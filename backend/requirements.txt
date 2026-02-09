@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+supabase
+celery[redis]
+openai
+python-multipart
+python-dotenv
+pydantic-settings
