@@ -10,7 +10,7 @@ const DEFAULT_PROMPT_TEMPLATE =
   "Gebruik ankertekst '{anker_1}' met URL '{anker_1_url}' en " +
   "ankertekst '{anker_2}' met URL '{anker_2_url}'. " +
   "Noem '{klant}' minimaal 4 keer op natuurlijke wijze. " +
-  "Voeg titel en tussenkoppen toe, zonder onnodige hoofdletters."
+  "Voeg titel en tussenkoppen toe."
 
 const UPLOAD_PROGRESS_STORAGE_KEY = "csv_upload_progress_v1"
 

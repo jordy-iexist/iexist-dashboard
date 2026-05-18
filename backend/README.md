@@ -57,32 +57,55 @@ MEDIA_BASE_URL=http://localhost:8000
 
 ## Lokale processen zonder Docker
 
-Als je de stack lokaal zonder Compose wilt draaien:
+### Eerste keer opzetten
 
-1. Installeer dependencies:
+1. Maak de database aan in PostgreSQL (eenmalig):
    ```bash
-   pip install -r requirements.txt
+   psql postgres -c "CREATE DATABASE csv_blog_generator;"
    ```
 
-2. Start Postgres en Redis lokaal of via losse containers.
-
-3. Zet in `backend/.env` de juiste lokale waarden, bijvoorbeeld:
+2. Voeg `DATABASE_URL` toe aan `backend/.env` (gebruik je eigen macOS-gebruikersnaam):
    ```env
-   DATABASE_URL=postgresql+psycopg://csv_blog_generator:csv_blog_generator@localhost:5432/csv_blog_generator
+   DATABASE_URL=postgresql+psycopg://jordyvanzanten@localhost:5432/csv_blog_generator
    REDIS_URL=redis://localhost:6379/0
    MEDIA_ROOT=./media
    MEDIA_BASE_URL=http://localhost:8000
    ```
 
-4. Start de API:
+3. Maak een venv en installeer dependencies:
    ```bash
-   uvicorn app.main:app --reload
+   cd backend
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
    ```
 
-5. Start de worker:
+4. Draai de migraties:
    ```bash
-   celery -A app.worker.celery_app worker --loglevel=info -Q default,blog_generation,image_generation --concurrency=3
+   venv/bin/alembic upgrade head
    ```
+
+### Elke keer opstarten
+
+**Terminal 1 — API:**
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+**Terminal 2 — Celery worker** (alleen nodig voor blog/image generatie):
+```bash
+cd backend
+venv/bin/celery -A app.worker.celery_app worker --loglevel=info -Q default,blog_generation,image_generation --concurrency=1
+```
+
+**Terminal 3 — Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+> **Let op:** gebruik altijd `venv/bin/alembic` en `venv/bin/celery` — de Homebrew-versies gebruiken een andere Python zonder de juiste packages.
 
 ## API Endpoints
 
