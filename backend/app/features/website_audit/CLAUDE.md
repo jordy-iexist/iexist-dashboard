@@ -8,7 +8,5 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #1710 | 2:39 PM | 🟣 | iexist-dashboard Repository Successfully Deployed to GitHub | ~380 |
-| #1687 | 2:15 PM | 🔴 | CSV Upload Cancel Endpoint Fails with SQLAlchemy InvalidRequestError | ~371 |
 | #1686 | 1:28 PM | ⚖️ | Cancel Feature Implementation Strategy Documented | ~526 |
-| #1685 | 1:12 PM | 🟣 | Bulk delete functionality for blog selection | ~421 |
 </claude-mem-context>
