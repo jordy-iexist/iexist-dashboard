@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Environment
+.env
+backend/.env
+frontend/.env.local
+
+# Redis dump
+*.rdb
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/

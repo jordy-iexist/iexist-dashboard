@@ -1,0 +1,76 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://csv_blog_generator:csv_blog_generator@db:5432/csv_blog_generator
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_ROOT: /app/media
+      MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://localhost:8000}
+    command: ["sh", "/app/scripts/start-api.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - backend_media:/app/media
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://csv_blog_generator:csv_blog_generator@db:5432/csv_blog_generator
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_ROOT: /app/media
+    command: ["sh", "/app/scripts/start-worker.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - backend_media:/app/media
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-csv_blog_generator}
+      POSTGRES_USER: ${POSTGRES_USER:-csv_blog_generator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-csv_blog_generator}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-csv_blog_generator} -d ${POSTGRES_DB:-csv_blog_generator}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_media:
