@@ -531,7 +531,7 @@ class LandingPageRow(Base):
         "LandingPageUpload", back_populates="rows"
     )
     jobs: Mapped[list["Job"]] = relationship(
-        "Job", back_populates="landing_page_row", foreign_keys="Job.landing_page_row_id"
+        "Job", back_populates="landing_page_row", foreign_keys="[Job.landing_page_row_id]"
     )
 
 
