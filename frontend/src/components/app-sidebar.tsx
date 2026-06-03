@@ -140,7 +140,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
               })}
 
               {/* Blog Generator Dropdown */}
-              <Collapsible asChild defaultOpen className="group/collapsible">
+              <Collapsible asChild className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton tooltip="Blog Generator">
@@ -170,7 +170,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
               </Collapsible>
 
               {/* Landingspagina's Dropdown */}
-              <Collapsible asChild defaultOpen className="group/collapsible">
+              <Collapsible asChild className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
@@ -202,7 +202,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                 </SidebarMenuItem>
               </Collapsible>
 
-              <Collapsible asChild defaultOpen className="group/collapsible">
+              <Collapsible asChild className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
@@ -237,7 +237,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                 </SidebarMenuItem>
               </Collapsible>
 
-              <Collapsible asChild defaultOpen className="group/collapsible">
+              <Collapsible asChild className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton

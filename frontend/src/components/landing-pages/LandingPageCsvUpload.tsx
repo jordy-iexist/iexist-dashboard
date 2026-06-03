@@ -1,13 +1,19 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { FileText, Loader2, Upload, X } from "lucide-react"
 
 import { type ColumnMapping, readCsvHeaders, reconcileColumnMapping } from "@/lib/csv-mapping"
 import { parsePromptFieldsFromTemplate } from "@/components/CsvUpload"
-import { DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE, type LandingPageUploadResponse } from "@/lib/landing-page-types"
+import { DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE } from "@/lib/landing-page-types"
+import { Button } from "@/components/ui/button"
 
-function toFieldId(field: string): string {
-  return field.replace(/[^a-zA-Z0-9_-]/g, "-")
+function toFieldId(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
 }
 
 export function LandingPageCsvUpload() {
@@ -15,10 +21,8 @@ export function LandingPageCsvUpload() {
   const [headers, setHeaders] = useState<string[]>([])
   const [promptTemplate, setPromptTemplate] = useState("")
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({})
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<{ jobs_queued: number } | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const effectivePromptTemplate = useMemo(
     () => (promptTemplate.trim() ? promptTemplate : DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE),
@@ -35,30 +39,47 @@ export function LandingPageCsvUpload() {
     setColumnMapping((prev) => reconcileColumnMapping(headers, templateFieldNames, prev))
   }, [headers, templateFieldNames])
 
-  const applyFile = async (selectedFile: File | null) => {
-    setError(null)
-    setSuccess(null)
-    setFile(selectedFile)
-
-    if (!selectedFile) {
-      setHeaders([])
-      return
-    }
-
+  const applyFile = async (selectedFile: File) => {
     if (!selectedFile.name.toLowerCase().endsWith(".csv")) {
-      setError("Bestand moet een CSV zijn.")
-      setHeaders([])
+      setUploadError("Bestand moet een CSV zijn.")
       return
     }
 
     const parsedHeaders = await readCsvHeaders(selectedFile)
     if (parsedHeaders.length === 0) {
-      setError("CSV bevat geen leesbare kolomnamen op de eerste rij.")
-      setHeaders([])
+      setUploadError("CSV bevat geen leesbare kolomnamen op de eerste rij.")
       return
     }
 
+    setFile(selectedFile)
     setHeaders(parsedHeaders)
+    setUploadError(null)
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0]
+    if (selectedFile) {
+      void applyFile(selectedFile)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const droppedFile = e.dataTransfer.files[0]
+    if (droppedFile) {
+      void applyFile(droppedFile)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const removeFile = () => {
+    setFile(null)
+    setHeaders([])
+    setColumnMapping({})
+    setUploadError(null)
   }
 
   const missingMappings = useMemo(
@@ -69,21 +90,20 @@ export function LandingPageCsvUpload() {
       }),
     [columnMapping, headers, templateFieldNames]
   )
-  const canSubmit =
+
+  const canUpload =
     file !== null &&
     headers.length > 0 &&
     !templateError &&
     templateFieldNames.length > 0 &&
     missingMappings.length === 0 &&
-    !uploading
+    !isUploading
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!file || !canSubmit) return
+  const handleUpload = async () => {
+    if (!file || !canUpload) return
 
-    setError(null)
-    setSuccess(null)
-    setUploading(true)
+    setUploadError(null)
+    setIsUploading(true)
 
     try {
       const formData = new FormData()
@@ -103,84 +123,75 @@ export function LandingPageCsvUpload() {
           data && typeof (data as { error?: string }).error === "string"
             ? (data as { error: string }).error
             : "Upload mislukt. Probeer het opnieuw."
-        setError(message)
+        setUploadError(message)
         return
       }
 
-      const payload = data as LandingPageUploadResponse
-      setSuccess({ jobs_queued: payload.jobs_queued })
       setFile(null)
       setHeaders([])
       setColumnMapping({})
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
+      setUploadError(null)
     } catch {
-      setError("Er is een fout opgetreden bij het uploaden.")
+      setUploadError("Er is een fout opgetreden bij het uploaden.")
     } finally {
-      setUploading(false)
+      setIsUploading(false)
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="landing-page-template">
-          Prompt template
-        </label>
+    <div className="mx-auto w-full max-w-2xl space-y-4">
+      <div className="space-y-3 rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-semibold">Prompt opbouw</h3>
         <p className="text-xs text-muted-foreground">
           Maak je eigen prompt. Alles tussen {"{"} en {"}"} wordt een mappingveld.
           Laat leeg om de standaardprompt te gebruiken.
         </p>
         <textarea
-          id="landing-page-template"
           value={promptTemplate}
           onChange={(e) => setPromptTemplate(e.target.value)}
           placeholder={DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE}
+          disabled={isUploading}
           rows={6}
-          className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono resize-y"
-          disabled={uploading}
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed"
         />
         {templateError ? (
           <p className="text-xs text-red-600">{templateError}</p>
-        ) : templateFieldNames.length > 0 ? (
-          <p className="text-xs text-muted-foreground">
+        ) : (
+          <p className="break-words text-xs text-muted-foreground">
             Placeholders: {templateFieldNames.join(", ")}
           </p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="csv-file">
-          CSV bestand
-        </label>
-        <input
-          ref={fileInputRef}
-          id="csv-file"
-          type="file"
-          accept=".csv"
-          required
-          onChange={(e) => applyFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
-        />
+        )}
       </div>
 
       {headers.length > 0 && templateFieldNames.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-4 rounded-lg border p-4">
           <div>
-            <p className="text-sm font-medium">Placeholder mapping</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Gevonden kolommen: {headers.join(", ")}
+            <h3 className="text-sm font-semibold">Placeholder mapping</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Koppel elke placeholder aan de juiste CSV-kolom.
             </p>
           </div>
-          <div className="rounded-md border divide-y">
+
+          <p className="break-words text-xs text-muted-foreground">
+            Gevonden kolommen: {headers.join(", ")}
+          </p>
+
+          <div className="space-y-3">
             {templateFieldNames.map((field, index) => (
-              <div key={`${field}-${index}`} className="flex items-center gap-3 px-3 py-2">
+              <div
+                key={field}
+                className="grid gap-1 md:grid-cols-[1fr_1.5fr] md:items-start"
+              >
                 <label
                   htmlFor={`mapping-${toFieldId(field)}-${index}`}
-                  className="w-48 shrink-0 text-sm font-medium"
+                  className="text-sm font-medium"
                 >
                   {field}
+                  <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                    Placeholder: {"{"}
+                    {field}
+                    {"}"}
+                  </span>
                 </label>
                 <select
                   id={`mapping-${toFieldId(field)}-${index}`}
@@ -188,11 +199,12 @@ export function LandingPageCsvUpload() {
                   onChange={(e) =>
                     setColumnMapping((prev) => ({ ...prev, [field]: e.target.value }))
                   }
-                  className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  disabled={isUploading}
                 >
-                  <option value="">— Kies een kolom —</option>
-                  {headers.map((header, i) => (
-                    <option key={`${header}-${i}`} value={header}>
+                  <option value="">Kies CSV-kolom</option>
+                  {headers.map((header) => (
+                    <option key={`${field}-${header}`} value={header}>
                       {header}
                     </option>
                   ))}
@@ -200,34 +212,83 @@ export function LandingPageCsvUpload() {
               </div>
             ))}
           </div>
+
           {missingMappings.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Koppel nog: {missingMappings.join(", ")}
+            <p className="text-xs text-amber-700">
+              Nog te koppelen: {missingMappings.join(", ")}
             </p>
           )}
         </div>
       )}
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+      {!file ? (
+        <div
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          className="cursor-pointer rounded-lg border-2 border-dashed p-12 transition-colors hover:bg-muted/50"
+          onClick={() => document.getElementById("lp-csv-input")?.click()}
+        >
+          <div className="flex flex-col items-center justify-center gap-4">
+            <div className="rounded-full bg-muted p-4">
+              <Upload className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium">
+                Sleep een CSV bestand hierheen of klik om te selecteren
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Ondersteunde formaten: .csv
+              </p>
+            </div>
+            <input
+              id="lp-csv-input"
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between rounded-lg border bg-card p-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="shrink-0 rounded bg-muted p-2">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{file.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {(file.size / 1024).toFixed(2)} KB
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={removeFile}
+            disabled={isUploading}
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
       )}
 
-      {success && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          Upload gelukt! {success.jobs_queued} landingspagina
-          {success.jobs_queued === 1 ? "" : "'s"} in de wachtrij gezet.
+      {uploadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {uploadError}
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {uploading ? "Uploaden..." : "Uploaden"}
-      </button>
-    </form>
+      <Button className="w-full" onClick={handleUpload} disabled={!canUpload}>
+        {isUploading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Uploaden...
+          </>
+        ) : (
+          "Upload CSV"
+        )}
+      </Button>
+    </div>
   )
 }

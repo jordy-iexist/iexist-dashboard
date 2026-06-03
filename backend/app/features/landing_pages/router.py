@@ -443,6 +443,51 @@ async def dismiss_landing_page_upload(
     return Response(status_code=204)
 
 
+@router.post("/api/landing-pages/uploads/{upload_id}/cancel")
+async def cancel_landing_page_upload(
+    upload_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    upload: LandingPageUpload | None = (
+        db.query(LandingPageUpload)
+        .filter(LandingPageUpload.id == upload_id, LandingPageUpload.created_by == user_id)
+        .first()
+    )
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload niet gevonden.")
+
+    all_jobs: list[Job] = (
+        db.query(Job)
+        .join(LandingPageRow, Job.landing_page_row_id == LandingPageRow.id)
+        .filter(LandingPageRow.upload_id == upload_id)
+        .all()  # type: ignore[assignment]
+    )
+
+    active_count = sum(
+        1 for j in all_jobs if str(j.status or "").strip() in {"pending", "processing"}
+    )
+    if active_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Er zijn geen actieve jobs om te annuleren.",
+        )
+
+    (
+        db.query(Job)
+        .filter(
+            Job.landing_page_row_id.in_(
+                db.query(LandingPageRow.id).filter(LandingPageRow.upload_id == upload_id)
+            ),
+            Job.status.in_(["pending", "processing"]),
+        )
+        .update({"status": "canceled"}, synchronize_session="fetch")
+    )
+    db.commit()
+
+    return {"ok": True, "upload_id": upload_id}
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------

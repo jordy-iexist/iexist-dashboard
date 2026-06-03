@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { X } from "lucide-react"
+import { Ban, Loader2, X } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { type LandingPageRecentUploadItem } from "@/lib/landing-page-types"
@@ -47,6 +47,7 @@ export function RecentLandingPageUploads() {
   const [uploads, setUploads] = useState<LandingPageRecentUploadItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cancelingIds, setCancelingIds] = useState<Set<string>>(new Set())
   const isFetchingRef = useRef(false)
 
   const handleDismiss = async (uploadId: string) => {
@@ -61,6 +62,41 @@ export function RecentLandingPageUploads() {
     } catch {
       setUploads(previous)
       setError("Verbergen mislukt.")
+    }
+  }
+
+  const handleCancel = async (uploadId: string) => {
+    if (cancelingIds.has(uploadId)) return
+    if (!confirm("Weet je zeker dat je deze upload wil annuleren?")) return
+
+    const previous = uploads
+    setCancelingIds((prev) => new Set(prev).add(uploadId))
+    setUploads((prev) =>
+      prev.map((u) =>
+        u.upload_id === uploadId ? { ...u, final_status: "canceled" as FinalStatus } : u
+      )
+    )
+
+    try {
+      const res = await fetch(`/api/landing-pages/uploads/${uploadId}/cancel`, { method: "POST" })
+      if (!res.ok) {
+        setUploads(previous)
+        const data = await res.json().catch(() => null)
+        const message =
+          data && typeof (data as { error?: string }).error === "string"
+            ? (data as { error: string }).error
+            : "Annuleren mislukt."
+        setError(message)
+      }
+    } catch {
+      setUploads(previous)
+      setError("Annuleren mislukt.")
+    } finally {
+      setCancelingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(uploadId)
+        return next
+      })
     }
   }
 
@@ -141,6 +177,21 @@ export function RecentLandingPageUploads() {
                 >
                   {statusLabel(upload.final_status)}
                 </span>
+                {upload.final_status === "processing" && (
+                  <button
+                    type="button"
+                    onClick={() => handleCancel(upload.upload_id)}
+                    disabled={cancelingIds.has(upload.upload_id)}
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    aria-label="Upload annuleren"
+                  >
+                    {cancelingIds.has(upload.upload_id) ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleDismiss(upload.upload_id)}
