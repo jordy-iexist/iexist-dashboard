@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { FileText, Loader2, Upload, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  type ColumnMapping,
+  readCsvHeaders,
+  reconcileColumnMapping,
+} from "@/lib/csv-mapping"
 
 const DEFAULT_PROMPT_TEMPLATE =
   "Schrijf een blog van {woorden} woorden voor klant {klant}. " +
@@ -14,7 +19,6 @@ const DEFAULT_PROMPT_TEMPLATE =
 
 const UPLOAD_PROGRESS_STORAGE_KEY = "csv_upload_progress_v1"
 
-type ColumnMapping = Record<string, string>
 type UploadFinalStatus = "processing" | "completed" | "completed_with_errors" | "canceled"
 
 type UploadProgress = {
@@ -37,30 +41,6 @@ type UploadProgress = {
 type PromptFieldParseResult = {
   fields: string[]
   error: string | null
-}
-
-function normalizeForMatch(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[^a-z0-9 ]/g, "")
-}
-
-function findMatchingHeader(headers: string[], fieldName: string): string | null {
-  const normalizedFieldName = normalizeForMatch(fieldName)
-  if (!normalizedFieldName) {
-    return null
-  }
-
-  for (const header of headers) {
-    if (normalizeForMatch(header) === normalizedFieldName) {
-      return header
-    }
-  }
-
-  return null
 }
 
 function parsePromptFieldsFromTemplate(template: string): PromptFieldParseResult {
@@ -104,124 +84,6 @@ function parsePromptFieldsFromTemplate(template: string): PromptFieldParseResult
   }
 
   return { fields, error: null }
-}
-
-function reconcileColumnMapping(
-  headers: string[],
-  templateFields: string[],
-  previousMapping: ColumnMapping
-): ColumnMapping {
-  const nextMapping: ColumnMapping = {}
-
-  for (const field of templateFields) {
-    const previousHeader = previousMapping[field]
-    if (previousHeader && headers.includes(previousHeader)) {
-      nextMapping[field] = previousHeader
-      continue
-    }
-
-    const autoMatch = findMatchingHeader(headers, field)
-    if (autoMatch) {
-      nextMapping[field] = autoMatch
-      continue
-    }
-
-    nextMapping[field] = ""
-  }
-
-  return nextMapping
-}
-
-function countDelimiterOutsideQuotes(line: string, delimiter: string): number {
-  let count = 0
-  let inQuotes = false
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-
-    if (char === '"') {
-      const nextChar = line[index + 1]
-      if (inQuotes && nextChar === '"') {
-        index += 1
-        continue
-      }
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (!inQuotes && char === delimiter) {
-      count += 1
-    }
-  }
-
-  return count
-}
-
-function detectDelimiter(line: string): "," | ";" | "\t" {
-  const candidates = [",", ";", "\t"] as const
-  let bestDelimiter: "," | ";" | "\t" = ","
-  let bestScore = -1
-
-  for (const candidate of candidates) {
-    const score = countDelimiterOutsideQuotes(line, candidate)
-    if (score > bestScore) {
-      bestDelimiter = candidate
-      bestScore = score
-    }
-  }
-
-  return bestDelimiter
-}
-
-function parseCsvHeaderLine(line: string): string[] {
-  const headers: string[] = []
-  const delimiter = detectDelimiter(line)
-  let current = ""
-  let inQuotes = false
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-
-    if (char === '"') {
-      const nextChar = line[index + 1]
-      if (inQuotes && nextChar === '"') {
-        current += '"'
-        index += 1
-        continue
-      }
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (char === delimiter && !inQuotes) {
-      headers.push(current.trim())
-      current = ""
-      continue
-    }
-
-    current += char
-  }
-
-  headers.push(current.trim())
-
-  if (headers.length > 0) {
-    headers[0] = headers[0].replace(/^\uFEFF/, "")
-  }
-
-  return headers.filter((header) => header.length > 0)
-}
-
-async function readCsvHeaders(file: File): Promise<string[]> {
-  const content = await file.text()
-  const firstDataLine = content
-    .split(/\r?\n/)
-    .find((line) => line.trim().length > 0)
-
-  if (!firstDataLine) {
-    return []
-  }
-
-  return parseCsvHeaderLine(firstDataLine)
 }
 
 function parseNonNegativeNumber(value: unknown): number | null {

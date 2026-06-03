@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
     const file = formData.get("file")
+    const mapping = formData.get("mapping")
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -23,8 +24,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    if (typeof mapping !== "string" || !mapping.trim()) {
+      return NextResponse.json(
+        { error: "Kolom mapping ontbreekt." },
+        { status: 400 }
+      )
+    }
+
     const backendFormData = new FormData()
     backendFormData.append("file", file)
+    backendFormData.append("mapping", mapping)
 
     const response = await fetch(
       `${getBackendApiUrl()}/api/landing-pages/upload`,

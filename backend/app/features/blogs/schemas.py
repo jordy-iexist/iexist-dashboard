@@ -78,6 +78,7 @@ class BlogsListItem(BaseModel):
     created_at: datetime
     published_at: datetime | None = None
     publication: BlogPublicationSummary | None = None
+    share_token: str
 
 
 class BlogsListResponse(BaseModel):

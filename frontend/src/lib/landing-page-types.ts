@@ -1,3 +1,13 @@
+export const LANDING_PAGE_FIELDS = [
+  "website",
+  "onderwerp",
+  "lengte",
+  "primaire_zoekwoorden",
+  "secundaire_zoekwoorden",
+] as const
+
+export type LandingPageField = (typeof LANDING_PAGE_FIELDS)[number]
+
 export type LandingPageRowData = {
   website?: string
   onderwerp?: string

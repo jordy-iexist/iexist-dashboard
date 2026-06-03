@@ -23,6 +23,7 @@ export type BlogListItemPayload = {
   filename: string
   published_at?: string | null
   publication?: BlogPublicationSummary | null
+  share_token: string
 }
 
 export type BlogsListResponse = {

@@ -1,7 +1,8 @@
+import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
@@ -14,7 +15,6 @@ from app.db.models import (
     LandingPageUpload,
 )
 from app.db.session import get_db
-from app.features.blogs.services.generation.csv import parse_csv
 from app.features.landing_pages.mappers import extract_landing_page_context
 from app.features.landing_pages.schemas import (
     LandingPageDetailResponse,
@@ -29,9 +29,10 @@ from app.features.landing_pages.schemas import (
     LandingPageUploadStatusResponse,
 )
 from app.features.landing_pages.services.generation.csv import (
-    REQUIRED_COLUMNS,
     build_landing_page_prompt,
-    validate_landing_page_headers,
+    map_row_to_landing_page_fields,
+    parse_csv,
+    validate_landing_page_mapping,
 )
 from app.features.landing_pages.services.generation.openai import SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT
 from app.features.settings.services import (
@@ -50,10 +51,11 @@ router = APIRouter(tags=["landing-pages"])
 @router.post("/api/landing-pages/upload", response_model=LandingPageUploadResponse)
 async def upload_landing_page_csv(
     file: UploadFile = File(...),
+    mapping: str = Form(...),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    """Upload a CSV, validate required columns, and queue landing page generation jobs."""
+    """Upload a CSV with column mapping and queue landing page generation jobs."""
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Bestand moet een CSV zijn.")
 
@@ -62,17 +64,22 @@ async def upload_landing_page_csv(
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    try:
+        mapping_payload = json.loads(mapping)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Ongeldige kolom-mapping.") from exc
+
+    if not isinstance(mapping_payload, dict):
+        raise HTTPException(status_code=400, detail="Ongeldige kolom-mapping.")
+
     content = await file.read()
     try:
         headers, rows = parse_csv(content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    headers = [h.strip().lower() for h in headers]
-    rows = [{k.strip().lower(): v for k, v in row.items()} for row in rows]
-
     try:
-        validate_landing_page_headers(headers)
+        normalized_mapping = validate_landing_page_mapping(mapping_payload, headers)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -80,10 +87,8 @@ async def upload_landing_page_csv(
     skipped_count = 0
 
     for row in rows:
-        row_dict: dict[str, Any] = {
-            col: str(row.get(col, "") or "").strip() for col in REQUIRED_COLUMNS
-        }
-        # Skip rows where any required value is empty
+        row_dict = map_row_to_landing_page_fields(row, normalized_mapping)
+
         if any(not v for v in row_dict.values()):
             skipped_count += 1
             continue

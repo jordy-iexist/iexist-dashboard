@@ -88,10 +88,12 @@ function mapBlogListItem(blog: {
   filename: string
   published_at?: string | null
   publication?: BlogPublicationSummary | null
+  share_token: string
 }): BlogListItem {
   const rowData = blog.row_data ?? {}
   return {
     id: blog.id,
+    shareToken: blog.share_token,
     title: toText(rowData.klant, "Onbekend onderwerp"),
     createdAt: blog.created_at,
     filename: toText(blog.filename, "Onbekend bestand"),

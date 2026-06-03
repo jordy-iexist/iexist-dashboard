@@ -1,6 +1,11 @@
 from typing import Any
 
-from app.features.blogs.services.generation.csv import parse_csv  # noqa: F401 — re-exported for callers
+from app.features.blogs.services.generation.csv import (  # noqa: F401 — re-exported for callers
+    map_row_to_prompt_fields,
+    normalize_mapping,
+    parse_csv,
+    validate_mapping,
+)
 
 REQUIRED_COLUMNS = [
     "website",
@@ -61,11 +66,14 @@ LANDING_PAGE_PROMPT_TEMPLATE = (
 )
 
 
-def validate_landing_page_headers(headers: list[str]) -> None:
-    normalized = {h.strip().lower() for h in headers}
-    for column in REQUIRED_COLUMNS:
-        if column not in normalized:
-            raise ValueError(f"CSV mist verplichte kolom: '{column}'.")
+def validate_landing_page_mapping(mapping: dict[str, Any], headers: list[str]) -> dict[str, str]:
+    normalized = normalize_mapping(mapping, REQUIRED_COLUMNS)
+    validate_mapping(normalized, headers, REQUIRED_COLUMNS)
+    return normalized
+
+
+def map_row_to_landing_page_fields(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, str]:
+    return map_row_to_prompt_fields(row, mapping, REQUIRED_COLUMNS)
 
 
 def build_landing_page_prompt(row: dict[str, Any]) -> str:

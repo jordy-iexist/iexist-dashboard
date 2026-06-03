@@ -261,6 +261,7 @@ async def list_blogs(
                 created_at=cast(Any, blog.created_at),
                 published_at=cast(Any, blog.published_at),
                 publication=publication,
+                share_token=str(blog.share_token),
             )
         )
 

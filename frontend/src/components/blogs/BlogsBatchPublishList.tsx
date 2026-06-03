@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { Check, Link2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { PublishActionResponse, WordPressSite } from "@/lib/wordpress-types"
@@ -25,6 +26,7 @@ const EMPTY_PUBLISH_SUMMARY: PublishSummary = {
 
 export type BlogListItem = {
   id: string
+  shareToken: string
   title: string
   createdAt: string
   filename: string
@@ -120,8 +122,10 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
     type: "success" | "error" | null
     message: string
   }>({ type: null, message: "" })
+  const [copiedShareBlogId, setCopiedShareBlogId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Stop polling wanneer er geen in-flight publicaties meer zijn
   const hasInFlightPublications = useMemo(
@@ -156,6 +160,10 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
+      }
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current)
+        copyResetTimeoutRef.current = null
       }
     }
   }, [])
@@ -228,6 +236,28 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
         })
       }
     })
+  }
+
+  const copyShareLink = async (blog: BlogListItem) => {
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/share/${blog.shareToken}`
+      )
+      setFeedback({ type: null, message: "" })
+      setCopiedShareBlogId(blog.id)
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current)
+      }
+      copyResetTimeoutRef.current = setTimeout(() => {
+        setCopiedShareBlogId(null)
+        copyResetTimeoutRef.current = null
+      }, 1500)
+    } catch {
+      setFeedback({
+        type: "error",
+        message: "Kopiëren naar klembord is mislukt.",
+      })
+    }
   }
 
   const deleteBatch = () => {
@@ -465,9 +495,27 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
               {blog.preview}
             </p>
 
-            <div className="pt-1">
-              <Button asChild size="sm" className="w-full">
+            <div className="flex items-center gap-2 pt-1">
+              <Button asChild size="sm" className="min-w-0 flex-1">
                 <Link href={`/dashboard/blogs/${blog.id}`}>Open blog</Link>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() => copyShareLink(blog)}
+                aria-label={
+                  copiedShareBlogId === blog.id
+                    ? "Gekopieerd"
+                    : "Kopieer deel-link"
+                }
+                title={
+                  copiedShareBlogId === blog.id
+                    ? "Gekopieerd"
+                    : "Kopieer deel-link"
+                }
+              >
+                {copiedShareBlogId === blog.id ? <Check /> : <Link2 />}
               </Button>
             </div>
           </article>
