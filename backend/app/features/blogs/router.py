@@ -48,6 +48,8 @@ from app.features.blogs.schemas import (
     PublishActionResponse,
     PublishBatchRequest,
     PublishBlogRequest,
+    RecentUploadItem,
+    RecentUploadsResponse,
     UploadResponse,
     UploadStatus,
     WordPressSiteCreateRequest,
@@ -620,6 +622,76 @@ async def upload_csv(
     )
 
 
+@router.get("/api/csv/uploads", response_model=RecentUploadsResponse)
+async def list_recent_uploads(
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """List the 10 most recent CSV uploads for the current user."""
+    uploads: list[CsvUpload] = (
+        db.query(CsvUpload)
+        .filter(CsvUpload.created_by == user_id, CsvUpload.dismissed_at.is_(None))
+        .order_by(CsvUpload.created_at.desc())
+        .limit(10)
+        .all()  # type: ignore[assignment]
+    )
+
+    if not uploads:
+        return RecentUploadsResponse(uploads=[])
+
+    upload_ids = [u.id for u in uploads]
+
+    job_rows = (
+        db.query(Job.status, CsvRow.upload_id)
+        .join(CsvRow, Job.row_id == CsvRow.id)
+        .filter(CsvRow.upload_id.in_(upload_ids))
+        .filter(Job.job_type != "image_generation")
+        .all()
+    )
+
+    counts: dict[str, dict[str, int]] = {
+        uid: {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "canceled": 0}
+        for uid in upload_ids
+    }
+    for job_status, upload_id in job_rows:
+        bucket = str(job_status or "").strip()
+        if bucket in counts[upload_id]:
+            counts[upload_id][bucket] += 1
+
+    items: list[RecentUploadItem] = []
+    for upload in uploads:
+        c = counts[upload.id]
+        total = sum(c.values())
+        processed = c["completed"] + c["failed"] + c["canceled"]
+        is_done = processed >= total
+        final_status: Any = (
+            "canceled"
+            if is_done and c["canceled"] > 0 and c["failed"] == 0
+            else "completed_with_errors"
+            if is_done and c["failed"] > 0
+            else "completed"
+            if is_done
+            else "processing"
+        )
+        items.append(
+            RecentUploadItem(
+                upload_id=upload.id,
+                filename=upload.filename,
+                template=upload.template,
+                created_at=upload.created_at,
+                total_jobs=total,
+                completed=c["completed"],
+                failed=c["failed"],
+                canceled=c["canceled"],
+                processed=processed,
+                is_done=is_done,
+                final_status=final_status,
+            )
+        )
+
+    return RecentUploadsResponse(uploads=items)
+
+
 @router.get("/api/uploads/{upload_id}", response_model=UploadStatus)
 async def get_upload_status(
     upload_id: str,
@@ -771,6 +843,25 @@ async def cancel_upload(
     db.commit()
 
     return {"ok": True, "upload_id": upload_id}
+
+
+@router.post("/api/csv/uploads/{upload_id}/dismiss", status_code=204)
+async def dismiss_csv_upload(
+    upload_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    upload: CsvUpload | None = (
+        db.query(CsvUpload)
+        .filter(CsvUpload.id == upload_id, CsvUpload.created_by == user_id)
+        .first()
+    )
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload niet gevonden.")
+
+    upload.dismissed_at = utc_now_iso()
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/api/uploads/{upload_id}/blogs", response_model=BlogsResponse)

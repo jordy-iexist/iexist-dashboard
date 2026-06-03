@@ -1,4 +1,6 @@
 import { CsvUpload } from "@/components/CsvUpload"
+import { RecentCsvUploads } from "@/components/blogs/RecentCsvUploads"
+
 export const metadata = {
   title: "CSV Upload",
 }
@@ -13,9 +15,11 @@ export default async function BlogsUploadPage() {
         </p>
       </div>
 
-      <div className="rounded-lg border p-8">
+      <div className="rounded-lg border p-4 sm:p-6 md:p-8">
         <CsvUpload />
       </div>
+
+      <RecentCsvUploads />
     </div>
   )
 }

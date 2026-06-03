@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import ReactMarkdown from "react-markdown"
+import { Copy, Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
@@ -33,11 +34,23 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
     message: string
   }>({ type: null, message: "" })
   const [isPending, startTransition] = useTransition()
+  const [justCopied, setJustCopied] = useState(false)
 
   const hasChanges = useMemo(
     () => draft.trim() !== content.trim(),
     [content, draft]
   )
+
+  const copyContent = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setJustCopied(true)
+      setFeedback({ type: null, message: "" })
+      setTimeout(() => setJustCopied(false), 1500)
+    } catch {
+      setFeedback({ type: "error", message: "Kopiëren naar klembord is mislukt." })
+    }
+  }
 
   const startEditing = () => {
     setDraft(content)
@@ -104,25 +117,38 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Blog inhoud</h2>
 
-        {!isEditing ? (
-          <Button onClick={startEditing}>Bewerk blog</Button>
-        ) : (
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={cancelEditing}
-              disabled={isPending}
-            >
-              Annuleren
-            </Button>
-            <Button
-              onClick={saveChanges}
-              disabled={isPending || !hasChanges || draft.trim().length === 0}
-            >
-              {isPending ? "Opslaan..." : "Opslaan"}
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={copyContent}
+            aria-label={justCopied ? "Gekopieerd" : "Kopieer blog naar klembord"}
+            title={justCopied ? "Gekopieerd" : "Kopieer blog naar klembord"}
+          >
+            {justCopied ? <Check /> : <Copy />}
+          </Button>
+
+          {!isEditing ? (
+            <Button onClick={startEditing}>Bewerk blog</Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={cancelEditing}
+                disabled={isPending}
+              >
+                Annuleren
+              </Button>
+              <Button
+                onClick={saveChanges}
+                disabled={isPending || !hasChanges || draft.trim().length === 0}
+              >
+                {isPending ? "Opslaan..." : "Opslaan"}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {feedback.message && (

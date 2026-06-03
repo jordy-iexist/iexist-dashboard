@@ -33,6 +33,24 @@ class UploadStatus(BaseModel):
     final_status: Literal["processing", "completed", "completed_with_errors", "canceled"]
 
 
+class RecentUploadItem(BaseModel):
+    upload_id: str
+    filename: str
+    template: str
+    created_at: datetime
+    total_jobs: int
+    completed: int
+    failed: int
+    canceled: int
+    processed: int
+    is_done: bool
+    final_status: Literal["processing", "completed", "completed_with_errors", "canceled"]
+
+
+class RecentUploadsResponse(BaseModel):
+    uploads: list[RecentUploadItem]
+
+
 class BlogItem(BaseModel):
     id: str
     row_data: dict[str, Any]

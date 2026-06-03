@@ -19,7 +19,7 @@ export default function ProtectedLayout({
       <Suspense fallback={<aside className="w-64 shrink-0 border-r" />}>
         <SidebarWithUser />
       </Suspense>
-      <main className="flex flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
           <SidebarTrigger />
         </header>

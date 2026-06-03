@@ -65,6 +65,7 @@ class CsvUpload(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    dismissed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     rows: Mapped[list["CsvRow"]] = relationship("CsvRow", back_populates="upload")
 

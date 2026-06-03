@@ -834,7 +834,7 @@ export function CsvUpload() {
         {templateError ? (
           <p className="text-xs text-red-600">{templateError}</p>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="break-words text-xs text-muted-foreground">
             Placeholders: {templateFieldNames.join(", ")}
           </p>
         )}
@@ -849,7 +849,7 @@ export function CsvUpload() {
             </p>
           </div>
 
-          <p className="text-xs text-muted-foreground">
+          <p className="break-words text-xs text-muted-foreground">
             Gevonden kolommen: {headers.join(", ")}
           </p>
 
@@ -961,12 +961,12 @@ export function CsvUpload() {
         </div>
       ) : (
         <div className="flex items-center justify-between rounded-lg border bg-card p-4">
-          <div className="flex items-center gap-4">
-            <div className="rounded bg-muted p-2">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="shrink-0 rounded bg-muted p-2">
               <FileText className="h-6 w-6" />
             </div>
-            <div>
-              <p className="text-sm font-medium">{file.name}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{file.name}</p>
               <p className="text-xs text-muted-foreground">
                 {(file.size / 1024).toFixed(2)} KB
               </p>
