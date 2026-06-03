@@ -3,6 +3,11 @@ import re
 from app.core.config import settings
 from app.services.openai import create_response
 
+DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS = 12000
+DEFAULT_LANDING_PAGE_REASONING_EFFORT = "medium"
+MIN_LANDING_PAGE_BODY_WORDS = 300
+MIN_REQUESTED_LENGTH_RATIO = 0.6
+
 SYSTEM_PROMPT = (
 """
 Je bent een ervaren SEO-copywriter die Nederlandstalige landingspagina's schrijft. Je schrijft voor zowel zoekmachines als menselijke lezers — conversie en ranking gaan hand in hand.
@@ -45,6 +50,12 @@ slug: [korte URL, alleen lowercase en koppeltekens, bijv. glad-stucwerk]
 )
 
 _FRONTMATTER_REGEX = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)", re.DOTALL)
+_HEADING_REGEX = re.compile(r"^#{1,3}\s+\S+", re.MULTILINE)
+_FAQ_REGEX = re.compile(r"^#{2,3}\s+.*\bfaq\b|veelgestelde vragen", re.IGNORECASE | re.MULTILINE)
+
+
+class LandingPageOutputValidationError(ValueError):
+    """Raised when OpenAI returns an incomplete landing page."""
 
 
 def generate_landing_page(
@@ -61,8 +72,12 @@ def generate_landing_page(
         model=model or settings.openai_blog_model,
         instructions=system_prompt or SYSTEM_PROMPT,
         input=prompt,
-        max_output_tokens=max_output_tokens if max_output_tokens is not None else 4000,
-        reasoning={"effort": reasoning_effort or settings.openai_blog_reasoning_effort},
+        max_output_tokens=(
+            max_output_tokens
+            if max_output_tokens is not None
+            else DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS
+        ),
+        reasoning={"effort": reasoning_effort or DEFAULT_LANDING_PAGE_REASONING_EFFORT},
     )
     return str(getattr(response, "output_text", "") or "").strip()
 
@@ -90,5 +105,43 @@ def parse_landing_page_output(raw: str) -> tuple[str, str, str, str]:
 
     if not meta_title or not meta_description or not slug:
         return ("", "", "", raw.strip())
+
+    return (meta_title, meta_description, slug, body_markdown)
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE))
+
+
+def validate_landing_page_output(
+    raw: str,
+    *,
+    requested_length: int | None = None,
+) -> tuple[str, str, str, str]:
+    normalized = str(raw or "").strip()
+    if not normalized:
+        raise LandingPageOutputValidationError("empty_output")
+
+    meta_title, meta_description, slug, body_markdown = parse_landing_page_output(normalized)
+    if not meta_title or not meta_description or not slug:
+        raise LandingPageOutputValidationError("missing_or_incomplete_frontmatter")
+
+    body_word_count = _word_count(body_markdown)
+    minimum_words = MIN_LANDING_PAGE_BODY_WORDS
+    if requested_length and requested_length > 0:
+        minimum_words = max(
+            minimum_words,
+            int(requested_length * MIN_REQUESTED_LENGTH_RATIO),
+        )
+    if body_word_count < minimum_words:
+        raise LandingPageOutputValidationError(
+            f"too_short:{body_word_count}_words_min_{minimum_words}"
+        )
+
+    if not _HEADING_REGEX.search(body_markdown):
+        raise LandingPageOutputValidationError("missing_markdown_headings")
+
+    if not _FAQ_REGEX.search(body_markdown):
+        raise LandingPageOutputValidationError("missing_faq")
 
     return (meta_title, meta_description, slug, body_markdown)

@@ -96,3 +96,13 @@ class LandingPageGenerationSettingsUpdateRequest(BaseModel):
     reasoning_effort: str | None = None
     model: str | None = None
     max_output_tokens: int | None = None
+
+
+class DeleteBatchRequest(BaseModel):
+    landing_page_ids: list[str] = Field(default_factory=list)
+
+
+class DeleteBatchResponse(BaseModel):
+    requested: int
+    deleted: int
+    missing: list[str] = Field(default_factory=list)

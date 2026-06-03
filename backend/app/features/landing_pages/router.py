@@ -16,7 +16,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.features.landing_pages.mappers import extract_landing_page_context
+from app.features.blogs.dependencies import dedupe_ids
 from app.features.landing_pages.schemas import (
+    DeleteBatchRequest,
+    DeleteBatchResponse,
     LandingPageDetailResponse,
     LandingPageGenerationSettingsResponse,
     LandingPageGenerationSettingsUpdateRequest,
@@ -34,7 +37,11 @@ from app.features.landing_pages.services.generation.csv import (
     parse_csv,
     validate_landing_page_mapping,
 )
-from app.features.landing_pages.services.generation.openai import SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT
+from app.features.landing_pages.services.generation.openai import (
+    DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS,
+    DEFAULT_LANDING_PAGE_REASONING_EFFORT,
+    SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT,
+)
 from app.features.settings.services import (
     MissingUserOpenAIKeyError,
     require_personal_openai_api_key,
@@ -359,7 +366,7 @@ async def get_landing_page_generation_settings(
         effective_reasoning_effort=(
             user_settings.reasoning_effort
             if user_settings and user_settings.reasoning_effort
-            else app_settings.openai_blog_reasoning_effort
+            else DEFAULT_LANDING_PAGE_REASONING_EFFORT
         ),
         effective_model=(
             user_settings.model
@@ -369,7 +376,7 @@ async def get_landing_page_generation_settings(
         effective_max_output_tokens=(
             user_settings.max_output_tokens
             if user_settings and user_settings.max_output_tokens is not None
-            else 4000
+            else DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS
         ),
     )
 
@@ -419,7 +426,7 @@ async def update_landing_page_generation_settings(
         effective_reasoning_effort=(
             user_settings.reasoning_effort
             if user_settings.reasoning_effort
-            else app_settings.openai_blog_reasoning_effort
+            else DEFAULT_LANDING_PAGE_REASONING_EFFORT
         ),
         effective_model=(
             user_settings.model
@@ -429,7 +436,7 @@ async def update_landing_page_generation_settings(
         effective_max_output_tokens=(
             user_settings.max_output_tokens
             if user_settings.max_output_tokens is not None
-            else 4000
+            else DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS
         ),
     )
 
@@ -650,6 +657,50 @@ async def update_landing_page(
         filename=filename,
         created_at=lp.created_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Landing page batch delete
+# ---------------------------------------------------------------------------
+
+@router.post("/api/landing-pages/delete/batch", response_model=DeleteBatchResponse)
+async def delete_landing_pages_batch(
+    payload: DeleteBatchRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+) -> DeleteBatchResponse:
+    landing_page_ids = dedupe_ids(payload.landing_page_ids)
+    if not landing_page_ids:
+        raise HTTPException(status_code=400, detail="Minimaal één landingspagina is verplicht.")
+
+    owned_rows = (
+        db.query(LandingPage.id, LandingPage.job_id)
+        .filter(LandingPage.id.in_(landing_page_ids), LandingPage.created_by == user_id)
+        .all()
+    )
+    owned_ids = [str(row.id) for row in owned_rows]
+    owned_job_ids = [str(row.job_id) for row in owned_rows if row.job_id]
+    missing = [lp_id for lp_id in landing_page_ids if lp_id not in owned_ids]
+
+    if owned_ids:
+        related_row_ids: list[str] = []
+        if owned_job_ids:
+            related_row_ids = [
+                str(row.landing_page_row_id)
+                for row in db.query(Job.landing_page_row_id)
+                    .filter(Job.id.in_(owned_job_ids))
+                    .all()
+                if row.landing_page_row_id
+            ]
+
+        db.query(LandingPage).filter(LandingPage.id.in_(owned_ids)).delete(synchronize_session=False)
+        if owned_job_ids:
+            db.query(Job).filter(Job.id.in_(owned_job_ids)).delete(synchronize_session=False)
+        if related_row_ids:
+            db.query(LandingPageRow).filter(LandingPageRow.id.in_(related_row_ids)).delete(synchronize_session=False)
+        db.commit()
+
+    return DeleteBatchResponse(requested=len(landing_page_ids), deleted=len(owned_ids), missing=missing)
 
 
 # ---------------------------------------------------------------------------

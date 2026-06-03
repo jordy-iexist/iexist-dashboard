@@ -11,6 +11,7 @@ import {
   type LandingPageListItem,
   type LandingPageListResponse,
 } from "@/lib/landing-page-types"
+import { LandingPagesBatchList } from "@/components/landing-pages/LandingPagesBatchList"
 
 export const metadata = {
   title: "Alle Landingspagina's",
@@ -34,45 +35,6 @@ function buildPageHref(page: number) {
     return "/dashboard/landing-pages"
   }
   return `/dashboard/landing-pages?page=${page}`
-}
-
-function formatDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return new Intl.DateTimeFormat("nl-NL", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
-}
-
-function statusBadgeClasses(status: string) {
-  switch (status) {
-    case "pending":
-      return "bg-muted text-muted-foreground"
-    case "processing":
-      return "bg-amber-100 text-amber-800"
-    case "completed":
-      return "bg-green-100 text-green-800"
-    case "failed":
-      return "bg-red-100 text-red-800"
-    default:
-      return "bg-muted text-muted-foreground"
-  }
-}
-
-function statusLabel(status: string) {
-  switch (status) {
-    case "pending":
-      return "In wachtrij"
-    case "processing":
-      return "Bezig"
-    case "completed":
-      return "Voltooid"
-    case "failed":
-      return "Mislukt"
-    default:
-      return status
-  }
 }
 
 function PaginationLink({
@@ -200,35 +162,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {landingPages.map((item) => (
-              <Link
-                key={item.id}
-                href={`/dashboard/landing-pages/${item.id}`}
-                className="rounded-lg border bg-card p-4 space-y-2 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium text-sm leading-snug line-clamp-2">
-                    {item.onderwerp || "Onbekend onderwerp"}
-                  </p>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadgeClasses(item.status)}`}
-                  >
-                    {statusLabel(item.status)}
-                  </span>
-                </div>
-                {item.meta_title && (
-                  <p className="text-xs text-muted-foreground line-clamp-1">
-                    {item.meta_title}
-                  </p>
-                )}
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p className="truncate">{item.filename}</p>
-                  <p>{formatDate(item.created_at)}</p>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <LandingPagesBatchList landingPages={landingPages} />
         </div>
       )}
     </div>
