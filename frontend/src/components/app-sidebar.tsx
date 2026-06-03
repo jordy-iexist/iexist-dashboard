@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Search,
   ScanLine,
+  Globe,
 } from "lucide-react";
 
 import {
@@ -64,6 +65,12 @@ const blogItems = [
     icon: Settings,
   },
 ];
+
+const landingPageItems = [
+  { title: "Alle pagina's", url: "/dashboard/landing-pages", icon: FileText },
+  { title: "CSV Upload", url: "/dashboard/landing-pages/upload", icon: Upload },
+  { title: "Instellingen", url: "/dashboard/landing-pages/settings", icon: Settings },
+]
 
 const seoItems = [
   {
@@ -145,6 +152,39 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                   <CollapsibleContent>
                     <SidebarMenuSub>
                       {blogItems.map((item) => {
+                        const isActive = pathname === item.url;
+                        return (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive}>
+                              <Link href={item.url}>
+                                <item.icon />
+                                <span>{item.title}</span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        );
+                      })}
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+
+              {/* Landingspagina's Dropdown */}
+              <Collapsible asChild defaultOpen className="group/collapsible">
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      isActive={pathname.startsWith("/dashboard/landing-pages")}
+                      tooltip="Landingspagina's"
+                    >
+                      <Globe />
+                      <span>Landingspagina&apos;s</span>
+                      <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      {landingPageItems.map((item) => {
                         const isActive = pathname === item.url;
                         return (
                           <SidebarMenuSubItem key={item.title}>

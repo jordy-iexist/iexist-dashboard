@@ -1,0 +1,79 @@
+from typing import Any
+
+from app.features.blogs.services.generation.csv import parse_csv  # noqa: F401 — re-exported for callers
+
+REQUIRED_COLUMNS = [
+    "website",
+    "onderwerp",
+    "lengte",
+    "primaire_zoekwoorden",
+    "secundaire_zoekwoorden",
+]
+
+LANDING_PAGE_PROMPT_TEMPLATE = (
+    "Opdracht: Schrijf een informatieve SEO-geoptimaliseerde landingspagina van minimaal {lengte} woorden voor de website {website}.\n"
+    "\n"
+    "Het onderwerp van de landingspagina is: {onderwerp}.\n"
+    "\n"
+    "Doel van de landingspagina: bezoekers informeren en aanzetten tot het doen van een offerte aanvraag. Benoem duidelijk hoe {website} de bezoeker kan helpen.\n"
+    "\n"
+    "Stijl:\n"
+    "\n"
+    "Gebruik duidelijke, korte zinnen.\n"
+    "\n"
+    "Gebruik actieve taal (geen \"er wordt gekeken naar…\" maar \"de bank kijkt naar…\").\n"
+    "\n"
+    "Gebruik H2- en H3-tussenkoppen met zoekwoorden erin verwerkt. Verwerk de H2 en H3 tussenkoppen met opmaak, dus niet als H2: en H3:.\n"
+    "\n"
+    "Gebruik maximaal 1 opsomming in de pagina.\n"
+    "\n"
+    "Sluit af met een korte samenvatting en een call-to-action naar {website}.\n"
+    "\n"
+    "SEO-richtlijnen:\n"
+    "\n"
+    "Gebruik de primaire zoekwoorden elk minimaal 2–3 keer, verspreid over de tekst en in minstens één tussenkop:\n"
+    "\n"
+    "{primaire_zoekwoorden}\n"
+    "\n"
+    "Gebruik de secundaire zoekwoorden minimaal één keer, verspreid over de tekst:\n"
+    "\n"
+    "{secundaire_zoekwoorden}\n"
+    "\n"
+    "Structuur van de pagina:\n"
+    "\n"
+    "Titel met hoofdzoekwoord.\n"
+    "\n"
+    "Introductie: kort, pakkend, en met het hoofdzoekwoord in de eerste alinea.\n"
+    "\n"
+    "Informatieve hoofdsecties (H2's):\n"
+    "\n"
+    "Beantwoord de belangrijkste vragen van de doelgroep over het onderwerp.\n"
+    "\n"
+    "Conclusie + samenvatting + CTA: vat de kern samen en voeg een duidelijke oproep toe.\n"
+    "\n"
+    "FAQ-sectie:\n"
+    "\n"
+    "Voeg 6 relevante veelgestelde vragen en antwoorden toe.\n"
+    "\n"
+    "Antwoorden zijn kort (50–100 woorden) en informatief.\n"
+    "\n"
+    "FAQ's moeten aansluiten bij het onderwerp en long-tail zoektermen bevatten."
+)
+
+
+def validate_landing_page_headers(headers: list[str]) -> None:
+    normalized = {h.strip().lower() for h in headers}
+    for column in REQUIRED_COLUMNS:
+        if column not in normalized:
+            raise ValueError(f"CSV mist verplichte kolom: '{column}'.")
+
+
+def build_landing_page_prompt(row: dict[str, Any]) -> str:
+    fields: dict[str, str] = {}
+    for column in REQUIRED_COLUMNS:
+        value = str(row.get(column, "") or "").strip()
+        if not value:
+            raise ValueError(f"Waarde ontbreekt voor veld: '{column}'.")
+        fields[column] = value
+
+    return LANDING_PAGE_PROMPT_TEMPLATE.format(**fields)
