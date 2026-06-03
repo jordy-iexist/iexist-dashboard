@@ -9,6 +9,7 @@ from app.features.landing_pages.services.generation.csv import build_landing_pag
 from app.features.landing_pages.services.generation.openai import (
     DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS,
     DEFAULT_LANDING_PAGE_REASONING_EFFORT,
+    LandingPageOutputValidationError,
     generate_landing_page,
     validate_landing_page_output,
 )
@@ -119,10 +120,20 @@ def generate_landing_page_task(self, job_id: str):
             reasoning_effort=effective_reasoning_effort,
             max_output_tokens=effective_max_output_tokens,
         )
-        meta_title, meta_description, slug, body_markdown = validate_landing_page_output(
-            raw_content,
-            requested_length=requested_length,
-        )
+        try:
+            meta_title, meta_description, slug, body_markdown = validate_landing_page_output(
+                raw_content,
+                requested_length=requested_length,
+            )
+        except LandingPageOutputValidationError as exc:
+            logger.error(
+                "Landing page validation failed for job %s: %s chars=%s words=%s",
+                job_id,
+                exc,
+                len(raw_content),
+                len(raw_content.split()),
+            )
+            raise
         logger.info(
             "Validated landing page output for job %s: chars=%s words=%s",
             job_id,

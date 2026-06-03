@@ -1,0 +1,260 @@
+"use client"
+
+import { useMemo, useState } from "react"
+import { Plus, Trash2 } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import {
+  DEFAULT_PROMPT_TEMPLATE,
+  parsePromptFieldsFromTemplate,
+} from "@/components/CsvUpload"
+
+type ManualRow = {
+  id: string
+  fields: Record<string, string>
+  generateImage: boolean
+}
+
+function makeEmptyRow(fields: string[]): ManualRow {
+  return {
+    id: crypto.randomUUID(),
+    fields: Object.fromEntries(fields.map((f) => [f, ""])),
+    generateImage: false,
+  }
+}
+
+function syncRowsToFields(rows: ManualRow[], fields: string[]): ManualRow[] {
+  return rows.map((row) => ({
+    ...row,
+    fields: Object.fromEntries(fields.map((f) => [f, row.fields[f] ?? ""])),
+  }))
+}
+
+export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
+  const [template, setTemplate] = useState(DEFAULT_PROMPT_TEMPLATE)
+  const [rows, setRows] = useState<ManualRow[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<{ jobs_queued: number; skipped_rows: number } | null>(null)
+
+  const { fields, error: templateError } = useMemo(
+    () => parsePromptFieldsFromTemplate(template),
+    [template]
+  )
+
+  const syncedRows = useMemo(() => {
+    if (rows.length === 0) return [makeEmptyRow(fields)]
+    return syncRowsToFields(rows, fields)
+  }, [fields]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentRows = rows.length === 0 ? syncedRows : rows
+
+  const ensureRows = () => {
+    if (rows.length === 0) setRows(syncedRows)
+  }
+
+  const updateField = (rowId: string, field: string, value: string) => {
+    ensureRows()
+    setRows((prev) =>
+      (prev.length === 0 ? syncedRows : prev).map((r) =>
+        r.id === rowId ? { ...r, fields: { ...r.fields, [field]: value } } : r
+      )
+    )
+  }
+
+  const updateImage = (rowId: string, checked: boolean) => {
+    ensureRows()
+    setRows((prev) =>
+      (prev.length === 0 ? syncedRows : prev).map((r) =>
+        r.id === rowId ? { ...r, generateImage: checked } : r
+      )
+    )
+  }
+
+  const addRow = () => {
+    setRows((prev) => {
+      const base = prev.length === 0 ? syncedRows : prev
+      return [...base, makeEmptyRow(fields)]
+    })
+  }
+
+  const removeRow = (rowId: string) => {
+    setRows((prev) => {
+      const base = prev.length === 0 ? syncedRows : prev
+      const next = base.filter((r) => r.id !== rowId)
+      return next.length === 0 ? [makeEmptyRow(fields)] : next
+    })
+  }
+
+  const canSubmit =
+    !submitting &&
+    !templateError &&
+    fields.length > 0 &&
+    currentRows.some((r) => fields.every((f) => r.fields[f]?.trim()))
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmit) return
+
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+
+    const apiRows = currentRows.map((r) => ({
+      ...r.fields,
+      __generate_image: r.generateImage,
+    }))
+
+    try {
+      const res = await fetch("/api/csv/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template, rows: apiRows }),
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        const msg =
+          data && typeof (data as { error?: string }).error === "string"
+            ? (data as { error: string }).error
+            : "Verwerken mislukt. Probeer het opnieuw."
+        setError(msg)
+        return
+      }
+
+      const payload = data as { jobs_queued: number; skipped_rows: number }
+      setSuccess({ jobs_queued: payload.jobs_queued, skipped_rows: payload.skipped_rows ?? 0 })
+      setRows([makeEmptyRow(fields)])
+      onSuccess?.()
+    } catch {
+      setError("Er is een fout opgetreden. Probeer het opnieuw.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Template editor */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="manual-template">
+          Prompt template
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Gebruik {"{"}<span className="font-mono">placeholders</span>{"}"} voor de velden die je per rij wil invullen.
+        </p>
+        <textarea
+          id="manual-template"
+          value={template}
+          onChange={(e) => {
+            setTemplate(e.target.value)
+            setRows([])
+          }}
+          rows={4}
+          className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono resize-y"
+          disabled={submitting}
+        />
+        {templateError ? (
+          <p className="text-xs text-red-600">{templateError}</p>
+        ) : fields.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Velden: {fields.join(", ")}
+          </p>
+        ) : null}
+      </div>
+
+      {/* Spreadsheet table */}
+      {!templateError && fields.length > 0 && (
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-10">#</th>
+                  {fields.map((field) => (
+                    <th key={field} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">
+                      {field}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
+                    Afbeelding
+                  </th>
+                  <th className="w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {currentRows.map((row, rowIndex) => (
+                  <tr key={row.id} className="border-b last:border-0 hover:bg-muted/25">
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{rowIndex + 1}</td>
+                    {fields.map((field) => (
+                      <td key={field} className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={row.fields[field] ?? ""}
+                          onChange={(e) => updateField(row.id, field, e.target.value)}
+                          className="w-full min-w-[120px] rounded border border-transparent bg-transparent px-2 py-1 text-sm focus:border-input focus:bg-background focus:outline-none"
+                          disabled={submitting}
+                          placeholder={field}
+                        />
+                      </td>
+                    ))}
+                    <td className="px-3 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={row.generateImage}
+                        onChange={(e) => updateImage(row.id, e.target.checked)}
+                        className="rounded border-input"
+                        disabled={submitting}
+                        aria-label="Afbeelding genereren"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {currentRows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeRow(row.id)}
+                          className="text-muted-foreground hover:text-red-600 transition-colors"
+                          aria-label="Rij verwijderen"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button
+            type="button"
+            onClick={addRow}
+            disabled={submitting}
+            className="flex items-center gap-2 text-sm text-primary hover:underline disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4" />
+            Rij toevoegen
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          Gelukt! {success.jobs_queued} blog{success.jobs_queued === 1 ? "" : "s"} worden verwerkt.
+          {success.skipped_rows > 0 && ` ${success.skipped_rows} onvolledige rijen overgeslagen.`}
+        </div>
+      )}
+
+      <Button type="submit" disabled={!canSubmit}>
+        {submitting ? "Verwerken..." : "Genereren"}
+      </Button>
+    </form>
+  )
+}

@@ -10,7 +10,7 @@ import {
   reconcileColumnMapping,
 } from "@/lib/csv-mapping"
 
-const DEFAULT_PROMPT_TEMPLATE =
+export const DEFAULT_PROMPT_TEMPLATE =
   "Schrijf een blog van {woorden} woorden voor klant {klant}. " +
   "Gebruik ankertekst '{anker_1}' met URL '{anker_1_url}' en " +
   "ankertekst '{anker_2}' met URL '{anker_2_url}'. " +
@@ -38,12 +38,12 @@ type UploadProgress = {
   finalStatus: UploadFinalStatus
 }
 
-type PromptFieldParseResult = {
+export type PromptFieldParseResult = {
   fields: string[]
   error: string | null
 }
 
-function parsePromptFieldsFromTemplate(template: string): PromptFieldParseResult {
+export function parsePromptFieldsFromTemplate(template: string): PromptFieldParseResult {
   const openCount = (template.match(/\{/g) ?? []).length
   const closeCount = (template.match(/\}/g) ?? []).length
   if (openCount !== closeCount) {

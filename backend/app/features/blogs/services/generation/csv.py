@@ -74,13 +74,16 @@ def parse_csv(file_content: bytes) -> tuple[list[str], list[dict[str, Any]]]:
     if not headers:
         raise ValueError("CSV header bevat geen geldige kolomnamen.")
 
-    counts: dict[str, int] = {}
-    for header in headers:
-        counts[header] = counts.get(header, 0) + 1
-    duplicate_headers = sorted(header for header, count in counts.items() if count > 1)
-    if duplicate_headers:
-        duplicates = ", ".join(duplicate_headers)
-        raise ValueError(f"CSV bevat dubbele kolomnamen: {duplicates}.")
+    seen: set[str] = set()
+    unique_indexes: list[int] = []
+    unique_headers: list[str] = []
+    for index, header in zip(non_empty_header_indexes, headers):
+        if header not in seen:
+            seen.add(header)
+            unique_indexes.append(index)
+            unique_headers.append(header)
+    non_empty_header_indexes = unique_indexes
+    headers = unique_headers
 
     rows: list[dict[str, Any]] = []
     for row_index, raw_values in enumerate(reader, start=2):

@@ -2,6 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
+LANDING_PAGE_MAX_OUTPUT_TOKENS_MIN = 1000
+LANDING_PAGE_MAX_OUTPUT_TOKENS_MAX = 50000
+
+
+class LandingPageManualUploadRequest(BaseModel):
+    rows: list[dict[str, str]]
+
 
 class LandingPageUploadResponse(BaseModel):
     upload_id: str
@@ -95,7 +102,11 @@ class LandingPageGenerationSettingsUpdateRequest(BaseModel):
     system_prompt: str | None = None
     reasoning_effort: str | None = None
     model: str | None = None
-    max_output_tokens: int | None = None
+    max_output_tokens: int | None = Field(
+        default=None,
+        ge=LANDING_PAGE_MAX_OUTPUT_TOKENS_MIN,
+        le=LANDING_PAGE_MAX_OUTPUT_TOKENS_MAX,
+    )
 
 
 class DeleteBatchRequest(BaseModel):

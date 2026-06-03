@@ -44,6 +44,7 @@ from app.features.blogs.schemas import (
     BlogsResponse,
     BlogUpdateRequest,
     GenerateBlogImageResponse,
+    ManualUploadRequest,
     PublicationItem,
     PublicationListResponse,
     PublishActionResponse,
@@ -609,6 +610,107 @@ async def upload_csv(
     csv_upload = CsvUpload(
         id=upload_id,
         filename=file.filename,
+        template=prompt_template,
+        skipped_rows=len(skipped_rows),
+        created_by=user_id,
+    )
+    db.add(csv_upload)
+    db.commit()
+
+    jobs_queued = 0
+    for prompt_row in prompt_rows:
+        row_id = str(uuid.uuid4())
+        csv_row_obj = CsvRow(id=row_id, upload_id=upload_id, data=prompt_row)
+        db.add(csv_row_obj)
+
+        job_id = str(uuid.uuid4())
+        job_obj = Job(
+            id=job_id,
+            row_id=row_id,
+            job_type="blog_generation",
+            blog_id=None,
+            status="pending",
+            error=None,
+            created_by=user_id,
+        )
+        db.add(job_obj)
+        db.commit()
+
+        generate_blog_task.delay(job_id)  # type: ignore[attr-defined]
+        jobs_queued += 1
+
+    return UploadResponse(
+        upload_id=upload_id,
+        rows_count=len(prompt_rows),
+        jobs_queued=jobs_queued,
+        skipped_rows=len(skipped_rows),
+        images_target=image_jobs_target,
+        status="processing",
+    )
+
+
+@router.post("/api/csv/manual", response_model=UploadResponse)
+async def manual_upload(
+    payload: ManualUploadRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Accept pre-filled rows (no CSV file) and queue blog generation jobs."""
+    try:
+        require_personal_openai_api_key(user_id, db)
+    except MissingUserOpenAIKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not payload.rows:
+        raise HTTPException(status_code=400, detail="Voeg minimaal één rij toe.")
+
+    prompt_template = normalize_prompt_template(payload.template)
+    try:
+        required_fields = extract_template_placeholders(prompt_template)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    prompt_rows: list[dict[str, Any]] = []
+    image_jobs_target = 0
+    skipped_rows: list[str] = []
+
+    for row_index, raw_row in enumerate(payload.rows, start=1):
+        prompt_row: dict[str, Any] = {
+            field: str(raw_row.get(field, "") or "").strip()
+            for field in required_fields
+        }
+        missing_values = get_missing_prompt_values(prompt_row, required_fields)
+        if missing_values:
+            skipped_rows.append(f"rij {row_index}: {', '.join(missing_values)}")
+            continue
+
+        try:
+            build_blog_prompt(prompt_template, prompt_row)
+        except ValueError as exc:
+            skipped_rows.append(f"rij {row_index}: {exc}")
+            continue
+
+        should_generate_image = bool(raw_row.get(IMAGE_GENERATION_META_FIELD, False))
+        prompt_row[IMAGE_GENERATION_META_FIELD] = should_generate_image
+        if should_generate_image:
+            image_jobs_target += 1
+
+        prompt_rows.append(prompt_row)
+
+    if not prompt_rows:
+        shown_errors = (
+            "; ".join(skipped_rows[:10]) if skipped_rows else "geen geldige rijen"
+        )
+        suffix = " ..." if len(skipped_rows) > 10 else ""
+        raise HTTPException(
+            status_code=400,
+            detail=f"Geen verwerkbare rijen gevonden. Overgeslagen: {shown_errors}{suffix}",
+        )
+
+    upload_id = str(uuid.uuid4())
+    csv_upload = CsvUpload(
+        id=upload_id,
+        filename="Handmatige invoer",
         template=prompt_template,
         skipped_rows=len(skipped_rows),
         created_by=user_id,

@@ -25,6 +25,7 @@ from app.features.landing_pages.schemas import (
     LandingPageGenerationSettingsUpdateRequest,
     LandingPageListItem,
     LandingPageListResponse,
+    LandingPageManualUploadRequest,
     LandingPageRecentUploadItem,
     LandingPageRecentUploadsResponse,
     LandingPageUpdateRequest,
@@ -118,6 +119,87 @@ async def upload_landing_page_csv(
     upload = LandingPageUpload(
         id=upload_id,
         filename=str(file.filename),
+        skipped_rows=skipped_count,
+        created_by=user_id,
+    )
+    db.add(upload)
+    db.commit()
+
+    jobs_queued = 0
+    for row_dict in valid_rows:
+        row_id = str(uuid.uuid4())
+        lp_row = LandingPageRow(id=row_id, upload_id=upload_id, data=row_dict)
+        db.add(lp_row)
+
+        job_id = str(uuid.uuid4())
+        job = Job(
+            id=job_id,
+            job_type="landing_page_generation",
+            landing_page_row_id=row_id,
+            status="pending",
+            created_by=user_id,
+        )
+        db.add(job)
+        db.commit()
+
+        generate_landing_page_task.delay(job_id)  # type: ignore[attr-defined]
+        jobs_queued += 1
+
+    return LandingPageUploadResponse(
+        upload_id=upload_id,
+        rows_count=len(valid_rows),
+        jobs_queued=jobs_queued,
+        skipped_rows=skipped_count,
+        status="processing",
+    )
+
+
+@router.post("/api/landing-pages/manual", response_model=LandingPageUploadResponse)
+async def manual_landing_page_upload(
+    payload: LandingPageManualUploadRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Accept pre-filled rows (no CSV file) and queue landing page generation jobs."""
+    try:
+        require_personal_openai_api_key(user_id, db)
+    except MissingUserOpenAIKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not payload.rows:
+        raise HTTPException(status_code=400, detail="Voeg minimaal één rij toe.")
+
+    valid_rows: list[dict[str, Any]] = []
+    skipped_count = 0
+
+    for raw_row in payload.rows:
+        row_dict: dict[str, Any] = {
+            field: str(raw_row.get(field, "") or "").strip()
+            for field in ["website", "onderwerp", "lengte", "primaire_zoekwoorden", "secundaire_zoekwoorden"]
+        }
+
+        if any(not v for v in row_dict.values()):
+            skipped_count += 1
+            continue
+
+        try:
+            build_landing_page_prompt(row_dict)
+        except ValueError:
+            skipped_count += 1
+            continue
+
+        valid_rows.append(row_dict)
+
+    if not valid_rows:
+        raise HTTPException(
+            status_code=400,
+            detail="Geen verwerkbare rijen gevonden. Controleer of alle verplichte velden zijn ingevuld.",
+        )
+
+    upload_id = str(uuid.uuid4())
+    upload = LandingPageUpload(
+        id=upload_id,
+        filename="Handmatige invoer",
         skipped_rows=skipped_count,
         created_by=user_id,
     )

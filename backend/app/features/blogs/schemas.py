@@ -4,6 +4,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class ManualUploadRequest(BaseModel):
+    template: str
+    rows: list[dict[str, Any]]
+
+
 class UploadResponse(BaseModel):
     upload_id: str
     rows_count: int

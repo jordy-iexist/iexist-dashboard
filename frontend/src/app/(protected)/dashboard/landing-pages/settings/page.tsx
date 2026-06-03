@@ -4,6 +4,9 @@ import { useEffect, useState, useTransition } from "react"
 
 import { type LandingPageGenerationSettings } from "@/lib/landing-page-types"
 
+const MIN_MAX_OUTPUT_TOKENS = 1000
+const MAX_MAX_OUTPUT_TOKENS = 50000
+
 export default function LandingPageSettingsPage() {
   const [settings, setSettings] = useState<LandingPageGenerationSettings | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -172,14 +175,15 @@ export default function LandingPageSettingsPage() {
           <input
             id="max-output-tokens"
             type="number"
-            min={1}
+            min={MIN_MAX_OUTPUT_TOKENS}
+            max={MAX_MAX_OUTPUT_TOKENS}
             className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             placeholder={String(settings.effective_max_output_tokens)}
             value={maxOutputTokens}
             onChange={(e) => setMaxOutputTokens(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            Leeg laten voor standaard: {settings.effective_max_output_tokens}
+            Leeg laten voor standaard: {settings.effective_max_output_tokens}. Toegestaan: {MIN_MAX_OUTPUT_TOKENS} tot {MAX_MAX_OUTPUT_TOKENS}.
           </p>
         </div>
 

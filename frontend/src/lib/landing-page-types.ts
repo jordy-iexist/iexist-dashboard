@@ -8,6 +8,14 @@ export const LANDING_PAGE_FIELDS = [
 
 export type LandingPageField = (typeof LANDING_PAGE_FIELDS)[number]
 
+export const LANDING_PAGE_FIELD_LABELS: Record<LandingPageField, string> = {
+  website: "Website",
+  onderwerp: "Onderwerp",
+  lengte: "Lengte (woorden)",
+  primaire_zoekwoorden: "Primaire zoekwoorden",
+  secundaire_zoekwoorden: "Secundaire zoekwoorden",
+}
+
 export type LandingPageRowData = {
   website?: string
   onderwerp?: string

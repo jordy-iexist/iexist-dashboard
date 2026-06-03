@@ -3,15 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { type ColumnMapping, readCsvHeaders, reconcileColumnMapping } from "@/lib/csv-mapping"
-import { LANDING_PAGE_FIELDS, type LandingPageUploadResponse } from "@/lib/landing-page-types"
-
-const FIELD_LABELS: Record<string, string> = {
-  website: "Website",
-  onderwerp: "Onderwerp",
-  lengte: "Lengte (woorden)",
-  primaire_zoekwoorden: "Primaire zoekwoorden",
-  secundaire_zoekwoorden: "Secundaire zoekwoorden",
-}
+import { LANDING_PAGE_FIELD_LABELS, LANDING_PAGE_FIELDS, type LandingPageUploadResponse } from "@/lib/landing-page-types"
 
 export function LandingPageCsvUpload() {
   const [file, setFile] = useState<File | null>(null)
@@ -130,7 +122,7 @@ export function LandingPageCsvUpload() {
                   htmlFor={`mapping-${field}`}
                   className="w-48 shrink-0 text-sm font-medium"
                 >
-                  {FIELD_LABELS[field]}
+                  {LANDING_PAGE_FIELD_LABELS[field]}
                 </label>
                 <select
                   id={`mapping-${field}`}
@@ -141,8 +133,8 @@ export function LandingPageCsvUpload() {
                   className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
                 >
                   <option value="">— Kies een kolom —</option>
-                  {headers.map((header) => (
-                    <option key={header} value={header}>
+                  {headers.map((header, i) => (
+                    <option key={`${header}-${i}`} value={header}>
                       {header}
                     </option>
                   ))}
@@ -152,7 +144,7 @@ export function LandingPageCsvUpload() {
           </div>
           {missingMappings.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              Koppel nog: {missingMappings.map((f) => FIELD_LABELS[f]).join(", ")}
+              Koppel nog: {missingMappings.map((f) => LANDING_PAGE_FIELD_LABELS[f]).join(", ")}
             </p>
           )}
         </div>
