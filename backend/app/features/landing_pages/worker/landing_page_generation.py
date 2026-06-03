@@ -5,13 +5,17 @@ from celery.utils.log import get_task_logger
 
 from app.db.models import Job, LandingPage, LandingPageGenerationSettings, LandingPageRow, LandingPageUpload
 from app.db.session import SessionLocal
-from app.features.landing_pages.services.generation.csv import build_landing_page_prompt
+from app.features.landing_pages.services.generation.csv import (
+    build_landing_page_prompt,
+    normalize_landing_page_prompt_template,
+)
 from app.features.landing_pages.services.generation.openai import (
     DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS,
     DEFAULT_LANDING_PAGE_REASONING_EFFORT,
     LandingPageOutputValidationError,
     generate_landing_page,
     validate_landing_page_output,
+    LandingPageGenerationResult,
 )
 from app.features.settings.services import MissingUserOpenAIKeyError
 from app.worker.celery_app import celery_app
@@ -70,9 +74,12 @@ def generate_landing_page_task(self, job_id: str):
         if not upload_id:
             raise ValueError(f"Upload id ontbreekt voor job {job_id}.")
 
+        upload = db.query(LandingPageUpload).filter(LandingPageUpload.id == upload_id).first()
+        template = upload.template if upload else ""
+        prompt_template = normalize_landing_page_prompt_template(template)
+
         created_by = str(job.created_by or "").strip() or None
         if not created_by:
-            upload = db.query(LandingPageUpload).filter(LandingPageUpload.id == upload_id).first()
             created_by = str(getattr(upload, "created_by", "") or "").strip() or None
         if not created_by:
             raise ValueError(f"Gebruiker ontbreekt voor landingspagina generatie job {job_id}.")
@@ -88,7 +95,7 @@ def generate_landing_page_task(self, job_id: str):
             else None
         )
 
-        prompt = build_landing_page_prompt(row_data)
+        prompt = build_landing_page_prompt(row_data, prompt_template)
         effective_model = user_gen_settings.model if user_gen_settings else None
         effective_reasoning_effort = (
             user_gen_settings.reasoning_effort
@@ -112,13 +119,21 @@ def generate_landing_page_task(self, job_id: str):
             effective_reasoning_effort,
             effective_max_output_tokens,
         )
-        raw_content = generate_landing_page(
+        generation_result: LandingPageGenerationResult = generate_landing_page(
             prompt,
             user_id=created_by,
             system_prompt=user_gen_settings.system_prompt if user_gen_settings else None,
             model=effective_model,
             reasoning_effort=effective_reasoning_effort,
             max_output_tokens=effective_max_output_tokens,
+        )
+        raw_content = generation_result.text
+        logger.info(
+            "Landing page generated for job %s: attempts=%s was_continued=%s total_reasoning_tokens=%s",
+            job_id,
+            generation_result.attempts,
+            generation_result.was_continued,
+            generation_result.total_reasoning_tokens,
         )
         try:
             meta_title, meta_description, slug, body_markdown = validate_landing_page_output(

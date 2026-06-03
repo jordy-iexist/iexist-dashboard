@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import dataclass
 
 from app.core.config import settings
 from app.services.openai import create_response
@@ -59,9 +60,20 @@ Sluit de volledige output altijd af met deze marker op een eigen regel:
 )
 
 _FRONTMATTER_REGEX = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)", re.DOTALL)
+_LEADING_FRONTMATTER_REGEX = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
+_LEADING_H1_REGEX = re.compile(r"^#\s+[^\n]+\n?")
 _HEADING_REGEX = re.compile(r"^#{1,3}\s+\S+", re.MULTILINE)
 _FAQ_REGEX = re.compile(r"^#{2,3}\s+.*\bfaq\b|veelgestelde vragen", re.IGNORECASE | re.MULTILINE)
 _FAQ_QUESTION_HEADING_REGEX = re.compile(r"^#{2,4}\s+.+\?\s*$", re.MULTILINE)
+_SENTENCE_END_RE = re.compile(r"[.!?:]\s*\n")
+
+
+@dataclass
+class LandingPageGenerationResult:
+    text: str
+    attempts: int
+    was_continued: bool
+    total_reasoning_tokens: int
 
 
 class LandingPageOutputValidationError(ValueError):
@@ -75,6 +87,13 @@ def _response_incomplete_reason(response) -> str:
     if isinstance(incomplete_details, dict):
         return str(incomplete_details.get("reason", "") or "")
     return str(getattr(incomplete_details, "reason", "") or "")
+
+
+def _extract_reasoning_tokens(response) -> int:
+    try:
+        return int(response.usage.output_tokens_details.reasoning_tokens)
+    except Exception:
+        return 0
 
 
 def _create_landing_page_response(
@@ -100,23 +119,117 @@ def _create_landing_page_response(
     )
 
 
-def _build_continuation_prompt(original_prompt: str, generated_so_far: str) -> str:
-    tail = generated_so_far[-6000:].strip()
+def _trim_to_clean_boundary(text: str) -> tuple[str, str]:
+    """Split text at the last clean sentence boundary.
+
+    Returns (kept, trimmed_tail) where kept ends at a clean punctuation
+    boundary and trimmed_tail is the potentially incomplete fragment that
+    follows. If no boundary is found the entire text is returned as kept
+    with an empty tail.
+    """
+    last_match = None
+    for m in _SENTENCE_END_RE.finditer(text):
+        last_match = m
+    if last_match:
+        split_pos = last_match.end()
+        return text[:split_pos].rstrip(), text[split_pos:].strip()
+
+    # Fall back to last blank line
+    blank = text.rfind("\n\n")
+    if blank != -1:
+        return text[:blank].rstrip(), text[blank:].strip()
+
+    # Fall back to last newline
+    nl = text.rfind("\n")
+    if nl != -1:
+        return text[:nl].rstrip(), text[nl:].strip()
+
+    return text, ""
+
+
+def _sanitize_continuation_chunk(chunk: str, first_part_h1: str) -> str:
+    """Strip leading frontmatter and duplicate H1 from a continuation chunk."""
+    cleaned = _LEADING_FRONTMATTER_REGEX.sub("", chunk.strip())
+
+    if first_part_h1:
+        h1_match = _LEADING_H1_REGEX.match(cleaned.lstrip())
+        if h1_match:
+            candidate_h1 = h1_match.group(0).strip().lstrip("#").strip().lower()
+            reference_h1 = first_part_h1.strip().lstrip("#").strip().lower()
+            if candidate_h1 == reference_h1 or candidate_h1.startswith(reference_h1[:20]):
+                cleaned = cleaned.lstrip()[h1_match.end():].strip()
+
+    return cleaned.strip()
+
+
+def _extract_first_h1(text: str) -> str:
+    m = _LEADING_H1_REGEX.search(text)
+    if m:
+        return m.group(0)
+    return ""
+
+
+def _find_overlap(prev: str, next_chunk: str, min_overlap: int = 40) -> int:
+    """Return the number of leading chars of next_chunk that overlap with the end of prev."""
+    tail = prev[-300:]
+    head = next_chunk[:300]
+    # Sliding window: longest match of tail-suffix that matches head-prefix
+    best = 0
+    max_check = min(len(tail), len(head))
+    for length in range(min_overlap, max_check + 1):
+        if tail.endswith(head[:length]):
+            best = length
+    return best
+
+
+def _stitch_output_parts(parts: list[str]) -> str:
+    """Join parts with overlap detection and smart whitespace handling."""
+    if not parts:
+        return ""
+    result = parts[0].strip()
+    for part in parts[1:]:
+        if not part.strip():
+            continue
+        overlap = _find_overlap(result, part.strip())
+        next_text = part.strip()[overlap:]
+        if not next_text:
+            continue
+        if result.endswith("\n\n") or next_text.startswith("\n"):
+            result = result.rstrip("\n") + "\n\n" + next_text.lstrip("\n")
+        else:
+            result = result.rstrip("\n") + "\n\n" + next_text
+    return result.strip()
+
+
+def _build_continuation_prompt(
+    original_prompt: str,
+    generated_so_far: str,
+    trimmed_tail: str,
+) -> str:
+    tail = generated_so_far[-2000:].strip()
+    tail_instruction = ""
+    if trimmed_tail:
+        tail_instruction = (
+            f"\n\nDe vorige output stopte halverwege een zin met: \"{trimmed_tail}\"\n"
+            "Begin je antwoord door deze zin volledig af te maken (inclusief de woorden hierboven) "
+            "en ga daarna verder met de rest van de pagina."
+        )
     return (
         "De vorige generatie van deze landingspagina is afgebroken voordat de "
         "volledige output klaar was.\n\n"
+        "BELANGRIJK:\n"
+        "- De YAML frontmatter is al geschreven en correct. Schrijf GEEN nieuwe frontmatter, "
+        "geen ---regels.\n"
+        "- Ga verder met de eerstvolgende inhoudelijke regel. Sla geen secties over. "
+        "Spring NIET vooruit naar de FAQ als er nog body-secties of een lopende paragraaf openstaan.\n"
+        "- Herhaal geen eerdere tekst.\n\n"
         "Oorspronkelijke opdracht:\n"
         f"{original_prompt}\n\n"
         "Laatste gegenereerde tekst tot nu toe:\n"
-        f"{tail}\n\n"
-        "Ga exact verder waar de tekst stopte. Herhaal geen eerdere tekst, "
-        "maak de landingspagina volledig af, voeg ontbrekende FAQ-vragen toe "
-        f"als dat nodig is, en sluit af met {LANDING_PAGE_END_MARKER} op een eigen regel."
+        f"{tail}"
+        f"{tail_instruction}\n\n"
+        f"Maak de landingspagina volledig af en sluit af met {LANDING_PAGE_END_MARKER} op een eigen regel."
     )
-
-
-def _combine_output_parts(parts: list[str]) -> str:
-    return "\n\n".join(part.strip() for part in parts if part.strip()).strip()
 
 
 def generate_landing_page(
@@ -127,10 +240,12 @@ def generate_landing_page(
     model: str | None = None,
     reasoning_effort: str | None = None,
     max_output_tokens: int | None = None,
-) -> str:
+) -> LandingPageGenerationResult:
     output_parts: list[str] = []
     current_prompt = prompt
     final_incomplete_reason = ""
+    total_reasoning_tokens = 0
+    first_h1 = ""
 
     for attempt in range(1, MAX_LANDING_PAGE_CONTINUATIONS + 2):
         response = _create_landing_page_response(
@@ -142,10 +257,29 @@ def generate_landing_page(
             max_output_tokens=max_output_tokens,
         )
         output_text = str(getattr(response, "output_text", "") or "").strip()
-        if output_text:
-            output_parts.append(output_text)
 
-        combined_output = _combine_output_parts(output_parts)
+        reasoning_tokens = _extract_reasoning_tokens(response)
+        total_reasoning_tokens += reasoning_tokens
+        usage = getattr(response, "usage", None)
+        logger.info(
+            "Landing page generation attempt %s/%s: usage input=%s output=%s reasoning=%s",
+            attempt,
+            MAX_LANDING_PAGE_CONTINUATIONS + 1,
+            getattr(usage, "input_tokens", "?") if usage else "?",
+            getattr(usage, "output_tokens", "?") if usage else "?",
+            reasoning_tokens,
+        )
+
+        if output_text:
+            if attempt == 1:
+                output_parts.append(output_text)
+                first_h1 = _extract_first_h1(output_text)
+            else:
+                sanitized = _sanitize_continuation_chunk(output_text, first_h1)
+                if sanitized:
+                    output_parts.append(sanitized)
+
+        combined_output = _stitch_output_parts(output_parts)
         incomplete_reason = _response_incomplete_reason(response)
         final_incomplete_reason = incomplete_reason
 
@@ -160,14 +294,30 @@ def generate_landing_page(
         )
 
         if not incomplete_reason and combined_output.rstrip().endswith(LANDING_PAGE_END_MARKER):
-            return combined_output
+            return LandingPageGenerationResult(
+                text=combined_output,
+                attempts=attempt,
+                was_continued=attempt > 1,
+                total_reasoning_tokens=total_reasoning_tokens,
+            )
 
         if attempt > MAX_LANDING_PAGE_CONTINUATIONS:
             break
 
-        current_prompt = _build_continuation_prompt(prompt, combined_output)
+        # Trim to a clean boundary before building the continuation prompt so
+        # the model doesn't see a hanging half-sentence as its last context.
+        kept, trimmed_tail = _trim_to_clean_boundary(combined_output)
+        if trimmed_tail and output_parts:
+            # Replace the last part with the trimmed version so the stitch
+            # on the next iteration doesn't re-include the dangling fragment.
+            # We need to find how much to trim from the last part's tail.
+            last_part = output_parts[-1]
+            if last_part.endswith(trimmed_tail):
+                output_parts[-1] = last_part[: -len(trimmed_tail)].rstrip()
 
-    combined_output = _combine_output_parts(output_parts)
+        current_prompt = _build_continuation_prompt(prompt, kept, trimmed_tail)
+
+    combined_output = _stitch_output_parts(output_parts)
     if final_incomplete_reason:
         logger.warning(
             "Landing page generation ended incomplete after continuations: %s",
@@ -176,7 +326,12 @@ def generate_landing_page(
         raise LandingPageOutputValidationError(
             f"openai_incomplete:{final_incomplete_reason or 'unknown'}"
         )
-    return combined_output
+    return LandingPageGenerationResult(
+        text=combined_output,
+        attempts=MAX_LANDING_PAGE_CONTINUATIONS + 1,
+        was_continued=True,
+        total_reasoning_tokens=total_reasoning_tokens,
+    )
 
 
 def parse_landing_page_output(raw: str) -> tuple[str, str, str, str]:

@@ -7,6 +7,7 @@ LANDING_PAGE_MAX_OUTPUT_TOKENS_MAX = 50000
 
 
 class LandingPageManualUploadRequest(BaseModel):
+    template: str = ""
     rows: list[dict[str, str]]
 
 

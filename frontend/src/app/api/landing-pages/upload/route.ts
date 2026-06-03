@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData()
     const file = formData.get("file")
     const mapping = formData.get("mapping")
+    const template = formData.get("template")
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     const backendFormData = new FormData()
     backendFormData.append("file", file)
     backendFormData.append("mapping", mapping)
+    backendFormData.append("template", typeof template === "string" ? template : "")
 
     const response = await fetch(
       `${getBackendApiUrl()}/api/landing-pages/upload`,

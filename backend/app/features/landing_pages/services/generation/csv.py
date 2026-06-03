@@ -1,6 +1,9 @@
 from typing import Any
 
 from app.features.blogs.services.generation.csv import (  # noqa: F401 — re-exported for callers
+    build_blog_prompt,
+    extract_template_placeholders,
+    get_missing_prompt_values,
     map_row_to_prompt_fields,
     normalize_mapping,
     parse_csv,
@@ -65,18 +68,41 @@ LANDING_PAGE_PROMPT_TEMPLATE = (
     "FAQ's moeten aansluiten bij het onderwerp en long-tail zoektermen bevatten."
 )
 
+DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE = LANDING_PAGE_PROMPT_TEMPLATE
 
-def validate_landing_page_mapping(mapping: dict[str, Any], headers: list[str]) -> dict[str, str]:
-    normalized = normalize_mapping(mapping, REQUIRED_COLUMNS)
-    validate_mapping(normalized, headers, REQUIRED_COLUMNS)
+
+def normalize_landing_page_prompt_template(template: str | None) -> str:
+    normalized = str(template or "").strip()
+    return normalized if normalized else DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE
+
+
+def validate_landing_page_mapping(
+    mapping: dict[str, Any],
+    headers: list[str],
+    required_fields: list[str] | None = None,
+) -> dict[str, str]:
+    fields = required_fields if required_fields is not None else REQUIRED_COLUMNS
+    normalized = normalize_mapping(mapping, fields)
+    validate_mapping(normalized, headers, fields)
     return normalized
 
 
-def map_row_to_landing_page_fields(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, str]:
-    return map_row_to_prompt_fields(row, mapping, REQUIRED_COLUMNS)
+def map_row_to_landing_page_fields(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    required_fields: list[str] | None = None,
+) -> dict[str, str]:
+    fields = required_fields if required_fields is not None else REQUIRED_COLUMNS
+    return map_row_to_prompt_fields(row, mapping, fields)
 
 
-def build_landing_page_prompt(row: dict[str, Any]) -> str:
+def build_landing_page_prompt(
+    row: dict[str, Any], template: str | None = None
+) -> str:
+    prompt_template = normalize_landing_page_prompt_template(template)
+    if template is not None or prompt_template != LANDING_PAGE_PROMPT_TEMPLATE:
+        return build_blog_prompt(prompt_template, row)
+
     fields: dict[str, str] = {}
     for column in REQUIRED_COLUMNS:
         value = str(row.get(column, "") or "").strip()

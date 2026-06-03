@@ -499,6 +499,7 @@ class LandingPageUpload(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     filename: Mapped[str] = mapped_column(Text, nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
     skipped_rows: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("'0'")
     )

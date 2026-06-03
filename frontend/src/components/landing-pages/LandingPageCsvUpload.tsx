@@ -1,22 +1,39 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { type ColumnMapping, readCsvHeaders, reconcileColumnMapping } from "@/lib/csv-mapping"
-import { LANDING_PAGE_FIELD_LABELS, LANDING_PAGE_FIELDS, type LandingPageUploadResponse } from "@/lib/landing-page-types"
+import { parsePromptFieldsFromTemplate } from "@/components/CsvUpload"
+import { DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE, type LandingPageUploadResponse } from "@/lib/landing-page-types"
+
+function toFieldId(field: string): string {
+  return field.replace(/[^a-zA-Z0-9_-]/g, "-")
+}
 
 export function LandingPageCsvUpload() {
   const [file, setFile] = useState<File | null>(null)
   const [headers, setHeaders] = useState<string[]>([])
+  const [promptTemplate, setPromptTemplate] = useState("")
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({})
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<{ jobs_queued: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const effectivePromptTemplate = useMemo(
+    () => (promptTemplate.trim() ? promptTemplate : DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE),
+    [promptTemplate]
+  )
+  const parsedTemplate = useMemo(
+    () => parsePromptFieldsFromTemplate(effectivePromptTemplate),
+    [effectivePromptTemplate]
+  )
+  const templateFieldNames = parsedTemplate.fields
+  const templateError = parsedTemplate.error
+
   useEffect(() => {
-    setColumnMapping((prev) => reconcileColumnMapping(headers, LANDING_PAGE_FIELDS, prev))
-  }, [headers])
+    setColumnMapping((prev) => reconcileColumnMapping(headers, templateFieldNames, prev))
+  }, [headers, templateFieldNames])
 
   const applyFile = async (selectedFile: File | null) => {
     setError(null)
@@ -44,8 +61,21 @@ export function LandingPageCsvUpload() {
     setHeaders(parsedHeaders)
   }
 
-  const missingMappings = LANDING_PAGE_FIELDS.filter((field) => !columnMapping[field])
-  const canSubmit = file !== null && headers.length > 0 && missingMappings.length === 0 && !uploading
+  const missingMappings = useMemo(
+    () =>
+      templateFieldNames.filter((field) => {
+        const mapped = columnMapping[field]
+        return !mapped || !headers.includes(mapped)
+      }),
+    [columnMapping, headers, templateFieldNames]
+  )
+  const canSubmit =
+    file !== null &&
+    headers.length > 0 &&
+    !templateError &&
+    templateFieldNames.length > 0 &&
+    missingMappings.length === 0 &&
+    !uploading
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -59,6 +89,7 @@ export function LandingPageCsvUpload() {
       const formData = new FormData()
       formData.append("file", file)
       formData.append("mapping", JSON.stringify(columnMapping))
+      formData.append("template", promptTemplate)
 
       const res = await fetch("/api/landing-pages/upload", {
         method: "POST",
@@ -80,6 +111,7 @@ export function LandingPageCsvUpload() {
       setSuccess({ jobs_queued: payload.jobs_queued })
       setFile(null)
       setHeaders([])
+      setColumnMapping({})
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
@@ -92,6 +124,32 @@ export function LandingPageCsvUpload() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="landing-page-template">
+          Prompt template
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Maak je eigen prompt. Alles tussen {"{"} en {"}"} wordt een mappingveld.
+          Laat leeg om de standaardprompt te gebruiken.
+        </p>
+        <textarea
+          id="landing-page-template"
+          value={promptTemplate}
+          onChange={(e) => setPromptTemplate(e.target.value)}
+          placeholder={DEFAULT_LANDING_PAGE_PROMPT_TEMPLATE}
+          rows={6}
+          className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono resize-y"
+          disabled={uploading}
+        />
+        {templateError ? (
+          <p className="text-xs text-red-600">{templateError}</p>
+        ) : templateFieldNames.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Placeholders: {templateFieldNames.join(", ")}
+          </p>
+        ) : null}
+      </div>
+
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor="csv-file">
           CSV bestand
@@ -107,25 +165,25 @@ export function LandingPageCsvUpload() {
         />
       </div>
 
-      {headers.length > 0 && (
+      {headers.length > 0 && templateFieldNames.length > 0 && (
         <div className="space-y-3">
           <div>
-            <p className="text-sm font-medium">Koppel kolommen</p>
+            <p className="text-sm font-medium">Placeholder mapping</p>
             <p className="text-xs text-muted-foreground mt-0.5">
               Gevonden kolommen: {headers.join(", ")}
             </p>
           </div>
           <div className="rounded-md border divide-y">
-            {LANDING_PAGE_FIELDS.map((field) => (
-              <div key={field} className="flex items-center gap-3 px-3 py-2">
+            {templateFieldNames.map((field, index) => (
+              <div key={`${field}-${index}`} className="flex items-center gap-3 px-3 py-2">
                 <label
-                  htmlFor={`mapping-${field}`}
+                  htmlFor={`mapping-${toFieldId(field)}-${index}`}
                   className="w-48 shrink-0 text-sm font-medium"
                 >
-                  {LANDING_PAGE_FIELD_LABELS[field]}
+                  {field}
                 </label>
                 <select
-                  id={`mapping-${field}`}
+                  id={`mapping-${toFieldId(field)}-${index}`}
                   value={columnMapping[field] ?? ""}
                   onChange={(e) =>
                     setColumnMapping((prev) => ({ ...prev, [field]: e.target.value }))
@@ -144,7 +202,7 @@ export function LandingPageCsvUpload() {
           </div>
           {missingMappings.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              Koppel nog: {missingMappings.map((f) => LANDING_PAGE_FIELD_LABELS[f]).join(", ")}
+              Koppel nog: {missingMappings.join(", ")}
             </p>
           )}
         </div>

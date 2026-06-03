@@ -34,7 +34,10 @@ from app.features.landing_pages.schemas import (
 )
 from app.features.landing_pages.services.generation.csv import (
     build_landing_page_prompt,
+    extract_template_placeholders,
+    get_missing_prompt_values,
     map_row_to_landing_page_fields,
+    normalize_landing_page_prompt_template,
     parse_csv,
     validate_landing_page_mapping,
 )
@@ -60,6 +63,7 @@ router = APIRouter(tags=["landing-pages"])
 async def upload_landing_page_csv(
     file: UploadFile = File(...),
     mapping: str = Form(...),
+    template: str = Form(""),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
@@ -80,6 +84,12 @@ async def upload_landing_page_csv(
     if not isinstance(mapping_payload, dict):
         raise HTTPException(status_code=400, detail="Ongeldige kolom-mapping.")
 
+    prompt_template = normalize_landing_page_prompt_template(template)
+    try:
+        required_fields = extract_template_placeholders(prompt_template)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     content = await file.read()
     try:
         headers, rows = parse_csv(content)
@@ -87,7 +97,9 @@ async def upload_landing_page_csv(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        normalized_mapping = validate_landing_page_mapping(mapping_payload, headers)
+        normalized_mapping = validate_landing_page_mapping(
+            mapping_payload, headers, required_fields
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -95,14 +107,16 @@ async def upload_landing_page_csv(
     skipped_count = 0
 
     for row in rows:
-        row_dict = map_row_to_landing_page_fields(row, normalized_mapping)
+        row_dict = map_row_to_landing_page_fields(
+            row, normalized_mapping, required_fields
+        )
 
-        if any(not v for v in row_dict.values()):
+        if get_missing_prompt_values(row_dict, required_fields):
             skipped_count += 1
             continue
 
         try:
-            build_landing_page_prompt(row_dict)
+            build_landing_page_prompt(row_dict, prompt_template)
         except ValueError:
             skipped_count += 1
             continue
@@ -119,6 +133,7 @@ async def upload_landing_page_csv(
     upload = LandingPageUpload(
         id=upload_id,
         filename=str(file.filename),
+        template=prompt_template,
         skipped_rows=skipped_count,
         created_by=user_id,
     )
@@ -169,21 +184,27 @@ async def manual_landing_page_upload(
     if not payload.rows:
         raise HTTPException(status_code=400, detail="Voeg minimaal één rij toe.")
 
+    prompt_template = normalize_landing_page_prompt_template(payload.template)
+    try:
+        required_fields = extract_template_placeholders(prompt_template)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     valid_rows: list[dict[str, Any]] = []
     skipped_count = 0
 
     for raw_row in payload.rows:
         row_dict: dict[str, Any] = {
             field: str(raw_row.get(field, "") or "").strip()
-            for field in ["website", "onderwerp", "lengte", "primaire_zoekwoorden", "secundaire_zoekwoorden"]
+            for field in required_fields
         }
 
-        if any(not v for v in row_dict.values()):
+        if get_missing_prompt_values(row_dict, required_fields):
             skipped_count += 1
             continue
 
         try:
-            build_landing_page_prompt(row_dict)
+            build_landing_page_prompt(row_dict, prompt_template)
         except ValueError:
             skipped_count += 1
             continue
@@ -200,6 +221,7 @@ async def manual_landing_page_upload(
     upload = LandingPageUpload(
         id=upload_id,
         filename="Handmatige invoer",
+        template=prompt_template,
         skipped_rows=skipped_count,
         created_by=user_id,
     )
