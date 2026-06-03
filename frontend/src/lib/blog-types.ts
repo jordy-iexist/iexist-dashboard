@@ -40,6 +40,31 @@ export type BlogDetailPayload = {
   status: string
   published_at?: string | null
   row_data: BlogRowData | null
+  share_token: string
+}
+
+export type BlogSharePayload = {
+  id: string
+  content: string
+  created_at: string
+  images: BlogImageItem[]
+}
+
+export type BlogImageItem = {
+  id: string
+  blog_id: string
+  source: "auto_generated" | "manual_upload"
+  storage_path: string
+  signed_url: string | null
+  mime_type: string
+  file_size_bytes: number
+  width: number | null
+  height: number | null
+  is_primary: boolean
+  generation_prompt: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type BlogDetailResponse = BlogDetailPayload

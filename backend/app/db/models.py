@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
 from typing import Any, Optional
 
@@ -126,6 +127,10 @@ class Blog(Base):
         String(36), ForeignKey("jobs.id"), nullable=False
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    share_token: Mapped[str] = mapped_column(
+        String(43), nullable=False, unique=True, index=True,
+        default=lambda: secrets.token_urlsafe(32),
+    )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

@@ -1,15 +1,17 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import ReactMarkdown from "react-markdown"
-import { Copy, Check } from "lucide-react"
+import { Copy, Check, Link2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { BlogMarkdownEditor } from "@/components/blogs/BlogMarkdownEditor"
 
 type BlogEditorProps = {
   blogId: string
   initialContent: string
+  shareToken: string
 }
 
 type SaveResponse =
@@ -24,7 +26,7 @@ type SaveResponse =
       error: string
     }
 
-export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
+export function BlogEditor({ blogId, initialContent, shareToken }: BlogEditorProps) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [content, setContent] = useState(initialContent)
@@ -35,6 +37,8 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
   }>({ type: null, message: "" })
   const [isPending, startTransition] = useTransition()
   const [justCopied, setJustCopied] = useState(false)
+  const [justCopiedShare, setJustCopiedShare] = useState(false)
+  const articleRef = useRef<HTMLElement>(null)
 
   const hasChanges = useMemo(
     () => draft.trim() !== content.trim(),
@@ -43,10 +47,30 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
 
   const copyContent = async () => {
     try {
-      await navigator.clipboard.writeText(content)
+      const html = articleRef.current?.innerHTML
+      if (html) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([content], { type: "text/plain" }),
+          }),
+        ])
+      } else {
+        await navigator.clipboard.writeText(content)
+      }
       setJustCopied(true)
       setFeedback({ type: null, message: "" })
       setTimeout(() => setJustCopied(false), 1500)
+    } catch {
+      setFeedback({ type: "error", message: "Kopiëren naar klembord is mislukt." })
+    }
+  }
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/share/${shareToken}`)
+      setJustCopiedShare(true)
+      setTimeout(() => setJustCopiedShare(false), 1500)
     } catch {
       setFeedback({ type: "error", message: "Kopiëren naar klembord is mislukt." })
     }
@@ -128,6 +152,16 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
           >
             {justCopied ? <Check /> : <Copy />}
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={copyShareLink}
+            aria-label={justCopiedShare ? "Gekopieerd" : "Kopieer deel-link"}
+            title={justCopiedShare ? "Gekopieerd" : "Kopieer deel-link"}
+          >
+            {justCopiedShare ? <Check /> : <Link2 />}
+          </Button>
 
           {!isEditing ? (
             <Button onClick={startEditing}>Bewerk blog</Button>
@@ -164,15 +198,14 @@ export function BlogEditor({ blogId, initialContent }: BlogEditorProps) {
       )}
 
       {!isEditing ? (
-        <article className="prose prose-sm max-w-none leading-7">
+        <article ref={articleRef} className="prose prose-sm max-w-none leading-7">
           <ReactMarkdown>{content}</ReactMarkdown>
         </article>
       ) : (
         <div className="space-y-2">
-          <textarea
+          <BlogMarkdownEditor
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            className="min-h-[420px] w-full rounded-md border bg-background px-3 py-2 text-sm leading-7"
+            onChange={setDraft}
             disabled={isPending}
           />
           <p className="text-xs text-muted-foreground">

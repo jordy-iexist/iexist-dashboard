@@ -28,6 +28,7 @@ from app.features.blogs.mappers import (
 from app.features.blogs.schemas import (
     BlockedPublicationItem,
     BlogDetailResponse,
+    BlogShareResponse,
     DeleteBatchRequest,
     DeleteBatchResponse,
     BlogGenerationSettingsResponse,
@@ -137,6 +138,7 @@ def _get_blog_record(blog_id: str, user_id: str, db: Session) -> dict[str, Any] 
     return {
         "id": str(blog.id),
         "content": blog.content,
+        "share_token": blog.share_token,
         "created_at": blog.created_at,
         "published_at": blog.published_at,
         "created_by": blog.created_by,
@@ -368,6 +370,27 @@ async def update_blog_generation_settings(
     )
 
 
+@router.get("/api/blogs/share/{token}", response_model=BlogShareResponse)
+async def get_shared_blog(token: str, db: Session = Depends(get_db)):
+    blog: Blog | None = (
+        db.query(Blog).filter(Blog.share_token == token).first()  # type: ignore[assignment]
+    )
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog niet gevonden.")
+    images: list[BlogImage] = (
+        db.query(BlogImage)
+        .filter(BlogImage.blog_id == blog.id)
+        .order_by(BlogImage.is_primary.desc(), BlogImage.created_at.desc())
+        .all()  # type: ignore[assignment]
+    )
+    return BlogShareResponse(
+        id=str(blog.id),
+        content=blog.content,
+        created_at=blog.created_at,
+        images=[to_blog_image_item(_row_to_dict(image)) for image in images],
+    )
+
+
 @router.get("/api/blogs/{blog_id}", response_model=BlogDetailResponse)
 async def get_blog(
     blog_id: str,
@@ -386,6 +409,7 @@ async def get_blog(
         status=status,
         created_at=blog["created_at"],
         published_at=blog.get("published_at"),
+        share_token=str(blog["share_token"]),
     )
 
 
@@ -421,6 +445,7 @@ async def update_blog(
         status=status,
         created_at=refreshed["created_at"],
         published_at=refreshed.get("published_at"),
+        share_token=str(refreshed["share_token"]),
     )
 
 

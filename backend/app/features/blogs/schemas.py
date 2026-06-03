@@ -95,6 +95,14 @@ class BlogDetailResponse(BaseModel):
     status: str
     created_at: datetime
     published_at: datetime | None = None
+    share_token: str
+
+
+class BlogShareResponse(BaseModel):
+    id: str
+    content: str
+    created_at: datetime
+    images: list["BlogImageItem"] = Field(default_factory=list)
 
 
 class BlogUpdateRequest(BaseModel):

@@ -384,7 +384,7 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
                 setSelectedFile(file)
               }}
               disabled={isPending}
-              className="block w-full text-sm"
+              className="block w-full text-sm bg-accent rounded-2xl p-2"
             />
             <Button
               onClick={uploadImage}

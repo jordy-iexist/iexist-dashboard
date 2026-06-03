@@ -147,7 +147,7 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
         />
       </section>
 
-      <BlogEditor blogId={blog.id} initialContent={blog.content} />
+      <BlogEditor blogId={blog.id} initialContent={blog.content} shareToken={blog.share_token} />
       <BlogImagePanel blogId={blog.id} />
       <BlogPublishPanel blogId={blog.id} />
     </div>
