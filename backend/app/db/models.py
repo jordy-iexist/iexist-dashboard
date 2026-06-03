@@ -99,6 +99,9 @@ class Job(Base):
     blog_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("blogs.id"), nullable=True
     )
+    landing_page_row_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("landing_page_rows.id"), nullable=True
+    )
     job_type: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'blog_generation'")
     )
@@ -116,6 +119,9 @@ class Job(Base):
     )
     blog: Mapped[Optional["Blog"]] = relationship(
         "Blog", back_populates="generation_job", foreign_keys=[blog_id]
+    )
+    landing_page_row: Mapped[Optional["LandingPageRow"]] = relationship(
+        "LandingPageRow", back_populates="jobs", foreign_keys=[landing_page_row_id]
     )
 
 
@@ -488,6 +494,86 @@ class BlogGenerationSettings(Base):
     )
 
 
+class LandingPageUpload(Base):
+    __tablename__ = "landing_page_uploads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    skipped_rows: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("'0'")
+    )
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    dismissed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    rows: Mapped[list["LandingPageRow"]] = relationship(
+        "LandingPageRow", back_populates="upload"
+    )
+
+
+class LandingPageRow(Base):
+    __tablename__ = "landing_page_rows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    upload_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("landing_page_uploads.id"), nullable=False
+    )
+    data: Mapped[Any] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    upload: Mapped["LandingPageUpload"] = relationship(
+        "LandingPageUpload", back_populates="rows"
+    )
+    jobs: Mapped[list["Job"]] = relationship(
+        "Job", back_populates="landing_page_row", foreign_keys="Job.landing_page_row_id"
+    )
+
+
+class LandingPage(Base):
+    __tablename__ = "landing_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.id"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    meta_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    slug: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    share_token: Mapped[str] = mapped_column(
+        String(43), nullable=False, unique=True, index=True,
+        default=lambda: secrets.token_urlsafe(32),
+    )
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    landing_page_job: Mapped[Optional["Job"]] = relationship(
+        "Job", foreign_keys=[job_id], primaryjoin="LandingPage.job_id == Job.id"
+    )
+
+
+class LandingPageGenerationSettings(Base):
+    __tablename__ = "landing_page_generation_settings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reasoning_effort: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    max_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class UserAISettings(Base):
     __tablename__ = "user_ai_settings"
 
@@ -630,4 +716,8 @@ __all__ = [
     "WebsiteAudit",
     "AuditPage",
     "AuditIssue",
+    "LandingPageUpload",
+    "LandingPageRow",
+    "LandingPage",
+    "LandingPageGenerationSettings",
 ]
