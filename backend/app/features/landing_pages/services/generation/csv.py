@@ -57,8 +57,6 @@ LANDING_PAGE_PROMPT_TEMPLATE = (
     "\n"
     "Beantwoord de belangrijkste vragen van de doelgroep over het onderwerp.\n"
     "\n"
-    "Conclusie + samenvatting + CTA: vat de kern samen en voeg een duidelijke oproep toe.\n"
-    "\n"
     "FAQ-sectie:\n"
     "\n"
     "Voeg 6 relevante veelgestelde vragen en antwoorden toe.\n"
