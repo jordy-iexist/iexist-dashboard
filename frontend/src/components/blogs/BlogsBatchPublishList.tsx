@@ -65,18 +65,6 @@ function getErrorMessage(payload: unknown, fallback: string) {
   return fallback
 }
 
-function formatDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return "-"
-  }
-
-  return new Intl.DateTimeFormat("nl-NL", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
-}
-
 function publicationLabel(blog: BlogListItem) {
   if (blog.published_at) {
     return "Gepubliceerd"
@@ -497,23 +485,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <h2 className="line-clamp-2 text-base font-semibold">{blog.title}</h2>
-              <p className="text-xs text-muted-foreground">
-                {formatDate(blog.createdAt)}
-              </p>
-            </div>
-
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p className="truncate">Bestand: {blog.filename}</p>
-              <p>{blog.words} woorden</p>
-              <p className="truncate">Anker 1: {blog.anchor1}</p>
-              <p className="truncate">Anker 2: {blog.anchor2}</p>
-            </div>
-
-            <p className="line-clamp-6 text-sm leading-6 text-foreground/90">
-              {blog.preview}
-            </p>
+            <h2 className="line-clamp-2 text-base font-semibold">{blog.title}</h2>
 
             <div className="flex items-center gap-2 pt-1">
               <Button asChild size="sm" className="min-w-0 flex-1">
