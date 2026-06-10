@@ -70,9 +70,14 @@ export function LandingPagesBatchList({
   }>({ type: null, message: "" })
   const [isPending, startTransition] = useTransition()
 
+  const ownedPages = useMemo(
+    () => landingPages.filter((lp) => lp.is_owner !== false),
+    [landingPages]
+  )
+
   const allSelected = useMemo(
-    () => landingPages.length > 0 && selectedIds.length === landingPages.length,
-    [landingPages.length, selectedIds.length]
+    () => ownedPages.length > 0 && selectedIds.length === ownedPages.length,
+    [ownedPages.length, selectedIds.length]
   )
 
   const toggleSelection = (id: string, checked: boolean) => {
@@ -85,7 +90,7 @@ export function LandingPagesBatchList({
   }
 
   const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(checked ? landingPages.map((lp) => lp.id) : [])
+    setSelectedIds(checked ? ownedPages.map((lp) => lp.id) : [])
   }
 
   const deleteBatch = () => {
@@ -168,14 +173,16 @@ export function LandingPagesBatchList({
             key={item.id}
             className="rounded-lg border bg-card flex items-start gap-2 p-4"
           >
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(item.id)}
-              onChange={(e) => toggleSelection(item.id, e.target.checked)}
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Selecteer"
-              className="mt-0.5 shrink-0 rounded border-input cursor-pointer"
-            />
+            {item.is_owner !== false && (
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(item.id)}
+                onChange={(e) => toggleSelection(item.id, e.target.checked)}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Selecteer"
+                className="mt-0.5 shrink-0 rounded border-input cursor-pointer"
+              />
+            )}
             <Link
               href={`/dashboard/landing-pages/${item.id}`}
               className="flex-1 min-w-0 space-y-2 hover:opacity-75 transition-opacity"
@@ -184,11 +191,23 @@ export function LandingPagesBatchList({
                 <p className="font-medium text-sm leading-snug line-clamp-2">
                   {item.onderwerp || "Onbekend onderwerp"}
                 </p>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadgeClasses(item.status)}`}
-                >
-                  {statusLabel(item.status)}
-                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  {item.is_owner === false && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800">
+                      Gedeeld met jou
+                    </span>
+                  )}
+                  {item.is_owner !== false && item.is_public === true && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800">
+                      Gedeeld
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadgeClasses(item.status)}`}
+                  >
+                    {statusLabel(item.status)}
+                  </span>
+                </div>
               </div>
               {item.meta_title && (
                 <p className="text-xs text-muted-foreground line-clamp-1">

@@ -1,7 +1,7 @@
 from pathlib import Path
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from app.core.auth import (
@@ -10,10 +10,12 @@ from app.core.auth import (
     create_user,
     get_user_by_email,
     get_user_by_id,
+    revoke_access_token,
     to_public_user,
 )
 from app.core.config import settings
 from app.core.dependencies import require_user_id
+from app.core.rate_limit import enforce_rate_limit
 from app.storage import verify_signed_request as verify_storage_signature
 from app.features.auth.schemas import AuthCredentialsRequest, AuthResponse, AuthUserItem
 
@@ -27,7 +29,8 @@ async def root():
 
 
 @router.post("/api/auth/signup", response_model=AuthResponse)
-async def signup(payload: AuthCredentialsRequest):
+async def signup(payload: AuthCredentialsRequest, request: Request):
+    enforce_rate_limit(request, "signup", limit=5, window_seconds=60)
     email = str(payload.email or "").strip().lower()
     password = str(payload.password or "")
     if not email:
@@ -63,7 +66,8 @@ async def signup(payload: AuthCredentialsRequest):
 
 
 @router.post("/api/auth/login", response_model=AuthResponse)
-async def login(payload: AuthCredentialsRequest):
+async def login(payload: AuthCredentialsRequest, request: Request):
+    enforce_rate_limit(request, "login", limit=10, window_seconds=60)
     user = authenticate_user(payload.email, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Ongeldige inloggegevens.")
@@ -84,8 +88,18 @@ async def get_authenticated_user(user_id: str = Depends(require_user_id)):
 
 
 @router.post("/api/auth/logout")
-async def logout():
-    return {"status": "logged_out"}
+async def logout(
+    authorization: str | None = Header(default=None),
+    access_token: str | None = Cookie(default=None),
+):
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    elif access_token and access_token.strip():
+        token = access_token.strip()
+
+    revoked = revoke_access_token(token) if token else False
+    return {"status": "logged_out", "revoked": revoked}
 
 
 @router.get("/api/storage/{bucket}/{storage_path:path}")

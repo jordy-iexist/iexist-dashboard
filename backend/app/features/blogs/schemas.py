@@ -84,6 +84,8 @@ class BlogsListItem(BaseModel):
     published_at: datetime | None = None
     publication: BlogPublicationSummary | None = None
     share_token: str
+    is_public: bool = False
+    is_owner: bool = True
 
 
 class BlogsListResponse(BaseModel):
@@ -102,6 +104,8 @@ class BlogDetailResponse(BaseModel):
     created_at: datetime
     published_at: datetime | None = None
     share_token: str
+    is_public: bool = False
+    is_owner: bool = True
 
 
 class BlogShareResponse(BaseModel):
@@ -112,7 +116,8 @@ class BlogShareResponse(BaseModel):
 
 
 class BlogUpdateRequest(BaseModel):
-    content: str
+    content: str | None = None
+    is_public: bool | None = None
 
 
 BlogImageSource = Literal["auto_generated", "manual_upload"]

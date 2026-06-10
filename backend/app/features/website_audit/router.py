@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_user_id, utc_now_iso
+from app.core.url_guard import UnsafeURLError, validate_external_url
 from app.db.models import AuditIssue, AuditPage, WebsiteAudit
 from app.db.session import get_db
 from app.features.website_audit.mappers import (
@@ -47,6 +48,12 @@ async def start_audit(
     from app.worker.tasks import run_website_audit_task  # type: ignore[attr-defined]
 
     url = payload.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    try:
+        validate_external_url(url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     domain = _extract_domain(url)
     now = utc_now_iso()
     audit_id = str(uuid.uuid4())

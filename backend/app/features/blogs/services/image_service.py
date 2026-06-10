@@ -35,6 +35,16 @@ def detect_mime_type(filename: str, content_type: str | None) -> str:
     raise ValueError("Alleen JPG, PNG of WEBP afbeeldingen zijn toegestaan.")
 
 
+def _matches_magic_bytes(mime_type: str, content: bytes) -> bool:
+    if mime_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if mime_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if mime_type == "image/webp":
+        return content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+    return False
+
+
 def validate_image_upload(
     filename: str, content_type: str | None, content: bytes
 ) -> str:
@@ -48,7 +58,10 @@ def validate_image_upload(
         max_mb = settings.blog_image_max_size_bytes / (1024 * 1024)
         raise ValueError(f"Afbeelding is te groot. Maximaal {max_mb:.1f} MB.")
 
-    return detect_mime_type(filename, content_type)
+    mime_type = detect_mime_type(filename, content_type)
+    if not _matches_magic_bytes(mime_type, content):
+        raise ValueError("Bestandsinhoud is geen geldige JPG, PNG of WEBP afbeelding.")
+    return mime_type
 
 
 def build_storage_path(blog_id: str, source: BlogImageSource, mime_type: str) -> str:

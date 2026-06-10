@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 
 from app.core.dependencies import get_request_user_id
 from app.db.models import Blog, BlogPublication, WordPressSite
@@ -56,10 +57,10 @@ def ensure_active_sites(site_ids: list[str]) -> dict[str, dict]:
     return sites_by_id
 
 
-def ensure_blogs_exist(blog_ids: list[str]) -> None:
+def ensure_blogs_exist(blog_ids: list[str], user_id: str | None = None) -> None:
+    user_id = user_id or get_request_user_id()
     with SessionLocal() as db:
         query = db.query(Blog).filter(Blog.id.in_(blog_ids))
-        user_id = get_request_user_id()
         if user_id:
             query = query.filter(Blog.created_by == user_id)
         blog_rows = [_row_to_dict(row) for row in query.all()]
@@ -73,12 +74,28 @@ def ensure_blogs_exist(blog_ids: list[str]) -> None:
         )
 
 
-def ensure_blog_exists(blog_id: str) -> None:
+def ensure_blog_exists(blog_id: str, user_id: str | None = None) -> None:
+    """Eigenaarscheck: 404 wanneer de blog niet bestaat of niet van de gebruiker is."""
+    user_id = user_id or get_request_user_id()
     with SessionLocal() as db:
         query = db.query(Blog).filter(Blog.id == blog_id)
-        user_id = get_request_user_id()
         if user_id:
             query = query.filter(Blog.created_by == user_id)
+        blog = query.first()
+
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog niet gevonden.")
+
+
+def ensure_blog_readable(blog_id: str, user_id: str | None = None) -> None:
+    """Leescheck: eigenaar óf blog die via is_public met het team gedeeld is."""
+    user_id = user_id or get_request_user_id()
+    with SessionLocal() as db:
+        query = db.query(Blog).filter(Blog.id == blog_id)
+        if user_id:
+            query = query.filter(
+                or_(Blog.created_by == user_id, Blog.is_public.is_(True))
+            )
         blog = query.first()
 
     if not blog:

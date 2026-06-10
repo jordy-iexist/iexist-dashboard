@@ -67,16 +67,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const payload = (await request.json().catch(() => null)) as
-      | { content?: unknown }
+      | { content?: unknown; is_public?: unknown }
       | null
     const rawContent = payload?.content
-    const content = typeof rawContent === "string" ? rawContent.trim() : ""
+    const content = typeof rawContent === "string" ? rawContent.trim() : null
+    const isPublic =
+      typeof payload?.is_public === "boolean" ? payload.is_public : null
 
-    if (!content) {
+    if (content !== null && !content) {
       return NextResponse.json(
         { error: "Blog inhoud mag niet leeg zijn." },
         { status: 400 }
       )
+    }
+    if (content === null && isPublic === null) {
+      return NextResponse.json(
+        { error: "Minimaal één veld moet worden meegegeven." },
+        { status: 400 }
+      )
+    }
+
+    const body: Record<string, unknown> = {}
+    if (content !== null) {
+      body.content = content
+    }
+    if (isPublic !== null) {
+      body.is_public = isPublic
     }
 
     const response = await fetch(
@@ -87,7 +103,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           "Content-Type": "application/json",
           Authorization: authorization,
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       }
     )
 

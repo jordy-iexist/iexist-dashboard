@@ -138,6 +138,9 @@ class Blog(Base):
         default=lambda: secrets.token_urlsafe(32),
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    is_public: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -552,6 +555,9 @@ class LandingPage(Base):
         default=lambda: secrets.token_urlsafe(32),
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    is_public: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

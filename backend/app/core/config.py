@@ -23,12 +23,12 @@ class Settings(BaseSettings):
         validation_alias="POSTGREST_TIMEOUT_SECONDS",
     )
     jwt_secret_key: str = Field(
-        default="change-me-in-production",
+        default="",
         validation_alias="JWT_SECRET_KEY",
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_access_token_expire_minutes: int = Field(
-        default=60 * 24 * 7,
+        default=60 * 24,
         validation_alias=AliasChoices(
             "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
             "JWT_ACCESS_TOKEN_EXPIRES_MINUTES",
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("STORAGE_ROOT", "MEDIA_ROOT"),
     )
     storage_signing_secret: str = Field(
-        default="change-me-storage-secret",
+        default="",
         validation_alias="STORAGE_SIGNING_SECRET",
     )
     cors_allowed_origins: str = Field(
@@ -180,6 +180,28 @@ class Settings(BaseSettings):
         ] or ["http://localhost:3000"]
 
 
+_INSECURE_SECRET_VALUES = {
+    "",
+    "change-me",
+    "change-me-in-production",
+    "change-me-storage-secret",
+}
+
+
+def validate_required_secrets(s: "Settings") -> None:
+    problems: list[str] = []
+    if s.jwt_secret_key.strip() in _INSECURE_SECRET_VALUES:
+        problems.append("JWT_SECRET_KEY")
+    if s.storage_signing_secret.strip() in _INSECURE_SECRET_VALUES:
+        problems.append("STORAGE_SIGNING_SECRET")
+    if problems:
+        raise RuntimeError(
+            "Onveilige of ontbrekende secrets: "
+            + ", ".join(problems)
+            + ". Zet deze env-vars in backend/.env (genereer met: openssl rand -hex 32)."
+        )
+
+
 settings = Settings()
 
-__all__ = ["Settings", "settings"]
+__all__ = ["Settings", "settings", "validate_required_secrets"]

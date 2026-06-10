@@ -90,4 +90,3 @@ The backend will be available at:
 - uvicorn app.main:app --reload
 - celery -A app.worker.celery_app worker --loglevel=info
 - brew services start redis
-

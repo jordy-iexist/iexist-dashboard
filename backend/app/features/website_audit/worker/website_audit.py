@@ -123,7 +123,13 @@ def run_website_audit_task(self, audit_id: str) -> None:
             try:
                 db.add(new_page)
                 db.commit()
-            except Exception:
+            except Exception as insert_exc:
+                logger.error(
+                    "Kon auditpagina %s niet opslaan voor audit %s: %s",
+                    page_url,
+                    audit_id,
+                    insert_exc,
+                )
                 db.rollback()
                 failed_pages += 1
                 scanned_pages += 1
@@ -150,8 +156,13 @@ def run_website_audit_task(self, audit_id: str) -> None:
                         bucket.upload(path, img_bytes)
                         signed = bucket.create_signed_url(path, 7 * 24 * 3600)
                         screenshot_urls[viewport_name] = signed["signedURL"]
-                    except Exception:
-                        pass
+                    except Exception as upload_exc:
+                        logger.warning(
+                            "Screenshot-upload mislukt voor %s (%s): %s",
+                            page_url,
+                            viewport_name,
+                            upload_exc,
+                        )
 
             # Update page with results
             update_vals = {
@@ -192,11 +203,20 @@ def run_website_audit_task(self, audit_id: str) -> None:
                         created_at=utc_now_iso(),
                     )
                     db.add(issue)
-                except Exception:
-                    pass
+                except Exception as issue_exc:
+                    logger.error(
+                        "Kon issue niet aanmaken voor pagina %s: %s",
+                        page_url,
+                        issue_exc,
+                    )
             try:
                 db.commit()
-            except Exception:
+            except Exception as commit_exc:
+                logger.error(
+                    "Kon issues niet opslaan voor pagina %s: %s",
+                    page_url,
+                    commit_exc,
+                )
                 db.rollback()
 
             if page_error:

@@ -2,6 +2,10 @@ import re
 from datetime import datetime, timezone
 
 
+class PermanentTaskError(Exception):
+    """Datafout die niet door een retry opgelost wordt (ontbrekende job/rij/gebruiker)."""
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

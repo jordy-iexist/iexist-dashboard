@@ -78,6 +78,8 @@ export type LandingPageListItem = {
   filename: string
   status: string
   created_at: string
+  is_public?: boolean
+  is_owner?: boolean
 }
 
 export type LandingPageListResponse = {
@@ -98,6 +100,8 @@ export type LandingPageDetailPayload = {
   onderwerp: string
   filename: string
   created_at: string
+  is_public?: boolean
+  is_owner?: boolean
 }
 
 export type LandingPageUploadResponse = {

@@ -5,6 +5,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.core.config import settings
+from app.core.url_guard import UnsafeURLError, validate_external_url
 
 
 class WordPressServiceError(Exception):
@@ -102,6 +103,14 @@ def _request(
     follow_redirects: bool = True,
 ) -> httpx.Response:
     timeout = settings.wordpress_request_timeout_seconds
+
+    try:
+        validate_external_url(url)
+    except UnsafeURLError as exc:
+        raise WordPressServiceError(
+            "WordPress URL wijst naar een niet-toegestaan (intern) adres.",
+            code="unsafe_url",
+        ) from exc
 
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:

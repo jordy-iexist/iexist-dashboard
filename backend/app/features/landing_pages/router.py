@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
@@ -598,16 +599,25 @@ async def update_landing_page_generation_settings(
 async def list_landing_pages(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=12, ge=1, le=100),
+    scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
     start = (page - 1) * page_size
-    total: int = (
-        db.query(LandingPage).filter(LandingPage.created_by == user_id).count()
-    )
+    if scope == "mine":
+        visibility = LandingPage.created_by == user_id
+    elif scope == "shared":
+        visibility = (LandingPage.is_public.is_(True)) & (
+            LandingPage.created_by != user_id
+        )
+    else:
+        visibility = or_(
+            LandingPage.created_by == user_id, LandingPage.is_public.is_(True)
+        )
+    total: int = db.query(LandingPage).filter(visibility).count()
     lp_rows: list[LandingPage] = (
         db.query(LandingPage)
-        .filter(LandingPage.created_by == user_id)
+        .filter(visibility)
         .order_by(LandingPage.created_at.desc())
         .offset(start)
         .limit(page_size)
@@ -649,6 +659,8 @@ async def list_landing_pages(
                 filename=filename,
                 status=status,
                 created_at=lp.created_at,
+                is_public=bool(lp.is_public),
+                is_owner=str(lp.created_by or "") == user_id,
             )
         )
 
@@ -672,7 +684,13 @@ async def get_landing_page(
 ):
     lp: LandingPage | None = (
         db.query(LandingPage)
-        .filter(LandingPage.id == landing_page_id, LandingPage.created_by == user_id)
+        .filter(
+            LandingPage.id == landing_page_id,
+            or_(
+                LandingPage.created_by == user_id,
+                LandingPage.is_public.is_(True),
+            ),
+        )
         .first()  # type: ignore[assignment]
     )
     if not lp:
@@ -714,6 +732,8 @@ async def get_landing_page(
         onderwerp=onderwerp,
         filename=filename,
         created_at=lp.created_at,
+        is_public=bool(lp.is_public),
+        is_owner=str(lp.created_by or "") == user_id,
     )
 
 
@@ -728,7 +748,16 @@ async def update_landing_page(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    if all(v is None for v in (payload.content, payload.meta_title, payload.meta_description, payload.slug)):
+    if all(
+        v is None
+        for v in (
+            payload.content,
+            payload.meta_title,
+            payload.meta_description,
+            payload.slug,
+            payload.is_public,
+        )
+    ):
         raise HTTPException(
             status_code=400,
             detail="Minimaal één veld moet worden meegegeven.",
@@ -754,6 +783,8 @@ async def update_landing_page(
         updates["meta_description"] = payload.meta_description
     if payload.slug is not None:
         updates["slug"] = payload.slug
+    if payload.is_public is not None:
+        updates["is_public"] = bool(payload.is_public)
 
     db.query(LandingPage).filter(
         LandingPage.id == landing_page_id, LandingPage.created_by == user_id
@@ -805,6 +836,8 @@ async def update_landing_page(
         onderwerp=onderwerp,
         filename=filename,
         created_at=lp.created_at,
+        is_public=bool(lp.is_public),
+        is_owner=True,
     )
 
 

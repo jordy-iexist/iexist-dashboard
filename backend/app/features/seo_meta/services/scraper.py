@@ -4,6 +4,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
+from app.core.url_guard import validate_external_url
 from app.features.seo_meta.services.types import PageSnapshot
 from app.features.seo_meta.services.validation import normalize_path
 
@@ -110,6 +111,7 @@ class MetadataParser(HTMLParser):
 
 
 def fetch_page_snapshot(url: str, *, timeout_seconds: float) -> PageSnapshot:
+    validate_external_url(url)
     response = httpx.get(
         url,
         follow_redirects=True,

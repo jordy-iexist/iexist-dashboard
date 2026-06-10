@@ -124,7 +124,12 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
             Gepubliceerd
           </span>
         )}
-        <BlogDeleteButton blogId={blog.id} />
+        {blog.is_owner === false && (
+          <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+            Gedeeld met jou · alleen lezen
+          </span>
+        )}
+        {blog.is_owner !== false && <BlogDeleteButton blogId={blog.id} />}
       </div>
 
       <section className="grid gap-3 rounded-lg border bg-card p-5 text-sm md:grid-cols-2">
@@ -147,9 +152,19 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
         />
       </section>
 
-      <BlogEditor blogId={blog.id} initialContent={blog.content} shareToken={blog.share_token} />
-      <BlogImagePanel blogId={blog.id} />
-      <BlogPublishPanel blogId={blog.id} />
+      <BlogEditor
+        blogId={blog.id}
+        initialContent={blog.content}
+        shareToken={blog.share_token}
+        isOwner={blog.is_owner !== false}
+        initialIsPublic={blog.is_public === true}
+      />
+      {blog.is_owner !== false && (
+        <>
+          <BlogImagePanel blogId={blog.id} />
+          <BlogPublishPanel blogId={blog.id} />
+        </>
+      )}
     </div>
   )
 }

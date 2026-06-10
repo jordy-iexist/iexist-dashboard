@@ -24,6 +24,8 @@ export type BlogListItemPayload = {
   published_at?: string | null
   publication?: BlogPublicationSummary | null
   share_token: string
+  is_public?: boolean
+  is_owner?: boolean
 }
 
 export type BlogsListResponse = {
@@ -42,6 +44,8 @@ export type BlogDetailPayload = {
   published_at?: string | null
   row_data: BlogRowData | null
   share_token: string
+  is_public?: boolean
+  is_owner?: boolean
 }
 
 export type BlogSharePayload = {

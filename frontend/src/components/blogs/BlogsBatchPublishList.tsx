@@ -36,6 +36,8 @@ export type BlogListItem = {
   preview: string
   publication: PublishSummary
   published_at: string | null
+  isPublic: boolean
+  isOwner: boolean
 }
 
 type SitesResponse =
@@ -168,9 +170,14 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
     }
   }, [])
 
+  const ownedBlogs = useMemo(
+    () => blogs.filter((blog) => blog.isOwner),
+    [blogs]
+  )
+
   const allSelected = useMemo(
-    () => blogs.length > 0 && selectedBlogIds.length === blogs.length,
-    [blogs.length, selectedBlogIds.length]
+    () => ownedBlogs.length > 0 && selectedBlogIds.length === ownedBlogs.length,
+    [ownedBlogs.length, selectedBlogIds.length]
   )
 
   const toggleBlogSelection = (blogId: string, checked: boolean) => {
@@ -184,7 +191,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedBlogIds(blogs.map((blog) => blog.id))
+      setSelectedBlogIds(ownedBlogs.map((blog) => blog.id))
       return
     }
     setSelectedBlogIds([])
@@ -460,21 +467,34 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
         {blogs.map((blog) => (
           <article key={blog.id} className="rounded-lg border bg-card p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={selectedBlogIds.includes(blog.id)}
-                  onChange={(event) =>
-                    toggleBlogSelection(blog.id, event.target.checked)
-                  }
-                />
-                Selecteer
-              </label>
-              <span
-                className={`rounded-full px-2 py-1 text-[11px] font-medium ${publicationBadgeClasses(blog)}`}
-              >
-                {publicationLabel(blog)}
-              </span>
+              {blog.isOwner ? (
+                <label className="inline-flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={selectedBlogIds.includes(blog.id)}
+                    onChange={(event) =>
+                      toggleBlogSelection(blog.id, event.target.checked)
+                    }
+                  />
+                  Selecteer
+                </label>
+              ) : (
+                <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                  Gedeeld met jou
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                {blog.isOwner && blog.isPublic && (
+                  <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    Gedeeld
+                  </span>
+                )}
+                <span
+                  className={`rounded-full px-2 py-1 text-[11px] font-medium ${publicationBadgeClasses(blog)}`}
+                >
+                  {publicationLabel(blog)}
+                </span>
+              </div>
             </div>
 
             <div className="space-y-1">

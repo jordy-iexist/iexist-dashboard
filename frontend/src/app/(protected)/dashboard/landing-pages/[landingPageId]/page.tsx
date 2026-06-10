@@ -101,7 +101,14 @@ export default async function LandingPageDetailPage({ params }: LandingPageDetai
         <p className="text-sm text-muted-foreground">
           {formatCreatedAt(landingPage.created_at)} · status: {landingPage.status}
         </p>
-        <LandingPageDeleteButton landingPageId={landingPage.id} />
+        {landingPage.is_owner === false && (
+          <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+            Gedeeld met jou · alleen lezen
+          </span>
+        )}
+        {landingPage.is_owner !== false && (
+          <LandingPageDeleteButton landingPageId={landingPage.id} />
+        )}
       </div>
 
       <section className="grid gap-3 rounded-lg border bg-card p-5 text-sm md:grid-cols-2">
@@ -120,6 +127,8 @@ export default async function LandingPageDetailPage({ params }: LandingPageDetai
         initialMetaTitle={landingPage.meta_title}
         initialMetaDescription={landingPage.meta_description}
         initialSlug={landingPage.slug}
+        isOwner={landingPage.is_owner !== false}
+        initialIsPublic={landingPage.is_public === true}
       />
     </div>
   )

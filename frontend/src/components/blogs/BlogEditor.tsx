@@ -12,6 +12,8 @@ type BlogEditorProps = {
   blogId: string
   initialContent: string
   shareToken: string
+  isOwner?: boolean
+  initialIsPublic?: boolean
 }
 
 type SaveResponse =
@@ -26,11 +28,19 @@ type SaveResponse =
       error: string
     }
 
-export function BlogEditor({ blogId, initialContent, shareToken }: BlogEditorProps) {
+export function BlogEditor({
+  blogId,
+  initialContent,
+  shareToken,
+  isOwner = true,
+  initialIsPublic = false,
+}: BlogEditorProps) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [content, setContent] = useState(initialContent)
   const [draft, setDraft] = useState(initialContent)
+  const [isPublic, setIsPublic] = useState(initialIsPublic)
+  const [isTogglingShare, setIsTogglingShare] = useState(false)
   const [feedback, setFeedback] = useState<{
     type: "success" | "error" | null
     message: string
@@ -73,6 +83,41 @@ export function BlogEditor({ blogId, initialContent, shareToken }: BlogEditorPro
       setTimeout(() => setJustCopiedShare(false), 1500)
     } catch {
       setFeedback({ type: "error", message: "Kopiëren naar klembord is mislukt." })
+    }
+  }
+
+  const toggleShareWithTeam = async () => {
+    const next = !isPublic
+    setIsTogglingShare(true)
+    setFeedback({ type: null, message: "" })
+    try {
+      const response = await fetch(`/api/blogs/${blogId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_public: next }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(payload?.error || "Delen aanpassen is mislukt.")
+      }
+      setIsPublic(next)
+      setFeedback({
+        type: "success",
+        message: next
+          ? "Blog is nu gedeeld met het team."
+          : "Blog is niet meer gedeeld met het team.",
+      })
+      router.refresh()
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Delen aanpassen is mislukt.",
+      })
+    } finally {
+      setIsTogglingShare(false)
     }
   }
 
@@ -163,25 +208,38 @@ export function BlogEditor({ blogId, initialContent, shareToken }: BlogEditorPro
             {justCopiedShare ? <Check /> : <Link2 />}
           </Button>
 
-          {!isEditing ? (
-            <Button onClick={startEditing}>Bewerk blog</Button>
-          ) : (
-            <>
-              <Button
-                variant="outline"
-                onClick={cancelEditing}
-                disabled={isPending}
-              >
-                Annuleren
-              </Button>
-              <Button
-                onClick={saveChanges}
-                disabled={isPending || !hasChanges || draft.trim().length === 0}
-              >
-                {isPending ? "Opslaan..." : "Opslaan"}
-              </Button>
-            </>
+          {isOwner && (
+            <label className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={isPublic}
+                onChange={toggleShareWithTeam}
+                disabled={isTogglingShare}
+              />
+              Gedeeld met team
+            </label>
           )}
+
+          {isOwner &&
+            (!isEditing ? (
+              <Button onClick={startEditing}>Bewerk blog</Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={cancelEditing}
+                  disabled={isPending}
+                >
+                  Annuleren
+                </Button>
+                <Button
+                  onClick={saveChanges}
+                  disabled={isPending || !hasChanges || draft.trim().length === 0}
+                >
+                  {isPending ? "Opslaan..." : "Opslaan"}
+                </Button>
+              </>
+            ))}
         </div>
       </div>
 

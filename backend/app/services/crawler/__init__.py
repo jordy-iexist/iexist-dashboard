@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
+from app.core.url_guard import is_safe_external_url
 from app.features.seo_tracker.services import extract_hostname, to_root_domain
 
 USER_AGENT = "WebCrawler/1.0"
@@ -90,6 +91,8 @@ def _dedupe_urls(urls: list[str]) -> list[str]:
 
 
 def _fetch_url(url: str, timeout_seconds: float) -> httpx.Response | None:
+    if not is_safe_external_url(url):
+        return None
     try:
         response = httpx.get(
             url,

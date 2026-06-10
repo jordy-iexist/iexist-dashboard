@@ -24,18 +24,36 @@ type LandingPagesPageProps = {
   searchParams?: Promise<Record<string, SearchParamsValue>>
 }
 
+type LandingPageScope = "all" | "mine" | "shared"
+
 function parsePageParam(value: SearchParamsValue): number {
   const raw = Array.isArray(value) ? value[0] : value
   const parsed = Number.parseInt(raw ?? "1", 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 }
 
-function buildPageHref(page: number) {
-  if (page <= 1) {
-    return "/dashboard/landing-pages"
-  }
-  return `/dashboard/landing-pages?page=${page}`
+function parseScopeParam(value: SearchParamsValue): LandingPageScope {
+  const raw = Array.isArray(value) ? value[0] : value
+  return raw === "mine" || raw === "shared" ? raw : "all"
 }
+
+function buildPageHref(page: number, scope: LandingPageScope) {
+  const params = new URLSearchParams()
+  if (page > 1) {
+    params.set("page", String(page))
+  }
+  if (scope !== "all") {
+    params.set("scope", scope)
+  }
+  const query = params.toString()
+  return query ? `/dashboard/landing-pages?${query}` : "/dashboard/landing-pages"
+}
+
+const SCOPE_OPTIONS: { value: LandingPageScope; label: string }[] = [
+  { value: "all", label: "Alle" },
+  { value: "mine", label: "Van mij" },
+  { value: "shared", label: "Gedeeld met mij" },
+]
 
 function PaginationLink({
   href,
@@ -69,6 +87,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
 
   const params = searchParams ? await searchParams : {}
   const page = parsePageParam(params.page)
+  const scope = parseScopeParam(params.scope)
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
@@ -82,6 +101,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
     const url = new URL(`${getBackendApiUrl()}/api/landing-pages`)
     url.searchParams.set("page", String(page))
     url.searchParams.set("page_size", String(PAGE_SIZE))
+    url.searchParams.set("scope", scope)
 
     const response = await fetch(url, {
       method: "GET",
@@ -127,6 +147,22 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
         </Link>
       </div>
 
+      <div className="flex items-center gap-2">
+        {SCOPE_OPTIONS.map((option) => (
+          <Link
+            key={option.value}
+            href={buildPageHref(1, option.value)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+              scope === option.value
+                ? "border-foreground bg-foreground text-background"
+                : "hover:bg-muted"
+            }`}
+          >
+            {option.label}
+          </Link>
+        ))}
+      </div>
+
       {errorMessage && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {errorMessage}
@@ -150,12 +186,12 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
             </p>
             <div className="flex items-center gap-2">
               <PaginationLink
-                href={buildPageHref(page - 1)}
+                href={buildPageHref(page - 1, scope)}
                 label="Vorige"
                 disabled={!hasPreviousPage}
               />
               <PaginationLink
-                href={buildPageHref(page + 1)}
+                href={buildPageHref(page + 1, scope)}
                 label="Volgende"
                 disabled={!hasNextPage}
               />

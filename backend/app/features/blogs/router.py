@@ -6,7 +6,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
@@ -17,6 +17,7 @@ from app.features.blogs.dependencies import (
     dedupe_ids,
     ensure_active_sites,
     ensure_blog_exists,
+    ensure_blog_readable,
     ensure_blogs_exist,
     fetch_publication_items,
 )
@@ -115,10 +116,17 @@ def _extract_blog_context(record: dict[str, Any]) -> tuple[dict[str, Any], str, 
     )
 
 
-def _get_blog_record(blog_id: str, user_id: str, db: Session) -> dict[str, Any] | None:
-    blog: Blog | None = (
-        db.query(Blog).filter(Blog.id == blog_id, Blog.created_by == user_id).first()  # type: ignore[assignment]
-    )
+def _get_blog_record(
+    blog_id: str, user_id: str, db: Session, include_shared: bool = False
+) -> dict[str, Any] | None:
+    query = db.query(Blog).filter(Blog.id == blog_id)
+    if include_shared:
+        query = query.filter(
+            or_(Blog.created_by == user_id, Blog.is_public.is_(True))
+        )
+    else:
+        query = query.filter(Blog.created_by == user_id)
+    blog: Blog | None = query.first()  # type: ignore[assignment]
     if not blog:
         return None
     job: Job | None = (
@@ -143,6 +151,7 @@ def _get_blog_record(blog_id: str, user_id: str, db: Session) -> dict[str, Any] 
         "created_at": blog.created_at,
         "published_at": blog.published_at,
         "created_by": blog.created_by,
+        "is_public": bool(blog.is_public),
         "jobs": {
             "status": job.status if job else None,
             "csv_rows": {
@@ -165,14 +174,21 @@ def _get_blog_record(blog_id: str, user_id: str, db: Session) -> dict[str, Any] 
 async def list_blogs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=12, ge=1, le=100),
+    scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
     start = (page - 1) * page_size
-    total: int = db.query(Blog).filter(Blog.created_by == user_id).count()
+    if scope == "mine":
+        visibility = Blog.created_by == user_id
+    elif scope == "shared":
+        visibility = (Blog.is_public.is_(True)) & (Blog.created_by != user_id)
+    else:
+        visibility = or_(Blog.created_by == user_id, Blog.is_public.is_(True))
+    total: int = db.query(Blog).filter(visibility).count()
     blog_rows: list[Blog] = (
         db.query(Blog)
-        .filter(Blog.created_by == user_id)
+        .filter(visibility)
         .order_by(Blog.created_at.desc())
         .offset(start)
         .limit(page_size)
@@ -263,6 +279,8 @@ async def list_blogs(
                 published_at=cast(Any, blog.published_at),
                 publication=publication,
                 share_token=str(blog.share_token),
+                is_public=bool(blog.is_public),
+                is_owner=str(blog.created_by or "") == user_id,
             )
         )
 
@@ -399,7 +417,7 @@ async def get_blog(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    blog = _get_blog_record(blog_id, user_id, db)
+    blog = _get_blog_record(blog_id, user_id, db, include_shared=True)
     if not blog:
         raise HTTPException(status_code=404, detail="Blog niet gevonden.")
     row_data, filename, status = _extract_blog_context(blog)
@@ -412,6 +430,8 @@ async def get_blog(
         created_at=blog["created_at"],
         published_at=blog.get("published_at"),
         share_token=str(blog["share_token"]),
+        is_public=bool(blog.get("is_public")),
+        is_owner=str(blog.get("created_by") or "") == user_id,
     )
 
 
@@ -422,17 +442,22 @@ async def update_blog(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    content = str(payload.content or "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="Blog inhoud mag niet leeg zijn.")
+    updates: dict[str, Any] = {}
+    if payload.content is not None:
+        content = str(payload.content or "").strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="Blog inhoud mag niet leeg zijn.")
+        updates["content"] = content
+    if payload.is_public is not None:
+        updates["is_public"] = bool(payload.is_public)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Minimaal één veld moet worden meegegeven.")
 
     existing = _get_blog_record(blog_id, user_id, db)
     if not existing:
         raise HTTPException(status_code=404, detail="Blog niet gevonden.")
 
-    db.query(Blog).filter(Blog.id == blog_id, Blog.created_by == user_id).update(
-        {"content": content}
-    )
+    db.query(Blog).filter(Blog.id == blog_id, Blog.created_by == user_id).update(updates)
     db.commit()
 
     refreshed = _get_blog_record(blog_id, user_id, db)
@@ -448,6 +473,8 @@ async def update_blog(
         created_at=refreshed["created_at"],
         published_at=refreshed.get("published_at"),
         share_token=str(refreshed["share_token"]),
+        is_public=bool(refreshed.get("is_public")),
+        is_owner=True,
     )
 
 
@@ -1030,10 +1057,10 @@ async def get_upload_blogs(
 @router.get("/api/blogs/{blog_id}/images", response_model=BlogImagesResponse)
 async def get_blog_images(
     blog_id: str,
-    _user_id: str = Depends(require_user_id),
+    user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    ensure_blog_exists(blog_id)
+    ensure_blog_readable(blog_id, user_id)
     images: list[BlogImage] = (
         db.query(BlogImage)
         .filter(BlogImage.blog_id == blog_id)
@@ -1051,10 +1078,10 @@ async def get_blog_images(
 )
 async def get_blog_image_generation_status(
     blog_id: str,
-    _user_id: str = Depends(require_user_id),
+    user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    ensure_blog_exists(blog_id)
+    ensure_blog_readable(blog_id, user_id)
 
     primary_image: BlogImage | None = (
         db.query(BlogImage)
@@ -1157,7 +1184,7 @@ async def upload_blog_image(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    ensure_blog_exists(blog_id)
+    ensure_blog_exists(blog_id, user_id)
 
     filename = str(file.filename or "").strip()
     content = await file.read()
@@ -1213,7 +1240,7 @@ async def queue_blog_image_generation(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    ensure_blog_exists(blog_id)
+    ensure_blog_exists(blog_id, user_id)
     try:
         require_personal_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
@@ -1553,7 +1580,7 @@ async def publish_blogs_batch(
             status_code=400, detail="Minimaal één WordPress site is verplicht."
         )
 
-    ensure_blogs_exist(blog_ids)
+    ensure_blogs_exist(blog_ids, user_id)
     ensure_active_sites(site_ids)
 
     existing_pubs = (

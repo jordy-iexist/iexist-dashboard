@@ -176,6 +176,7 @@ def publish_blog_to_wordpress_task(self, publication_id: str):
             exc.code if isinstance(exc, WordPressServiceError) else "publish_failed"
         )
         try:
+            db.rollback()
             pub_err = (
                 db.query(BlogPublication)
                 .filter(BlogPublication.id == publication_id)
@@ -184,13 +185,17 @@ def publish_blog_to_wordpress_task(self, publication_id: str):
             if pub_err:
                 pub_err.status = "failed"
                 pub_err.error_code = error_code
-                pub_err.error_message = str(exc)
+                pub_err.error_message = str(exc)[:2000]
                 pub_err.warning_code = None
                 pub_err.warning_message = None
                 pub_err.updated_at = utc_now_iso()
                 db.commit()
-        except Exception:
-            pass
+        except Exception as status_exc:
+            logger.error(
+                "Kon publicatiestatus niet bijwerken voor %s na fout: %s",
+                publication_id,
+                status_exc,
+            )
         raise
     finally:
         db.close()

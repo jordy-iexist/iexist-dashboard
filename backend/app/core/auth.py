@@ -52,18 +52,35 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+_TOKEN_DENYLIST_PREFIX = "auth:revoked:"
+
+
 def create_access_token(*, user_id: str, email: str) -> str:
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     payload = {
         "sub": user_id,
         "email": email,
+        "jti": str(uuid.uuid4()),
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
     return jwt.encode(
         payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
+
+
+def _is_token_revoked(payload: dict[str, Any]) -> bool:
+    jti = str(payload.get("jti") or "").strip()
+    if not jti:
+        return False
+    try:
+        from app.core.redis_client import get_redis
+
+        return bool(get_redis().exists(f"{_TOKEN_DENYLIST_PREFIX}{jti}"))
+    except Exception:
+        # Redis onbereikbaar: token niet blokkeren (fail-open voor beschikbaarheid).
+        return False
 
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
@@ -75,7 +92,37 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         )
     except JWTError:
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    if _is_token_revoked(payload):
+        return None
+    return payload
+
+
+def revoke_access_token(token: str) -> bool:
+    """Zet het token op de denylist tot het toch al zou verlopen."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    jti = str(payload.get("jti") or "").strip()
+    exp = int(payload.get("exp") or 0)
+    if not jti:
+        return False
+    ttl = max(exp - int(datetime.now(timezone.utc).timestamp()), 1)
+    try:
+        from app.core.redis_client import get_redis
+
+        get_redis().setex(f"{_TOKEN_DENYLIST_PREFIX}{jti}", ttl, "1")
+    except Exception:
+        return False
+    return True
 
 
 def get_user_by_email(email: str) -> dict[str, Any] | None:

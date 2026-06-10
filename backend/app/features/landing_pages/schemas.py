@@ -59,6 +59,8 @@ class LandingPageListItem(BaseModel):
     filename: str = ""
     status: str
     created_at: datetime
+    is_public: bool = False
+    is_owner: bool = True
 
 
 class LandingPageListResponse(BaseModel):
@@ -79,6 +81,8 @@ class LandingPageDetailResponse(BaseModel):
     onderwerp: str = ""  # from row_data for display
     filename: str = ""
     created_at: datetime
+    is_public: bool = False
+    is_owner: bool = True
 
 
 class LandingPageUpdateRequest(BaseModel):
@@ -86,6 +90,7 @@ class LandingPageUpdateRequest(BaseModel):
     meta_title: str | None = None
     meta_description: str | None = None
     slug: str | None = None
+    is_public: bool | None = None
 
 
 class LandingPageGenerationSettingsResponse(BaseModel):
