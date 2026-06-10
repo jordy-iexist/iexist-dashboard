@@ -1,0 +1,14 @@
+app.{$DOMAIN} {
+	encode gzip zstd
+	reverse_proxy frontend:3000
+}
+
+api.{$DOMAIN} {
+	encode gzip zstd
+
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy api:8000
+}
