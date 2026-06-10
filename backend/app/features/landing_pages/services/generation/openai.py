@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.services.openai import create_response
+from app.services.openai import create_response, model_supports_reasoning
 
 DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS = 20000
 DEFAULT_LANDING_PAGE_REASONING_EFFORT = "medium"
@@ -105,9 +105,10 @@ def _create_landing_page_response(
     reasoning_effort: str | None,
     max_output_tokens: int | None,
 ):
+    effective_model = model or settings.openai_blog_model
     return create_response(
         user_id=user_id,
-        model=model or settings.openai_blog_model,
+        model=effective_model,
         instructions=system_prompt or SYSTEM_PROMPT,
         input=prompt,
         max_output_tokens=(
@@ -115,7 +116,11 @@ def _create_landing_page_response(
             if max_output_tokens is not None
             else DEFAULT_LANDING_PAGE_MAX_OUTPUT_TOKENS
         ),
-        reasoning={"effort": reasoning_effort or DEFAULT_LANDING_PAGE_REASONING_EFFORT},
+        reasoning=(
+            {"effort": reasoning_effort or DEFAULT_LANDING_PAGE_REASONING_EFFORT}
+            if model_supports_reasoning(effective_model)
+            else None
+        ),
     )
 
 

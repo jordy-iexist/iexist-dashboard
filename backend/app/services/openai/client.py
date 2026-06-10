@@ -1,7 +1,15 @@
+import re
+
 import httpx
 from openai import OpenAI
 
 from app.features.settings.services import require_personal_openai_api_key_for_user
+
+
+def model_supports_reasoning(model: str) -> bool:
+    """Reasoning-effort wordt alleen ondersteund door gpt-5* en o-serie modellen."""
+    normalized = (model or "").strip().lower()
+    return normalized.startswith("gpt-5") or bool(re.match(r"^o\d", normalized))
 
 
 def _build_openai_client(user_id: str) -> OpenAI:

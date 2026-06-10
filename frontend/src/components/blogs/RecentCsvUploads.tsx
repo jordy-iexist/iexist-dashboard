@@ -19,6 +19,7 @@ interface RecentUploadItem {
   processed: number
   is_done: boolean
   final_status: FinalStatus
+  error_messages?: string[]
 }
 
 function formatDate(value: string) {
@@ -135,34 +136,52 @@ export function RecentCsvUploads() {
           {uploads.map((upload) => (
             <div
               key={upload.upload_id}
-              className="rounded-lg border bg-card p-4 flex items-center justify-between gap-4"
+              className="rounded-lg border bg-card p-4 flex flex-col gap-2"
             >
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="truncate text-sm font-medium">{upload.filename}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {upload.template} · {formatDate(upload.created_at)}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                {upload.total_jobs > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    {upload.completed}/{upload.total_jobs} blogs
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="truncate text-sm font-medium">{upload.filename}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {upload.template} · {formatDate(upload.created_at)}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  {upload.total_jobs > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {upload.completed}/{upload.total_jobs} blogs
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-1 text-[11px] font-medium ${statusBadgeClasses(upload.final_status)}`}
+                  >
+                    {statusLabel(upload.final_status)}
                   </span>
-                )}
-                <span
-                  className={`rounded-full px-2 py-1 text-[11px] font-medium ${statusBadgeClasses(upload.final_status)}`}
-                >
-                  {statusLabel(upload.final_status)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleDismiss(upload.upload_id)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  aria-label="Verbergen uit lijst"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDismiss(upload.upload_id)}
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Verbergen uit lijst"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
+              {upload.failed > 0 &&
+                (upload.error_messages?.length ?? 0) > 0 && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                    <p className="font-medium">
+                      {upload.failed}{" "}
+                      {upload.failed === 1 ? "blog mislukt" : "blogs mislukt"}:
+                    </p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      {upload.error_messages?.map((message) => (
+                        <li key={message} className="break-words">
+                          {message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
             </div>
           ))}
         </div>

@@ -325,7 +325,7 @@ async def get_blog_generation_settings(
         effective_max_output_tokens=(
             user_settings.max_output_tokens
             if user_settings and user_settings.max_output_tokens is not None
-            else 2000
+            else app_settings.openai_blog_max_output_tokens
         ),
     )
 
@@ -385,7 +385,7 @@ async def update_blog_generation_settings(
         effective_max_output_tokens=(
             user_settings.max_output_tokens
             if user_settings.max_output_tokens is not None
-            else 2000
+            else app_settings.openai_blog_max_output_tokens
         ),
     )
 
@@ -777,6 +777,25 @@ async def manual_upload(
     )
 
 
+def _collect_error_messages(
+    errors: list[str | None], *, limit: int = 3, max_len: int = 300
+) -> list[str]:
+    """Dedupliceer foutmeldingen van mislukte jobs voor weergave in de UI."""
+    seen: set[str] = set()
+    messages: list[str] = []
+    for error in errors:
+        text = str(error or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        if len(text) > max_len:
+            text = text[: max_len - 1].rstrip() + "…"
+        messages.append(text)
+        if len(messages) >= limit:
+            break
+    return messages
+
+
 @router.get("/api/csv/uploads", response_model=RecentUploadsResponse)
 async def list_recent_uploads(
     user_id: str = Depends(require_user_id),
@@ -797,7 +816,7 @@ async def list_recent_uploads(
     upload_ids = [u.id for u in uploads]
 
     job_rows = (
-        db.query(Job.status, CsvRow.upload_id)
+        db.query(Job.status, Job.error, CsvRow.upload_id)
         .join(CsvRow, Job.row_id == CsvRow.id)
         .filter(CsvRow.upload_id.in_(upload_ids))
         .filter(Job.job_type != "image_generation")
@@ -808,10 +827,13 @@ async def list_recent_uploads(
         uid: {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "canceled": 0}
         for uid in upload_ids
     }
-    for job_status, upload_id in job_rows:
+    errors_by_upload: dict[str, list[str | None]] = {uid: [] for uid in upload_ids}
+    for job_status, job_error, upload_id in job_rows:
         bucket = str(job_status or "").strip()
         if bucket in counts[upload_id]:
             counts[upload_id][bucket] += 1
+        if bucket == "failed":
+            errors_by_upload[upload_id].append(job_error)
 
     items: list[RecentUploadItem] = []
     for upload in uploads:
@@ -841,6 +863,7 @@ async def list_recent_uploads(
                 processed=processed,
                 is_done=is_done,
                 final_status=final_status,
+                error_messages=_collect_error_messages(errors_by_upload[upload.id]),
             )
         )
 
@@ -952,6 +975,9 @@ async def get_upload_status(
         images_target=images_target,
         is_done=is_done,
         final_status=final_status,
+        error_messages=_collect_error_messages(
+            [job.error for job in blog_jobs if job.status == "failed"]
+        ),
     )
 
 

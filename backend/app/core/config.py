@@ -152,12 +152,17 @@ class Settings(BaseSettings):
         validation_alias="SEO_META_OPENAI_MODEL",
     )
     openai_blog_model: str = Field(
-        default="gpt-5.4",
+        default="gpt-5.4-mini",
         validation_alias="OPENAI_BLOG_MODEL",
     )
     openai_blog_reasoning_effort: str = Field(
-        default="high",
+        default="medium",
         validation_alias="OPENAI_BLOG_REASONING_EFFORT",
+    )
+    openai_blog_max_output_tokens: int = Field(
+        default=4000,
+        ge=1,
+        validation_alias="OPENAI_BLOG_MAX_OUTPUT_TOKENS",
     )
     openai_seo_meta_reasoning_effort: str = Field(
         default="low",

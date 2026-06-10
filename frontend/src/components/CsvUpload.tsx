@@ -36,6 +36,7 @@ type UploadProgress = {
   imagesTarget: number
   isDone: boolean
   finalStatus: UploadFinalStatus
+  errorMessages: string[]
 }
 
 export type PromptFieldParseResult = {
@@ -128,6 +129,17 @@ function readErrorMessage(payload: unknown): string | null {
   return null
 }
 
+function parseErrorMessages(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter(
+    (entry): entry is string =>
+      typeof entry === "string" && entry.trim().length > 0
+  )
+}
+
 function buildProgressFromStatusPayload(
   uploadId: string,
   payload: unknown
@@ -185,6 +197,7 @@ function buildProgressFromStatusPayload(
     imagesTarget,
     isDone,
     finalStatus,
+    errorMessages: parseErrorMessages(record.error_messages),
   }
 }
 
@@ -245,6 +258,8 @@ function parseStoredUploadProgress(payload: unknown): UploadProgress | null {
     imagesTarget: imagesTarget === null ? jobsCreated : imagesTarget,
     finalStatus,
     isDone,
+    // Optioneel voor backwards compat met eerder opgeslagen voortgang.
+    errorMessages: parseErrorMessages(record.errorMessages),
   }
 }
 
@@ -519,6 +534,7 @@ export function CsvUpload() {
           imagesTarget: imagesTarget ?? jobsCreated,
           isDone: jobsCreated === 0,
           finalStatus: jobsCreated === 0 ? "completed" : "processing",
+          errorMessages: [],
         })
       } else {
         setUploadProgress(null)
@@ -927,6 +943,22 @@ export function CsvUpload() {
             </p>
             {uploadProgress.failed > 0 && <p>Mislukt: {uploadProgress.failed}</p>}
           </div>
+
+          {uploadProgress.failed > 0 &&
+            uploadProgress.errorMessages.length > 0 && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                <p className="font-medium">
+                  Foutmeldingen bij mislukte blogs:
+                </p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  {uploadProgress.errorMessages.map((message) => (
+                    <li key={message} className="break-words">
+                      {message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
           {progressError && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">

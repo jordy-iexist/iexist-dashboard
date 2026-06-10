@@ -5,6 +5,7 @@ from app.services.openai import (
     create_image,
     create_response,
     download_binary,
+    model_supports_reasoning,
 )
 
 SYSTEM_PROMPT = (
@@ -52,13 +53,21 @@ def generate_blog(
     reasoning_effort: str | None = None,
     max_output_tokens: int | None = None,
 ) -> str:
+    effective_model = model or settings.openai_blog_model
+    reasoning = (
+        {"effort": reasoning_effort or settings.openai_blog_reasoning_effort}
+        if model_supports_reasoning(effective_model)
+        else None
+    )
     response = create_response(
         user_id=user_id,
-        model=model or settings.openai_blog_model,
+        model=effective_model,
         instructions=system_prompt or SYSTEM_PROMPT,
         input=prompt,
-        max_output_tokens=max_output_tokens if max_output_tokens is not None else 2000,
-        reasoning={"effort": reasoning_effort or settings.openai_blog_reasoning_effort},
+        max_output_tokens=max_output_tokens
+        if max_output_tokens is not None
+        else settings.openai_blog_max_output_tokens,
+        reasoning=reasoning,
     )
     return str(getattr(response, "output_text", "") or "").strip()
 

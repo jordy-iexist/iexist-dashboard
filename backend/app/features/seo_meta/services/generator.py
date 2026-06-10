@@ -2,7 +2,11 @@ import json
 import re
 
 from app.core.config import settings
-from app.services.openai import create_response, response_output_text
+from app.services.openai import (
+    create_response,
+    model_supports_reasoning,
+    response_output_text,
+)
 from app.features.seo_meta.services.types import MetaSuggestion
 
 SYSTEM_PROMPT = (
@@ -121,7 +125,11 @@ def generate_meta_suggestion(
         instructions=SYSTEM_PROMPT,
         input=prompt,
         max_output_tokens=350,
-        reasoning={"effort": settings.openai_seo_meta_reasoning_effort},
+        reasoning=(
+            {"effort": settings.openai_seo_meta_reasoning_effort}
+            if model_supports_reasoning(model)
+            else None
+        ),
     )
     parsed = _parse_json_response(response_output_text(response))
 

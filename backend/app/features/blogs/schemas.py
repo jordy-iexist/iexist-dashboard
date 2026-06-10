@@ -36,6 +36,7 @@ class UploadStatus(BaseModel):
     images_target: int = 0
     is_done: bool
     final_status: Literal["processing", "completed", "completed_with_errors", "canceled"]
+    error_messages: list[str] = Field(default_factory=list)
 
 
 class RecentUploadItem(BaseModel):
@@ -50,6 +51,7 @@ class RecentUploadItem(BaseModel):
     processed: int
     is_done: bool
     final_status: Literal["processing", "completed", "completed_with_errors", "canceled"]
+    error_messages: list[str] = Field(default_factory=list)
 
 
 class RecentUploadsResponse(BaseModel):
