@@ -1,39 +1,37 @@
+import Image from 'next/image'
 import Link from 'next/link'
-import Header from '@/components/layout/Header'
-import Footer from '@/components/layout/Footer'
 import { Button } from '@/components/ui/button'
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
+    <main className="flex min-h-screen items-center justify-center bg-background px-6 py-16">
+      <div className="flex w-full max-w-2xl flex-col items-center">
+        <Image
+          src="/logo.svg"
+          alt="iExist"
+          width={1776}
+          height={422}
+          priority
+          className="h-auto w-full max-w-md"
+        />
 
-      <main className="flex flex-1 flex-col items-center justify-center px-6 py-24">
-        <div className="mx-auto max-w-2xl text-center">
-          <h1 className="text-5xl font-black tracking-tight text-foreground">
-            CSV Blog
-            <span className="text-[#FAB806]">Generator</span>
-          </h1>
-          <p className="mt-6 text-lg text-muted-foreground">
-            Upload een CSV-bestand en genereer automatisch blogposts met
-            AI. Publiceer direct naar WordPress vanuit één dashboard.
-          </p>
-          <div className="mt-10 flex items-center justify-center gap-4">
-            <Button
-              asChild
-              size="lg"
-              className="bg-[#FAB806] text-[#171d35] hover:bg-[#FAB806]/90 font-semibold"
-            >
-              <Link href="/signup">Gratis aan de slag</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link href="/login">Inloggen</Link>
-            </Button>
-          </div>
+        <div className="mt-12 flex w-full max-w-sm flex-col gap-3 sm:flex-row">
+          <Button
+            asChild
+            size="lg"
+            className="h-12 flex-1 bg-brand-blue text-white hover:bg-brand-blue-light focus-visible:ring-brand-blue/40"
+          >
+            <Link href="/login">Inloggen</Link>
+          </Button>
+          <Button
+            asChild
+            size="lg"
+            className="h-12 flex-1 bg-brand-yellow font-semibold text-brand-blue hover:bg-brand-yellow/85 focus-visible:ring-brand-yellow/50"
+          >
+            <Link href="/signup">Registreren</Link>
+          </Button>
         </div>
-      </main>
-
-      <Footer />
-    </div>
+      </div>
+    </main>
   )
 }
