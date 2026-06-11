@@ -12,11 +12,13 @@ export function CustomerFilterSelect({
   selected,
   scope,
   basePath,
+  extraParams,
 }: {
   customers: CustomerFilterOption[]
   selected: string | null
   scope: string
   basePath: string
+  extraParams?: Record<string, string>
 }) {
   const router = useRouter()
 
@@ -27,6 +29,11 @@ export function CustomerFilterSelect({
     }
     if (value) {
       params.set("customer_website_id", value)
+    }
+    for (const [key, paramValue] of Object.entries(extraParams ?? {})) {
+      if (paramValue) {
+        params.set(key, paramValue)
+      }
     }
     const query = params.toString()
     router.push(query ? `${basePath}?${query}` : basePath)

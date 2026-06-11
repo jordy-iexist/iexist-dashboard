@@ -99,6 +99,17 @@ class BlogsListResponse(BaseModel):
     page_size: int
 
 
+class BlogIdItem(BaseModel):
+    id: str
+    share_token: str
+    is_owner: bool
+
+
+class BlogsIdsResponse(BaseModel):
+    blogs: list[BlogIdItem]
+    total: int
+
+
 class BlogDetailResponse(BaseModel):
     id: str
     row_data: dict[str, Any] = Field(default_factory=dict)

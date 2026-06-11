@@ -18,6 +18,14 @@ Een blog of landingspagina hoort aan **maximaal één klant**, of is "zonder kla
 
 Geen match betekent: wél genereren, niet koppelen. Klanten worden nooit automatisch aangemaakt vanuit een upload.
 
+## Blogtitel
+
+De blogtitel is de primaire H1-kop van de bloginhoud.
+
+## Share-link
+
+De publieke leeslink van een blog of landingspagina. Werkt voor iedereen met de link. Dit is het artefact dat naar de linkbuilding-partij gaat: die plaatst de content op haar eigen websites, dus zij ontvangt share-links, geen gepubliceerde klant-URLs.
+
 ## Scope (mine / shared / all)
 
 Bestaande zichtbaarheidsindeling van blogs en landingspagina's per gebruiker ("Van mij" / "Gedeeld met mij" / "Alle"). Staat los van de klant-koppeling: het klantfilter werkt binnen elke scope.

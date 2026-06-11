@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Check, Link2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { type BlogsIdsResponse } from "@/lib/blog-types"
 import { PublishActionResponse, WordPressSite } from "@/lib/wordpress-types"
 
 type PublishSummary = {
@@ -28,7 +29,7 @@ export type BlogListItem = {
   id: string
   shareToken: string
   title: string
-  createdAt: string
+  createdDate: string
   filename: string
   words: string
   anchor1: string
@@ -102,9 +103,32 @@ function publicationBadgeClasses(blog: BlogListItem) {
   return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
 }
 
-export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
+export type BlogListFilters = {
+  scope: string
+  customerWebsiteId: string | null
+  createdFrom: string | null
+  createdTo: string | null
+}
+
+type SelectedBlogInfo = {
+  shareToken: string
+  isOwner: boolean
+}
+
+export function BlogsBatchPublishList({
+  blogs,
+  totalBlogs,
+  filters,
+}: {
+  blogs: BlogListItem[]
+  totalBlogs: number
+  filters: BlogListFilters
+}) {
   const router = useRouter()
-  const [selectedBlogIds, setSelectedBlogIds] = useState<string[]>([])
+  const [selectedBlogs, setSelectedBlogs] = useState<
+    Record<string, SelectedBlogInfo>
+  >({})
+  const [isSelectingAll, setIsSelectingAll] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
   const [wpStatus, setWpStatus] = useState<"draft" | "publish">("draft")
   const [sites, setSites] = useState<WordPressSite[]>([])
@@ -114,9 +138,13 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
     message: string
   }>({ type: null, message: "" })
   const [copiedShareBlogId, setCopiedShareBlogId] = useState<string | null>(null)
+  const [copiedSelection, setCopiedSelection] = useState(false)
   const [isPending, startTransition] = useTransition()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copySelectionResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
 
   // Stop polling wanneer er geen in-flight publicaties meer zijn
   const hasInFlightPublications = useMemo(
@@ -156,34 +184,103 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
         clearTimeout(copyResetTimeoutRef.current)
         copyResetTimeoutRef.current = null
       }
+      if (copySelectionResetTimeoutRef.current) {
+        clearTimeout(copySelectionResetTimeoutRef.current)
+        copySelectionResetTimeoutRef.current = null
+      }
     }
   }, [])
 
-  const ownedBlogs = useMemo(
-    () => blogs.filter((blog) => blog.isOwner),
-    [blogs]
+  const selectedCount = useMemo(
+    () => Object.keys(selectedBlogs).length,
+    [selectedBlogs]
   )
 
-  const allSelected = useMemo(
-    () => ownedBlogs.length > 0 && selectedBlogIds.length === ownedBlogs.length,
-    [ownedBlogs.length, selectedBlogIds.length]
+  const ownedSelectedIds = useMemo(
+    () =>
+      Object.entries(selectedBlogs)
+        .filter(([, info]) => info.isOwner)
+        .map(([id]) => id),
+    [selectedBlogs]
   )
 
-  const toggleBlogSelection = (blogId: string, checked: boolean) => {
-    setSelectedBlogIds((current) => {
+  const sharedSelectedCount = selectedCount - ownedSelectedIds.length
+
+  const allSelected = totalBlogs > 0 && selectedCount >= totalBlogs
+
+  const toggleBlogSelection = (blog: BlogListItem, checked: boolean) => {
+    setSelectedBlogs((current) => {
       if (checked) {
-        return current.includes(blogId) ? current : [...current, blogId]
+        return {
+          ...current,
+          [blog.id]: { shareToken: blog.shareToken, isOwner: blog.isOwner },
+        }
       }
-      return current.filter((value) => value !== blogId)
+      const next = { ...current }
+      delete next[blog.id]
+      return next
     })
   }
 
   const toggleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setSelectedBlogIds(ownedBlogs.map((blog) => blog.id))
+    if (!checked) {
+      setSelectedBlogs({})
       return
     }
-    setSelectedBlogIds([])
+
+    setFeedback({ type: null, message: "" })
+    setIsSelectingAll(true)
+    void (async () => {
+      try {
+        const params = new URLSearchParams()
+        if (filters.scope !== "all") {
+          params.set("scope", filters.scope)
+        }
+        if (filters.customerWebsiteId) {
+          params.set("customer_website_id", filters.customerWebsiteId)
+        }
+        if (filters.createdFrom) {
+          params.set("created_from", filters.createdFrom)
+        }
+        if (filters.createdTo) {
+          params.set("created_to", filters.createdTo)
+        }
+        const query = params.toString()
+        const response = await fetch(
+          query ? `/api/blogs/ids?${query}` : "/api/blogs/ids",
+          { method: "GET", cache: "no-store" }
+        )
+        const payload = (await response.json().catch(() => null)) as
+          | BlogsIdsResponse
+          | { error: string }
+          | null
+        if (!response.ok || !payload || !("blogs" in payload)) {
+          throw new Error(getErrorMessage(payload, "Kon selectie niet ophalen."))
+        }
+        const next: Record<string, SelectedBlogInfo> = {}
+        for (const item of payload.blogs) {
+          next[item.id] = {
+            shareToken: item.share_token,
+            isOwner: item.is_owner,
+          }
+        }
+        setSelectedBlogs(next)
+        if (payload.blogs.length < totalBlogs) {
+          setFeedback({
+            type: "error",
+            message: `Selectie beperkt tot ${payload.blogs.length} van ${totalBlogs} blogs.`,
+          })
+        }
+      } catch (error) {
+        setFeedback({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Kon selectie niet ophalen.",
+        })
+      } finally {
+        setIsSelectingAll(false)
+      }
+    })()
   }
 
   const toggleSiteSelection = (siteId: string, checked: boolean) => {
@@ -256,10 +353,34 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
     }
   }
 
+  const copySelectionLinks = async () => {
+    const links = Object.values(selectedBlogs).map(
+      (info) => `${window.location.origin}/share/${info.shareToken}`
+    )
+    if (links.length === 0) return
+    try {
+      await navigator.clipboard.writeText(links.join("\n"))
+      setFeedback({ type: null, message: "" })
+      setCopiedSelection(true)
+      if (copySelectionResetTimeoutRef.current) {
+        clearTimeout(copySelectionResetTimeoutRef.current)
+      }
+      copySelectionResetTimeoutRef.current = setTimeout(() => {
+        setCopiedSelection(false)
+        copySelectionResetTimeoutRef.current = null
+      }, 1500)
+    } catch {
+      setFeedback({
+        type: "error",
+        message: "Kopiëren naar klembord is mislukt.",
+      })
+    }
+  }
+
   const deleteBatch = () => {
-    if (selectedBlogIds.length === 0) return
+    if (ownedSelectedIds.length === 0) return
     const confirmed = window.confirm(
-      `Weet je zeker dat je ${selectedBlogIds.length} blog(s) wilt verwijderen? Dit kan niet ongedaan gemaakt worden.`
+      `Weet je zeker dat je ${ownedSelectedIds.length} blog(s) wilt verwijderen? Dit kan niet ongedaan gemaakt worden.`
     )
     if (!confirmed) return
 
@@ -269,7 +390,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
         const response = await fetch("/api/blogs/delete/batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ blog_ids: selectedBlogIds }),
+          body: JSON.stringify({ blog_ids: ownedSelectedIds }),
         })
         const payload = (await response.json().catch(() => null)) as
           | { deleted: number; missing: string[]; error?: string }
@@ -281,7 +402,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
           type: "success",
           message: `${payload?.deleted ?? 0} blog(s) verwijderd.`,
         })
-        setSelectedBlogIds([])
+        setSelectedBlogs({})
         setShowBatchPanel(false)
         router.refresh()
       } catch (error) {
@@ -304,7 +425,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            blog_ids: selectedBlogIds,
+            blog_ids: ownedSelectedIds,
             site_ids: selectedSiteIds,
             wp_status: wpStatus,
           }),
@@ -328,7 +449,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
           message: `${payload.queued} publicaties gestart${blockedText}.`,
         })
         setSelectedSiteIds([])
-        setSelectedBlogIds([])
+        setSelectedBlogs({})
         router.refresh()
       } catch (error) {
         setFeedback({
@@ -348,30 +469,70 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
             <input
               type="checkbox"
               checked={allSelected}
+              ref={(element) => {
+                if (element) {
+                  element.indeterminate = selectedCount > 0 && !allSelected
+                }
+              }}
               onChange={(event) => toggleSelectAll(event.target.checked)}
+              disabled={isSelectingAll}
             />
-            Selecteer alles op deze pagina
+            {isSelectingAll
+              ? "Selecteren..."
+              : `Selecteer alle ${totalBlogs} blogs`}
+            {selectedCount > 0 && (
+              <span className="text-muted-foreground">
+                ({selectedCount} geselecteerd)
+              </span>
+            )}
           </label>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
+              type="button"
+              variant="outline"
+              onClick={copySelectionLinks}
+              disabled={selectedCount === 0}
+              aria-label={
+                copiedSelection
+                  ? "Deel-links gekopieerd"
+                  : "Kopieer deel-links van selectie"
+              }
+              title={
+                copiedSelection
+                  ? "Deel-links gekopieerd"
+                  : "Kopieer deel-links van selectie"
+              }
+            >
+              {copiedSelection ? <Check /> : <Link2 />}
+              Kopieer links ({selectedCount})
+            </Button>
+            <Button
               variant="outline"
               onClick={openBatchPanel}
-              disabled={selectedBlogIds.length === 0 || isPending}
+              disabled={ownedSelectedIds.length === 0 || isPending}
             >
-              Publiceer selectie ({selectedBlogIds.length})
+              Publiceer selectie ({ownedSelectedIds.length})
             </Button>
-            {selectedBlogIds.length > 0 && (
+            {ownedSelectedIds.length > 0 && (
               <Button
                 variant="destructive"
                 onClick={deleteBatch}
                 disabled={isPending}
               >
-                {isPending ? "Verwijderen..." : `Verwijder selectie (${selectedBlogIds.length})`}
+                {isPending ? "Verwijderen..." : `Verwijder selectie (${ownedSelectedIds.length})`}
               </Button>
             )}
           </div>
         </div>
+
+        {sharedSelectedCount > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {sharedSelectedCount} geselecteerde blog
+            {sharedSelectedCount === 1 ? " is" : "s zijn"} gedeeld met jou; voor
+            gedeelde blogs is alleen kopiëren mogelijk.
+          </p>
+        )}
 
         {showBatchPanel && (
           <div className="space-y-3 rounded-md border bg-muted/20 p-3">
@@ -429,7 +590,7 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
                 onClick={publishBatch}
                 disabled={
                   isPending ||
-                  selectedBlogIds.length === 0 ||
+                  ownedSelectedIds.length === 0 ||
                   selectedSiteIds.length === 0
                 }
               >
@@ -456,26 +617,25 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
         {blogs.map((blog) => (
           <article key={blog.id} className="rounded-lg border bg-card p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
-              {blog.isOwner ? (
-                <label className="inline-flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={selectedBlogIds.includes(blog.id)}
-                    onChange={(event) =>
-                      toggleBlogSelection(blog.id, event.target.checked)
-                    }
-                  />
-                  Selecteer
-                </label>
-              ) : (
-                <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                  Gedeeld met jou
-                </span>
-              )}
+              <label className="inline-flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedBlogs[blog.id])}
+                  onChange={(event) =>
+                    toggleBlogSelection(blog, event.target.checked)
+                  }
+                />
+                Selecteer
+              </label>
               <div className="flex items-center gap-1">
                 {blog.customerName && (
                   <span className="rounded-full bg-violet-100 px-2 py-1 text-[11px] font-medium text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
                     {blog.customerName}
+                  </span>
+                )}
+                {!blog.isOwner && (
+                  <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    Gedeeld met jou
                   </span>
                 )}
                 {blog.isOwner && blog.isPublic && (
@@ -492,6 +652,9 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
             </div>
 
             <h2 className="line-clamp-2 text-base font-semibold">{blog.title}</h2>
+            <p className="text-sm text-muted-foreground">
+              Aangemaakt op {blog.createdDate}
+            </p>
 
             <div className="flex items-center gap-2 pt-1">
               <Button asChild size="sm" className="min-w-0 flex-1">

@@ -10,6 +10,7 @@ import {
   CustomerFilterSelect,
   type CustomerFilterOption,
 } from "@/components/klanten/CustomerFilterSelect"
+import { CreatedDateFilter } from "@/components/blogs/CreatedDateFilter"
 import { type CustomersResponse } from "@/lib/customer-types"
 import {
   getBackendApiUrl,
@@ -59,7 +60,32 @@ function parseCustomerParam(value: SearchParamsValue): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function buildPageHref(page: number, scope: BlogScope, customer: string | null) {
+type CreatedDateParams = {
+  createdOn: string | null
+  createdFrom: string | null
+  createdTo: string | null
+}
+
+function parseCreatedDateParams(
+  params: Record<string, SearchParamsValue>
+): CreatedDateParams {
+  const createdOn = parseCustomerParam(params.created_on)
+  if (!createdOn || !/^\d{4}-\d{2}-\d{2}$/.test(createdOn)) {
+    return { createdOn: null, createdFrom: null, createdTo: null }
+  }
+  return {
+    createdOn,
+    createdFrom: parseCustomerParam(params.created_from),
+    createdTo: parseCustomerParam(params.created_to),
+  }
+}
+
+function buildPageHref(
+  page: number,
+  scope: BlogScope,
+  customer: string | null,
+  createdDate: CreatedDateParams
+) {
   const params = new URLSearchParams()
   if (page > 1) {
     params.set("page", String(page))
@@ -70,6 +96,15 @@ function buildPageHref(page: number, scope: BlogScope, customer: string | null) 
   if (customer) {
     params.set("customer_website_id", customer)
   }
+  if (createdDate.createdOn) {
+    params.set("created_on", createdDate.createdOn)
+    if (createdDate.createdFrom) {
+      params.set("created_from", createdDate.createdFrom)
+    }
+    if (createdDate.createdTo) {
+      params.set("created_to", createdDate.createdTo)
+    }
+  }
   const query = params.toString()
   return query ? `/dashboard/blogs?${query}` : "/dashboard/blogs"
 }
@@ -79,6 +114,13 @@ const SCOPE_OPTIONS: { value: BlogScope; label: string }[] = [
   { value: "mine", label: "Van mij" },
   { value: "shared", label: "Gedeeld met mij" },
 ]
+
+const BLOG_CREATED_DATE_FORMATTER = new Intl.DateTimeFormat("nl-NL", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  timeZone: "Europe/Amsterdam",
+})
 
 function toText(value: unknown, fallback = "-") {
   if (typeof value !== "string") {
@@ -94,6 +136,18 @@ function buildPreview(content: string, maxLength = 220) {
     return normalized
   }
   return `${normalized.slice(0, maxLength).trimEnd()}...`
+}
+
+function extractBlogTitle(content: string) {
+  const heading = content.match(/^#\s+(.+?)\s*#*\s*$/m)
+  return toText(heading?.[1], "Titel ontbreekt")
+}
+
+function formatCreatedDate(createdAt: string) {
+  const date = new Date(createdAt)
+  return Number.isNaN(date.getTime())
+    ? "Datum onbekend"
+    : BLOG_CREATED_DATE_FORMATTER.format(date)
 }
 
 function normalizePublicationSummary(
@@ -130,8 +184,8 @@ function mapBlogListItem(blog: {
   return {
     id: blog.id,
     shareToken: blog.share_token,
-    title: toText(rowData.klant, "Onbekend onderwerp"),
-    createdAt: blog.created_at,
+    title: extractBlogTitle(blog.content),
+    createdDate: formatCreatedDate(blog.created_at),
     filename: toText(blog.filename, "Onbekend bestand"),
     words: toText(rowData.woorden),
     anchor1: toText(rowData.anker_1),
@@ -179,6 +233,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   const page = parsePageParam(params.page)
   const scope = parseScopeParam(params.scope)
   const customerFilter = parseCustomerParam(params.customer_website_id)
+  const createdDate = parseCreatedDateParams(params)
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
@@ -218,6 +273,12 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
     url.searchParams.set("scope", scope)
     if (customerFilter) {
       url.searchParams.set("customer_website_id", customerFilter)
+    }
+    if (createdDate.createdFrom) {
+      url.searchParams.set("created_from", createdDate.createdFrom)
+    }
+    if (createdDate.createdTo) {
+      url.searchParams.set("created_to", createdDate.createdTo)
     }
 
     const response = await fetch(url, {
@@ -264,7 +325,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
         {SCOPE_OPTIONS.map((option) => (
           <Link
             key={option.value}
-            href={buildPageHref(1, option.value, customerFilter)}
+            href={buildPageHref(1, option.value, customerFilter, createdDate)}
             className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
               scope === option.value
                 ? "border-foreground bg-foreground text-background"
@@ -274,12 +335,27 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             {option.label}
           </Link>
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <CreatedDateFilter
+            selectedDay={createdDate.createdOn}
+            scope={scope}
+            customerWebsiteId={customerFilter}
+            basePath="/dashboard/blogs"
+          />
           <CustomerFilterSelect
             customers={customers}
             selected={customerFilter}
             scope={scope}
             basePath="/dashboard/blogs"
+            extraParams={
+              createdDate.createdOn
+                ? {
+                    created_on: createdDate.createdOn,
+                    created_from: createdDate.createdFrom ?? "",
+                    created_to: createdDate.createdTo ?? "",
+                  }
+                : undefined
+            }
           />
         </div>
       </div>
@@ -307,19 +383,29 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             </p>
             <div className="flex items-center gap-2">
               <PaginationLink
-                href={buildPageHref(page - 1, scope, customerFilter)}
+                href={buildPageHref(page - 1, scope, customerFilter, createdDate)}
                 label="Vorige"
                 disabled={!hasPreviousPage}
               />
               <PaginationLink
-                href={buildPageHref(page + 1, scope, customerFilter)}
+                href={buildPageHref(page + 1, scope, customerFilter, createdDate)}
                 label="Volgende"
                 disabled={!hasNextPage}
               />
             </div>
           </div>
 
-          <BlogsBatchPublishList blogs={blogs} />
+          <BlogsBatchPublishList
+            key={`${scope}|${customerFilter ?? ""}|${createdDate.createdOn ?? ""}`}
+            blogs={blogs}
+            totalBlogs={totalBlogs}
+            filters={{
+              scope,
+              customerWebsiteId: customerFilter,
+              createdFrom: createdDate.createdFrom,
+              createdTo: createdDate.createdTo,
+            }}
+          />
         </div>
       )}
     </div>

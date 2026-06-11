@@ -1,6 +1,7 @@
 import json
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -34,12 +35,14 @@ from app.features.blogs.schemas import (
     DeleteBatchResponse,
     BlogGenerationSettingsResponse,
     BlogGenerationSettingsUpdateRequest,
+    BlogIdItem,
     BlogImageGenerationState,
     BlogImageGenerationStatusResponse,
     BlogImageItem,
     BlogImagesResponse,
     BlogItem,
     BlogPublicationSummary,
+    BlogsIdsResponse,
     BlogsListItem,
     BlogsListResponse,
     BlogsResponse,
@@ -192,16 +195,27 @@ def _get_blog_record(
     }
 
 
-@router.get("/api/blogs", response_model=BlogsListResponse)
-async def list_blogs(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=12, ge=1, le=100),
-    scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
-    customer_website_id: str | None = Query(default=None),
-    user_id: str = Depends(require_user_id),
-    db: Session = Depends(get_db),
+def _parse_iso_instant(value: str | None, param_name: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ongeldige datum/tijd voor '{param_name}'.",
+        )
+
+
+def _blogs_filtered_query(
+    db: Session,
+    user_id: str,
+    scope: str,
+    customer_website_id: str | None,
+    created_from: datetime | None,
+    created_to: datetime | None,
 ):
-    start = (page - 1) * page_size
     if scope == "mine":
         visibility = Blog.created_by == user_id
     elif scope == "shared":
@@ -210,11 +224,38 @@ async def list_blogs(
         visibility = or_(Blog.created_by == user_id, Blog.is_public.is_(True))
 
     customer_filter = str(customer_website_id or "").strip()
-    base_query = db.query(Blog).filter(visibility)
+    query = db.query(Blog).filter(visibility)
     if customer_filter == "none":
-        base_query = base_query.filter(Blog.customer_website_id.is_(None))
+        query = query.filter(Blog.customer_website_id.is_(None))
     elif customer_filter:
-        base_query = base_query.filter(Blog.customer_website_id == customer_filter)
+        query = query.filter(Blog.customer_website_id == customer_filter)
+    if created_from is not None:
+        query = query.filter(Blog.created_at >= created_from)
+    if created_to is not None:
+        query = query.filter(Blog.created_at < created_to)
+    return query
+
+
+@router.get("/api/blogs", response_model=BlogsListResponse)
+async def list_blogs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=12, ge=1, le=100),
+    scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
+    customer_website_id: str | None = Query(default=None),
+    created_from: str | None = Query(default=None),
+    created_to: str | None = Query(default=None),
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    start = (page - 1) * page_size
+    base_query = _blogs_filtered_query(
+        db,
+        user_id,
+        scope,
+        customer_website_id,
+        _parse_iso_instant(created_from, "created_from"),
+        _parse_iso_instant(created_to, "created_to"),
+    )
 
     total: int = base_query.count()
     blog_rows: list[Blog] = (
@@ -327,6 +368,41 @@ async def list_blogs(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/api/blogs/ids", response_model=BlogsIdsResponse)
+async def list_blog_ids(
+    scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
+    customer_website_id: str | None = Query(default=None),
+    created_from: str | None = Query(default=None),
+    created_to: str | None = Query(default=None),
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    base_query = _blogs_filtered_query(
+        db,
+        user_id,
+        scope,
+        customer_website_id,
+        _parse_iso_instant(created_from, "created_from"),
+        _parse_iso_instant(created_to, "created_to"),
+    )
+    rows = (
+        base_query
+        .with_entities(Blog.id, Blog.share_token, Blog.created_by)
+        .order_by(Blog.created_at.desc())
+        .limit(2000)
+        .all()
+    )
+    items = [
+        BlogIdItem(
+            id=str(blog_id),
+            share_token=str(share_token),
+            is_owner=str(created_by or "") == user_id,
+        )
+        for blog_id, share_token, created_by in rows
+    ]
+    return BlogsIdsResponse(blogs=items, total=len(items))
 
 
 @router.get("/api/blogs/settings", response_model=BlogGenerationSettingsResponse)

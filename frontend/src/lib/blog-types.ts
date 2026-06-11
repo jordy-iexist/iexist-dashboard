@@ -35,6 +35,17 @@ export type BlogsListResponse = {
   page_size: number
 }
 
+export type BlogIdItemPayload = {
+  id: string
+  share_token: string
+  is_owner: boolean
+}
+
+export type BlogsIdsResponse = {
+  blogs: BlogIdItemPayload[]
+  total: number
+}
+
 export type BlogDetailPayload = {
   id: string
   content: string
