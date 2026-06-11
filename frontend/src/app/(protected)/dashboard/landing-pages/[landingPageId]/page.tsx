@@ -119,6 +119,10 @@ export default async function LandingPageDetailPage({ params }: LandingPageDetai
           <span className="font-medium">Onderwerp:</span>{" "}
           {landingPage.onderwerp || "-"}
         </p>
+        <p>
+          <span className="font-medium">Klant:</span>{" "}
+          {landingPage.customer_name || "Geen klant gekoppeld"}
+        </p>
       </section>
 
       <LandingPageEditor
@@ -129,6 +133,7 @@ export default async function LandingPageDetailPage({ params }: LandingPageDetai
         initialSlug={landingPage.slug}
         isOwner={landingPage.is_owner !== false}
         initialIsPublic={landingPage.is_public === true}
+        initialCustomerWebsiteId={landingPage.customer_website_id ?? null}
       />
     </div>
   )

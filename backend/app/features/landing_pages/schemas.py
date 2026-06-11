@@ -61,6 +61,8 @@ class LandingPageListItem(BaseModel):
     created_at: datetime
     is_public: bool = False
     is_owner: bool = True
+    customer_website_id: str | None = None
+    customer_name: str | None = None
 
 
 class LandingPageListResponse(BaseModel):
@@ -83,6 +85,8 @@ class LandingPageDetailResponse(BaseModel):
     created_at: datetime
     is_public: bool = False
     is_owner: bool = True
+    customer_website_id: str | None = None
+    customer_name: str | None = None
 
 
 class LandingPageUpdateRequest(BaseModel):
@@ -91,6 +95,7 @@ class LandingPageUpdateRequest(BaseModel):
     meta_description: str | None = None
     slug: str | None = None
     is_public: bool | None = None
+    customer_website_id: str | None = None
 
 
 class LandingPageGenerationSettingsResponse(BaseModel):

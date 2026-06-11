@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -9,16 +9,19 @@ import {
   type LandingPageUploadResponse,
 } from "@/lib/landing-page-types"
 import { parsePromptFieldsFromTemplate } from "@/components/CsvUpload"
+import { type CustomersResponse } from "@/lib/customer-types"
 
 type ManualRow = {
   id: string
   fields: Record<string, string>
+  customerWebsiteId: string
 }
 
 function makeEmptyRow(fields: string[]): ManualRow {
   return {
     id: crypto.randomUUID(),
     fields: Object.fromEntries(fields.map((field) => [field, ""])),
+    customerWebsiteId: "",
   }
 }
 
@@ -35,6 +38,26 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<{ jobs_queued: number; skipped_rows: number } | null>(null)
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/customers?active_only=true", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload: CustomersResponse | null) => {
+        if (!cancelled && payload?.websites) {
+          setCustomers(
+            payload.websites.map(({ id, name }) => ({ id, name }))
+          )
+        }
+      })
+      .catch(() => {
+        // Klant-select is optioneel; zonder lijst blijft de kolom leeg.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const { fields, error: templateError } = useMemo(
     () => parsePromptFieldsFromTemplate(template),
@@ -50,6 +73,14 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
     setRows((prev) =>
       (prev.length === 0 ? syncedRows : prev).map((r) =>
         r.id === rowId ? { ...r, fields: { ...r.fields, [field]: value } } : r
+      )
+    )
+  }
+
+  const updateCustomer = (rowId: string, customerWebsiteId: string) => {
+    setRows((prev) =>
+      (prev.length === 0 ? syncedRows : prev).map((r) =>
+        r.id === rowId ? { ...r, customerWebsiteId } : r
       )
     )
   }
@@ -83,7 +114,12 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
     setError(null)
     setSuccess(null)
 
-    const apiRows = currentRows.map((r) => ({ ...r.fields }))
+    const apiRows = currentRows.map((r) => ({
+      ...r.fields,
+      ...(r.customerWebsiteId
+        ? { __customer_website_id: r.customerWebsiteId }
+        : {}),
+    }))
 
     try {
       const res = await fetch("/api/landing-pages/manual", {
@@ -155,6 +191,9 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
                     {field}
                   </th>
                 ))}
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
+                  Klant (optioneel)
+                </th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -174,6 +213,22 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
                       />
                     </td>
                   ))}
+                  <td className="px-2 py-1.5">
+                    <select
+                      value={row.customerWebsiteId}
+                      onChange={(e) => updateCustomer(row.id, e.target.value)}
+                      className="w-full min-w-[140px] rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none"
+                      disabled={submitting}
+                      aria-label="Klant"
+                    >
+                      <option value="">Geen klant</option>
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-2 py-1.5">
                     {currentRows.length > 1 && (
                       <button

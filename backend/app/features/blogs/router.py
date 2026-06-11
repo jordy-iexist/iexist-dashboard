@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
 from app.core.dependencies import require_user_id, utc_now_iso
-from app.db.models import Blog, BlogGenerationSettings, BlogImage, BlogPublication, CsvRow, CsvUpload, Job, WordPressSite
+from app.db.models import Blog, BlogGenerationSettings, BlogImage, BlogPublication, CsvRow, CsvUpload, CustomerWebsite, Job, WordPressSite
 from app.db.session import get_db
 from app.features.blogs.dependencies import (
     dedupe_ids,
@@ -61,6 +61,12 @@ from app.features.blogs.schemas import (
     WordPressSiteUpdateRequest,
 )
 from app.features.blogs.services.crypto_service import decrypt_secret, encrypt_secret
+from app.features.customers.services import (
+    CUSTOMER_WEBSITE_META_FIELD,
+    build_customer_name_index,
+    match_customer_id_by_name,
+    resolve_customer_website_id,
+)
 from app.features.blogs.services.generation.openai import SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT
 from app.features.blogs.services.generation import (
     IMAGE_GENERATION_META_FIELD,
@@ -116,6 +122,18 @@ def _extract_blog_context(record: dict[str, Any]) -> tuple[dict[str, Any], str, 
     )
 
 
+def _customer_names(db: Session, customer_ids: list[str | None]) -> dict[str, str]:
+    ids = [str(cid) for cid in customer_ids if cid]
+    if not ids:
+        return {}
+    rows = (
+        db.query(CustomerWebsite.id, CustomerWebsite.name)
+        .filter(CustomerWebsite.id.in_(ids))
+        .all()
+    )
+    return {str(cid): str(name) for cid, name in rows}
+
+
 def _get_blog_record(
     blog_id: str, user_id: str, db: Session, include_shared: bool = False
 ) -> dict[str, Any] | None:
@@ -152,6 +170,10 @@ def _get_blog_record(
         "published_at": blog.published_at,
         "created_by": blog.created_by,
         "is_public": bool(blog.is_public),
+        "customer_website_id": blog.customer_website_id,
+        "customer_name": _customer_names(db, [blog.customer_website_id]).get(
+            str(blog.customer_website_id or "")
+        ),
         "jobs": {
             "status": job.status if job else None,
             "csv_rows": {
@@ -175,6 +197,7 @@ async def list_blogs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=12, ge=1, le=100),
     scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
+    customer_website_id: str | None = Query(default=None),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
@@ -185,16 +208,26 @@ async def list_blogs(
         visibility = (Blog.is_public.is_(True)) & (Blog.created_by != user_id)
     else:
         visibility = or_(Blog.created_by == user_id, Blog.is_public.is_(True))
-    total: int = db.query(Blog).filter(visibility).count()
+
+    customer_filter = str(customer_website_id or "").strip()
+    base_query = db.query(Blog).filter(visibility)
+    if customer_filter == "none":
+        base_query = base_query.filter(Blog.customer_website_id.is_(None))
+    elif customer_filter:
+        base_query = base_query.filter(Blog.customer_website_id == customer_filter)
+
+    total: int = base_query.count()
     blog_rows: list[Blog] = (
-        db.query(Blog)
-        .filter(visibility)
+        base_query
         .order_by(Blog.created_at.desc())
         .offset(start)
         .limit(page_size)
         .all()  # type: ignore[assignment]
     )
     blog_ids = [str(blog.id) for blog in blog_rows]
+    customer_name_map = _customer_names(
+        db, [blog.customer_website_id for blog in blog_rows]
+    )
 
     publication_counts = (
         db.query(
@@ -281,6 +314,10 @@ async def list_blogs(
                 share_token=str(blog.share_token),
                 is_public=bool(blog.is_public),
                 is_owner=str(blog.created_by or "") == user_id,
+                customer_website_id=blog.customer_website_id,
+                customer_name=customer_name_map.get(
+                    str(blog.customer_website_id or "")
+                ),
             )
         )
 
@@ -432,6 +469,8 @@ async def get_blog(
         share_token=str(blog["share_token"]),
         is_public=bool(blog.get("is_public")),
         is_owner=str(blog.get("created_by") or "") == user_id,
+        customer_website_id=blog.get("customer_website_id"),
+        customer_name=blog.get("customer_name"),
     )
 
 
@@ -450,6 +489,15 @@ async def update_blog(
         updates["content"] = content
     if payload.is_public is not None:
         updates["is_public"] = bool(payload.is_public)
+    # null betekent hier expliciet ontkoppelen, dus afwezig vs. null onderscheiden.
+    if "customer_website_id" in payload.model_fields_set:
+        if payload.customer_website_id:
+            resolved = resolve_customer_website_id(db, payload.customer_website_id)
+            if not resolved:
+                raise HTTPException(status_code=400, detail="Klant niet gevonden.")
+            updates["customer_website_id"] = resolved
+        else:
+            updates["customer_website_id"] = None
     if not updates:
         raise HTTPException(status_code=400, detail="Minimaal één veld moet worden meegegeven.")
 
@@ -475,6 +523,8 @@ async def update_blog(
         share_token=str(refreshed["share_token"]),
         is_public=bool(refreshed.get("is_public")),
         is_owner=True,
+        customer_website_id=refreshed.get("customer_website_id"),
+        customer_name=refreshed.get("customer_name"),
     )
 
 
@@ -594,6 +644,7 @@ async def upload_csv(
             ),
         )
 
+    customer_name_index = build_customer_name_index(db)
     prompt_rows: list[dict[str, Any]] = []
     image_jobs_target = 0
     skipped_rows: list[str] = []
@@ -620,6 +671,12 @@ async def upload_csv(
         prompt_row[IMAGE_GENERATION_META_FIELD] = should_generate_image
         if should_generate_image:
             image_jobs_target += 1
+
+        matched_customer_id = match_customer_id_by_name(
+            customer_name_index, prompt_row.get("klant")
+        )
+        if matched_customer_id:
+            prompt_row[CUSTOMER_WEBSITE_META_FIELD] = matched_customer_id
 
         prompt_rows.append(prompt_row)
 
@@ -697,6 +754,7 @@ async def manual_upload(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    customer_name_index = build_customer_name_index(db)
     prompt_rows: list[dict[str, Any]] = []
     image_jobs_target = 0
     skipped_rows: list[str] = []
@@ -721,6 +779,12 @@ async def manual_upload(
         prompt_row[IMAGE_GENERATION_META_FIELD] = should_generate_image
         if should_generate_image:
             image_jobs_target += 1
+
+        customer_id = resolve_customer_website_id(
+            db, raw_row.get(CUSTOMER_WEBSITE_META_FIELD)
+        ) or match_customer_id_by_name(customer_name_index, prompt_row.get("klant"))
+        if customer_id:
+            prompt_row[CUSTOMER_WEBSITE_META_FIELD] = customer_id
 
         prompt_rows.append(prompt_row)
 

@@ -46,6 +46,8 @@ export type BlogDetailPayload = {
   share_token: string
   is_public?: boolean
   is_owner?: boolean
+  customer_website_id?: string | null
+  customer_name?: string | null
 }
 
 export type BlogSharePayload = {

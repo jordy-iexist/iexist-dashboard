@@ -140,6 +140,10 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
           <span className="font-medium">Onderwerp/Klant:</span>{" "}
           {rowData?.klant || "-"}
         </p>
+        <p>
+          <span className="font-medium">Klant:</span>{" "}
+          {blog.customer_name || "Geen klant gekoppeld"}
+        </p>
         <AnchorDisplay
           label="Anker 1"
           text={rowData?.anker_1}
@@ -158,6 +162,7 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
         shareToken={blog.share_token}
         isOwner={blog.is_owner !== false}
         initialIsPublic={blog.is_public === true}
+        initialCustomerWebsiteId={blog.customer_website_id ?? null}
       />
       {blog.is_owner !== false && (
         <>

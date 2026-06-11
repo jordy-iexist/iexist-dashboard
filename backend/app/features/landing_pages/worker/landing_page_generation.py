@@ -5,6 +5,10 @@ from celery.utils.log import get_task_logger
 
 from app.db.models import Job, LandingPage, LandingPageGenerationSettings, LandingPageRow, LandingPageUpload
 from app.db.session import SessionLocal
+from app.features.customers.services import (
+    CUSTOMER_WEBSITE_META_FIELD,
+    resolve_customer_website_id,
+)
 from app.features.landing_pages.services.generation.csv import (
     build_landing_page_prompt,
     normalize_landing_page_prompt_template,
@@ -165,6 +169,10 @@ def generate_landing_page_task(self, job_id: str):
             return
 
         landing_page_id = str(uuid.uuid4())
+        # Her-valideren: de klant kan verwijderd zijn tussen upload en afronding.
+        customer_website_id = resolve_customer_website_id(
+            db, row_data.get(CUSTOMER_WEBSITE_META_FIELD)
+        )
         new_landing_page = LandingPage(
             id=landing_page_id,
             job_id=job_id,
@@ -173,6 +181,7 @@ def generate_landing_page_task(self, job_id: str):
             meta_description=meta_description,
             slug=slug,
             created_by=created_by,
+            customer_website_id=customer_website_id,
         )
         db.add(new_landing_page)
         db.commit()

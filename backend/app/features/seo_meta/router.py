@@ -63,7 +63,6 @@ async def start_website_meta_run(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.website_id == website_id,
-            WebsiteMetaRun.requested_by == user_id,
             WebsiteMetaRun.status.in_(["pending", "processing"]),
         )
         .first()
@@ -124,7 +123,6 @@ async def get_meta_run(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.id == run_id,
-            WebsiteMetaRun.requested_by == user_id,
         )
         .first()
     )
@@ -146,7 +144,6 @@ async def list_meta_run_pages(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.id == run_id,
-            WebsiteMetaRun.requested_by == user_id,
         )
         .first()
     )
@@ -210,7 +207,6 @@ async def get_website_meta_latest(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.website_id == website_id,
-            WebsiteMetaRun.requested_by == user_id,
         )
         .order_by(WebsiteMetaRun.created_at.desc())
         .first()
@@ -247,7 +243,6 @@ async def update_meta_page(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.id == page.run_id,
-            WebsiteMetaRun.requested_by == user_id,
         )
         .first()
     )

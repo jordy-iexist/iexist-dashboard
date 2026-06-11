@@ -192,6 +192,11 @@ export function LandingPagesBatchList({
                   {item.onderwerp || "Onbekend onderwerp"}
                 </p>
                 <div className="flex shrink-0 items-center gap-1">
+                  {item.customer_name && (
+                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800">
+                      {item.customer_name}
+                    </span>
+                  )}
                   {item.is_owner === false && (
                     <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800">
                       Gedeeld met jou

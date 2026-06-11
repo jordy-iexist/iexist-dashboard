@@ -4,6 +4,10 @@ from celery.utils.log import get_task_logger
 
 from app.db.models import Blog, BlogGenerationSettings, CsvRow, CsvUpload, Job
 from app.db.session import SessionLocal
+from app.features.customers.services import (
+    CUSTOMER_WEBSITE_META_FIELD,
+    resolve_customer_website_id,
+)
 from app.features.blogs.services.generation import (
     build_blog_prompt,
     generate_blog,
@@ -103,8 +107,17 @@ def generate_blog_task(self, job_id: str):
 
         blog_id = str(uuid.uuid4())
 
+        # Her-valideren: de klant kan verwijderd zijn tussen upload en afronding.
+        customer_website_id = resolve_customer_website_id(
+            db, row_data.get(CUSTOMER_WEBSITE_META_FIELD)
+        )
+
         new_blog = Blog(
-            id=blog_id, job_id=job_id, content=content, created_by=created_by
+            id=blog_id,
+            job_id=job_id,
+            content=content,
+            created_by=created_by,
+            customer_website_id=customer_website_id,
         )
         db.add(new_blog)
         db.commit()

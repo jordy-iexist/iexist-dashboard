@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useRef, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import ReactMarkdown from "react-markdown"
 import { Copy, Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { BlogMarkdownEditor } from "@/components/blogs/BlogMarkdownEditor"
+import { type CustomersResponse } from "@/lib/customer-types"
 import { LandingPageMetaPanel } from "./LandingPageMetaPanel"
 
 type Props = {
@@ -17,6 +18,7 @@ type Props = {
   initialSlug: string | null
   isOwner?: boolean
   initialIsPublic?: boolean
+  initialCustomerWebsiteId?: string | null
 }
 
 type SaveResponse =
@@ -39,6 +41,7 @@ export function LandingPageEditor({
   initialSlug,
   isOwner = true,
   initialIsPublic = false,
+  initialCustomerWebsiteId = null,
 }: Props) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
@@ -46,6 +49,29 @@ export function LandingPageEditor({
   const [draft, setDraft] = useState(initialContent)
   const [isPublic, setIsPublic] = useState(initialIsPublic)
   const [isTogglingShare, setIsTogglingShare] = useState(false)
+  const [customerWebsiteId, setCustomerWebsiteId] = useState(
+    initialCustomerWebsiteId ?? ""
+  )
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([])
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false)
+
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    fetch("/api/customers?active_only=true", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload: CustomersResponse | null) => {
+        if (!cancelled && payload?.websites) {
+          setCustomers(payload.websites.map(({ id, name }) => ({ id, name })))
+        }
+      })
+      .catch(() => {
+        // Klant-select is optioneel; zonder lijst blijft de dropdown leeg.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner])
   const [feedback, setFeedback] = useState<{
     type: "success" | "error" | null
     message: string
@@ -112,6 +138,42 @@ export function LandingPageEditor({
       })
     } finally {
       setIsTogglingShare(false)
+    }
+  }
+
+  const changeCustomer = async (nextCustomerId: string) => {
+    const previous = customerWebsiteId
+    setCustomerWebsiteId(nextCustomerId)
+    setIsSavingCustomer(true)
+    setFeedback({ type: null, message: "" })
+    try {
+      const response = await fetch(`/api/landing-pages/${landingPageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_website_id: nextCustomerId || null }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(payload?.error || "Klant aanpassen is mislukt.")
+      }
+      setFeedback({
+        type: "success",
+        message: nextCustomerId
+          ? "Landingspagina is gekoppeld aan de klant."
+          : "Klantkoppeling is verwijderd.",
+      })
+      router.refresh()
+    } catch (error) {
+      setCustomerWebsiteId(previous)
+      setFeedback({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Klant aanpassen is mislukt.",
+      })
+    } finally {
+      setIsSavingCustomer(false)
     }
   }
 
@@ -201,6 +263,23 @@ export function LandingPageEditor({
             >
               {justCopied ? <Check /> : <Copy />}
             </Button>
+
+            {isOwner && (
+              <select
+                value={customerWebsiteId}
+                onChange={(event) => changeCustomer(event.target.value)}
+                disabled={isSavingCustomer}
+                aria-label="Klant"
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none"
+              >
+                <option value="">Geen klant</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </select>
+            )}
 
             {isOwner && (
               <label className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">

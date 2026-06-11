@@ -93,7 +93,6 @@ async def list_customer_websites(
 ):
     websites = (
         db.query(CustomerWebsite)
-        .filter(CustomerWebsite.created_by == user_id)
         .order_by(CustomerWebsite.created_at.desc())
         .all()
     )
@@ -113,7 +112,6 @@ async def update_customer_website(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -138,7 +136,6 @@ async def update_customer_website(
             db.query(CustomerWebsite)
             .filter(
                 CustomerWebsite.domain == next_domain,
-                CustomerWebsite.created_by == user_id,
                 CustomerWebsite.id != website_id,
             )
             .first()
@@ -159,7 +156,6 @@ async def update_customer_website(
 
     db.query(CustomerWebsite).filter(
         CustomerWebsite.id == website_id,
-        CustomerWebsite.created_by == user_id,
     ).update(updates)  # type: ignore
     db.commit()
 
@@ -167,7 +163,6 @@ async def update_customer_website(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -186,7 +181,6 @@ async def delete_customer_website(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -197,7 +191,6 @@ async def delete_customer_website(
         db.query(SerpScan)
         .filter(
             SerpScan.website_id == website_id,
-            SerpScan.requested_by == user_id,
             SerpScan.status.in_(["pending", "processing"]),
         )
         .first()
@@ -212,7 +205,6 @@ async def delete_customer_website(
         db.query(WebsiteMetaRun)
         .filter(
             WebsiteMetaRun.website_id == website_id,
-            WebsiteMetaRun.requested_by == user_id,
             WebsiteMetaRun.status.in_(["pending", "processing"]),
         )
         .first()
@@ -225,7 +217,6 @@ async def delete_customer_website(
 
     db.query(CustomerWebsite).filter(
         CustomerWebsite.id == website_id,
-        CustomerWebsite.created_by == user_id,
     ).delete()
     db.commit()
     return {
@@ -247,7 +238,6 @@ async def create_website_keyword(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -263,7 +253,6 @@ async def create_website_keyword(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.website_id == website_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .all()
     )
@@ -304,7 +293,6 @@ async def list_website_keywords(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -315,7 +303,6 @@ async def list_website_keywords(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.website_id == website_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .order_by(WebsiteKeyword.created_at.asc())
         .all()
@@ -336,7 +323,6 @@ async def update_website_keyword(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.id == keyword_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .first()
     )
@@ -355,7 +341,6 @@ async def update_website_keyword(
             db.query(WebsiteKeyword)
             .filter(
                 WebsiteKeyword.website_id == keyword_record.website_id,
-                WebsiteKeyword.created_by == user_id,
             )
             .all()
         )
@@ -378,7 +363,6 @@ async def update_website_keyword(
 
     db.query(WebsiteKeyword).filter(
         WebsiteKeyword.id == keyword_id,
-        WebsiteKeyword.created_by == user_id,
     ).update(updates)  # type: ignore
     db.commit()
 
@@ -386,7 +370,6 @@ async def update_website_keyword(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.id == keyword_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .first()
     )
@@ -405,7 +388,6 @@ async def delete_website_keyword(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.id == keyword_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .first()
     )
@@ -420,7 +402,6 @@ async def delete_website_keyword(
         db.query(SerpScan)
         .filter(
             SerpScan.website_id == website_id,
-            SerpScan.requested_by == user_id,
             SerpScan.status.in_(["pending", "processing"]),
         )
         .first()
@@ -433,7 +414,6 @@ async def delete_website_keyword(
 
     db.query(WebsiteKeyword).filter(
         WebsiteKeyword.id == keyword_id,
-        WebsiteKeyword.created_by == user_id,
     ).delete()
     db.commit()
     return {
@@ -460,7 +440,6 @@ async def start_website_scan(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -473,7 +452,6 @@ async def start_website_scan(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.website_id == website_id,
-            WebsiteKeyword.created_by == user_id,
             WebsiteKeyword.is_active == True,  # noqa: E712
         )
         .order_by(WebsiteKeyword.created_at.asc())
@@ -535,7 +513,6 @@ async def get_website_scan(
         db.query(SerpScan)
         .filter(
             SerpScan.id == scan_id,
-            SerpScan.requested_by == user_id,
         )
         .first()
     )
@@ -554,7 +531,6 @@ async def cancel_website_scan(
         db.query(SerpScan)
         .filter(
             SerpScan.id == scan_id,
-            SerpScan.requested_by == user_id,
         )
         .first()
     )
@@ -568,7 +544,6 @@ async def cancel_website_scan(
     canceled_error_message = build_scan_canceled_error_message()
     db.query(SerpScan).filter(
         SerpScan.id == scan_id,
-        SerpScan.requested_by == user_id,
     ).update(
         {
             "status": "canceled",
@@ -582,7 +557,6 @@ async def cancel_website_scan(
         db.query(SerpScan)
         .filter(
             SerpScan.id == scan_id,
-            SerpScan.requested_by == user_id,
         )
         .first()
     )
@@ -602,7 +576,6 @@ async def list_website_scans(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -613,7 +586,6 @@ async def list_website_scans(
         db.query(SerpScan)
         .filter(
             SerpScan.website_id == website_id,
-            SerpScan.requested_by == user_id,
         )
         .order_by(SerpScan.created_at.desc())
         .limit(limit)
@@ -634,7 +606,6 @@ async def get_website_rankings(
         db.query(CustomerWebsite)
         .filter(
             CustomerWebsite.id == website_id,
-            CustomerWebsite.created_by == user_id,
         )
         .first()
     )
@@ -645,7 +616,6 @@ async def get_website_rankings(
         db.query(WebsiteKeyword)
         .filter(
             WebsiteKeyword.website_id == website_id,
-            WebsiteKeyword.created_by == user_id,
         )
         .order_by(WebsiteKeyword.created_at.asc())
         .all()

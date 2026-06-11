@@ -7,6 +7,11 @@ import {
   type BlogListItem,
 } from "@/components/blogs/BlogsBatchPublishList"
 import {
+  CustomerFilterSelect,
+  type CustomerFilterOption,
+} from "@/components/klanten/CustomerFilterSelect"
+import { type CustomersResponse } from "@/lib/customer-types"
+import {
   getBackendApiUrl,
   getBackendAuthorizationValue,
   readBackendError,
@@ -48,13 +53,22 @@ function parseScopeParam(value: SearchParamsValue): BlogScope {
   return raw === "mine" || raw === "shared" ? raw : "all"
 }
 
-function buildPageHref(page: number, scope: BlogScope) {
+function parseCustomerParam(value: SearchParamsValue): string | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  const trimmed = raw?.trim() ?? ""
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function buildPageHref(page: number, scope: BlogScope, customer: string | null) {
   const params = new URLSearchParams()
   if (page > 1) {
     params.set("page", String(page))
   }
   if (scope !== "all") {
     params.set("scope", scope)
+  }
+  if (customer) {
+    params.set("customer_website_id", customer)
   }
   const query = params.toString()
   return query ? `/dashboard/blogs?${query}` : "/dashboard/blogs"
@@ -109,6 +123,8 @@ function mapBlogListItem(blog: {
   share_token: string
   is_public?: boolean
   is_owner?: boolean
+  customer_website_id?: string | null
+  customer_name?: string | null
 }): BlogListItem {
   const rowData = blog.row_data ?? {}
   return {
@@ -125,6 +141,7 @@ function mapBlogListItem(blog: {
     published_at: blog.published_at ?? null,
     isPublic: blog.is_public ?? false,
     isOwner: blog.is_owner ?? true,
+    customerName: blog.customer_name ?? null,
   }
 }
 
@@ -161,6 +178,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   const params = searchParams ? await searchParams : {}
   const page = parsePageParam(params.page)
   const scope = parseScopeParam(params.scope)
+  const customerFilter = parseCustomerParam(params.customer_website_id)
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
@@ -169,12 +187,38 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   let blogs: BlogListItem[] = []
   let totalBlogs = 0
   let errorMessage: string | null = null
+  let customers: CustomerFilterOption[] = []
+
+  try {
+    const customersResponse = await fetch(
+      `${getBackendApiUrl()}/api/customers?active_only=true`,
+      {
+        method: "GET",
+        headers: { Authorization: authorization },
+        cache: "no-store",
+      }
+    )
+    if (customersResponse.ok) {
+      const payload = (await customersResponse.json().catch(() => null)) as
+        | CustomersResponse
+        | null
+      customers = (payload?.websites ?? []).map((customer) => ({
+        id: customer.id,
+        name: customer.name,
+      }))
+    }
+  } catch {
+    // Klantfilter is niet kritiek voor de pagina; lijst blijft leeg.
+  }
 
   try {
     const url = new URL(`${getBackendApiUrl()}/api/blogs`)
     url.searchParams.set("page", String(page))
     url.searchParams.set("page_size", String(PAGE_SIZE))
     url.searchParams.set("scope", scope)
+    if (customerFilter) {
+      url.searchParams.set("customer_website_id", customerFilter)
+    }
 
     const response = await fetch(url, {
       method: "GET",
@@ -216,11 +260,11 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
         </p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {SCOPE_OPTIONS.map((option) => (
           <Link
             key={option.value}
-            href={buildPageHref(1, option.value)}
+            href={buildPageHref(1, option.value, customerFilter)}
             className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
               scope === option.value
                 ? "border-foreground bg-foreground text-background"
@@ -230,6 +274,14 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             {option.label}
           </Link>
         ))}
+        <div className="ml-auto">
+          <CustomerFilterSelect
+            customers={customers}
+            selected={customerFilter}
+            scope={scope}
+            basePath="/dashboard/blogs"
+          />
+        </div>
       </div>
 
       {errorMessage && (
@@ -255,12 +307,12 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             </p>
             <div className="flex items-center gap-2">
               <PaginationLink
-                href={buildPageHref(page - 1, scope)}
+                href={buildPageHref(page - 1, scope, customerFilter)}
                 label="Vorige"
                 disabled={!hasPreviousPage}
               />
               <PaginationLink
-                href={buildPageHref(page + 1, scope)}
+                href={buildPageHref(page + 1, scope, customerFilter)}
                 label="Volgende"
                 disabled={!hasNextPage}
               />

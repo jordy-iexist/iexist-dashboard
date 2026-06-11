@@ -38,6 +38,7 @@ export type BlogListItem = {
   published_at: string | null
   isPublic: boolean
   isOwner: boolean
+  customerName: string | null
 }
 
 type SitesResponse =
@@ -472,6 +473,11 @@ export function BlogsBatchPublishList({ blogs }: { blogs: BlogListItem[] }) {
                 </span>
               )}
               <div className="flex items-center gap-1">
+                {blog.customerName && (
+                  <span className="rounded-full bg-violet-100 px-2 py-1 text-[11px] font-medium text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
+                    {blog.customerName}
+                  </span>
+                )}
                 {blog.isOwner && blog.isPublic && (
                   <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
                     Gedeeld

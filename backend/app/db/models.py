@@ -141,6 +141,12 @@ class Blog(Base):
     is_public: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    customer_website_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -557,6 +563,12 @@ class LandingPage(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     is_public: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    customer_website_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

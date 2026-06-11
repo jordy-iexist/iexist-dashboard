@@ -46,6 +46,11 @@ const menuItems = [
     url: "/dashboard",
     icon: LayoutDashboard,
   },
+  {
+    title: "Klanten",
+    url: "/dashboard/klanten",
+    icon: Users,
+  },
 ];
 
 const blogItems = [

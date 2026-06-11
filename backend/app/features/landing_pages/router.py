@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings as app_settings
 from app.core.dependencies import require_user_id, utc_now_iso
 from app.db.models import (
+    CustomerWebsite,
     Job,
     LandingPage,
     LandingPageGenerationSettings,
@@ -18,6 +19,12 @@ from app.db.models import (
 from app.db.session import get_db
 from app.features.landing_pages.mappers import extract_landing_page_context
 from app.features.blogs.dependencies import dedupe_ids
+from app.features.customers.services import (
+    CUSTOMER_WEBSITE_META_FIELD,
+    build_customer_domain_index,
+    match_customer_id_by_website,
+    resolve_customer_website_id,
+)
 from app.features.landing_pages.schemas import (
     DeleteBatchRequest,
     DeleteBatchResponse,
@@ -54,6 +61,18 @@ from app.features.settings.services import (
 from app.worker.tasks import generate_landing_page_task
 
 router = APIRouter(tags=["landing-pages"])
+
+
+def _customer_names(db: Session, customer_ids: list[str | None]) -> dict[str, str]:
+    ids = [str(cid) for cid in customer_ids if cid]
+    if not ids:
+        return {}
+    rows = (
+        db.query(CustomerWebsite.id, CustomerWebsite.name)
+        .filter(CustomerWebsite.id.in_(ids))
+        .all()
+    )
+    return {str(cid): str(name) for cid, name in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +123,7 @@ async def upload_landing_page_csv(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    customer_domain_index = build_customer_domain_index(db)
     valid_rows: list[dict[str, Any]] = []
     skipped_count = 0
 
@@ -121,6 +141,12 @@ async def upload_landing_page_csv(
         except ValueError:
             skipped_count += 1
             continue
+
+        matched_customer_id = match_customer_id_by_website(
+            customer_domain_index, row_dict.get("website")
+        )
+        if matched_customer_id:
+            row_dict[CUSTOMER_WEBSITE_META_FIELD] = matched_customer_id
 
         valid_rows.append(row_dict)
 
@@ -191,6 +217,7 @@ async def manual_landing_page_upload(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    customer_domain_index = build_customer_domain_index(db)
     valid_rows: list[dict[str, Any]] = []
     skipped_count = 0
 
@@ -209,6 +236,14 @@ async def manual_landing_page_upload(
         except ValueError:
             skipped_count += 1
             continue
+
+        customer_id = resolve_customer_website_id(
+            db, raw_row.get(CUSTOMER_WEBSITE_META_FIELD)
+        ) or match_customer_id_by_website(
+            customer_domain_index, row_dict.get("website")
+        )
+        if customer_id:
+            row_dict[CUSTOMER_WEBSITE_META_FIELD] = customer_id
 
         valid_rows.append(row_dict)
 
@@ -600,6 +635,7 @@ async def list_landing_pages(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=12, ge=1, le=100),
     scope: str = Query(default="all", pattern="^(mine|shared|all)$"),
+    customer_website_id: str | None = Query(default=None),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
@@ -614,14 +650,26 @@ async def list_landing_pages(
         visibility = or_(
             LandingPage.created_by == user_id, LandingPage.is_public.is_(True)
         )
-    total: int = db.query(LandingPage).filter(visibility).count()
+
+    customer_filter = str(customer_website_id or "").strip()
+    base_query = db.query(LandingPage).filter(visibility)
+    if customer_filter == "none":
+        base_query = base_query.filter(LandingPage.customer_website_id.is_(None))
+    elif customer_filter:
+        base_query = base_query.filter(
+            LandingPage.customer_website_id == customer_filter
+        )
+
+    total: int = base_query.count()
     lp_rows: list[LandingPage] = (
-        db.query(LandingPage)
-        .filter(visibility)
+        base_query
         .order_by(LandingPage.created_at.desc())
         .offset(start)
         .limit(page_size)
         .all()  # type: ignore[assignment]
+    )
+    customer_name_map = _customer_names(
+        db, [lp.customer_website_id for lp in lp_rows]
     )
 
     items: list[LandingPageListItem] = []
@@ -661,6 +709,10 @@ async def list_landing_pages(
                 created_at=lp.created_at,
                 is_public=bool(lp.is_public),
                 is_owner=str(lp.created_by or "") == user_id,
+                customer_website_id=lp.customer_website_id,
+                customer_name=customer_name_map.get(
+                    str(lp.customer_website_id or "")
+                ),
             )
         )
 
@@ -734,6 +786,10 @@ async def get_landing_page(
         created_at=lp.created_at,
         is_public=bool(lp.is_public),
         is_owner=str(lp.created_by or "") == user_id,
+        customer_website_id=lp.customer_website_id,
+        customer_name=_customer_names(db, [lp.customer_website_id]).get(
+            str(lp.customer_website_id or "")
+        ),
     )
 
 
@@ -748,15 +804,18 @@ async def update_landing_page(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    if all(
-        v is None
-        for v in (
-            payload.content,
-            payload.meta_title,
-            payload.meta_description,
-            payload.slug,
-            payload.is_public,
+    if (
+        all(
+            v is None
+            for v in (
+                payload.content,
+                payload.meta_title,
+                payload.meta_description,
+                payload.slug,
+                payload.is_public,
+            )
         )
+        and "customer_website_id" not in payload.model_fields_set
     ):
         raise HTTPException(
             status_code=400,
@@ -785,6 +844,15 @@ async def update_landing_page(
         updates["slug"] = payload.slug
     if payload.is_public is not None:
         updates["is_public"] = bool(payload.is_public)
+    # null betekent hier expliciet ontkoppelen, dus afwezig vs. null onderscheiden.
+    if "customer_website_id" in payload.model_fields_set:
+        if payload.customer_website_id:
+            resolved = resolve_customer_website_id(db, payload.customer_website_id)
+            if not resolved:
+                raise HTTPException(status_code=400, detail="Klant niet gevonden.")
+            updates["customer_website_id"] = resolved
+        else:
+            updates["customer_website_id"] = None
 
     db.query(LandingPage).filter(
         LandingPage.id == landing_page_id, LandingPage.created_by == user_id
@@ -838,6 +906,10 @@ async def update_landing_page(
         created_at=lp.created_at,
         is_public=bool(lp.is_public),
         is_owner=True,
+        customer_website_id=lp.customer_website_id,
+        customer_name=_customer_names(db, [lp.customer_website_id]).get(
+            str(lp.customer_website_id or "")
+        ),
     )
 
 

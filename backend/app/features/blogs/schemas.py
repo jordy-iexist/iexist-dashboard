@@ -88,6 +88,8 @@ class BlogsListItem(BaseModel):
     share_token: str
     is_public: bool = False
     is_owner: bool = True
+    customer_website_id: str | None = None
+    customer_name: str | None = None
 
 
 class BlogsListResponse(BaseModel):
@@ -108,6 +110,8 @@ class BlogDetailResponse(BaseModel):
     share_token: str
     is_public: bool = False
     is_owner: bool = True
+    customer_website_id: str | None = None
+    customer_name: str | None = None
 
 
 class BlogShareResponse(BaseModel):
@@ -120,6 +124,7 @@ class BlogShareResponse(BaseModel):
 class BlogUpdateRequest(BaseModel):
     content: str | None = None
     is_public: bool | None = None
+    customer_website_id: str | None = None
 
 
 BlogImageSource = Literal["auto_generated", "manual_upload"]

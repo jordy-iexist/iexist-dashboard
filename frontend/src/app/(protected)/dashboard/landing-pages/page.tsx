@@ -12,6 +12,11 @@ import {
   type LandingPageListResponse,
 } from "@/lib/landing-page-types"
 import { LandingPagesBatchList } from "@/components/landing-pages/LandingPagesBatchList"
+import {
+  CustomerFilterSelect,
+  type CustomerFilterOption,
+} from "@/components/klanten/CustomerFilterSelect"
+import { type CustomersResponse } from "@/lib/customer-types"
 
 export const metadata = {
   title: "Alle Landingspagina's",
@@ -37,13 +42,26 @@ function parseScopeParam(value: SearchParamsValue): LandingPageScope {
   return raw === "mine" || raw === "shared" ? raw : "all"
 }
 
-function buildPageHref(page: number, scope: LandingPageScope) {
+function parseCustomerParam(value: SearchParamsValue): string | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  const trimmed = raw?.trim() ?? ""
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function buildPageHref(
+  page: number,
+  scope: LandingPageScope,
+  customer: string | null
+) {
   const params = new URLSearchParams()
   if (page > 1) {
     params.set("page", String(page))
   }
   if (scope !== "all") {
     params.set("scope", scope)
+  }
+  if (customer) {
+    params.set("customer_website_id", customer)
   }
   const query = params.toString()
   return query ? `/dashboard/landing-pages?${query}` : "/dashboard/landing-pages"
@@ -88,6 +106,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
   const params = searchParams ? await searchParams : {}
   const page = parsePageParam(params.page)
   const scope = parseScopeParam(params.scope)
+  const customerFilter = parseCustomerParam(params.customer_website_id)
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
@@ -96,12 +115,38 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
   let landingPages: LandingPageListItem[] = []
   let total = 0
   let errorMessage: string | null = null
+  let customers: CustomerFilterOption[] = []
+
+  try {
+    const customersResponse = await fetch(
+      `${getBackendApiUrl()}/api/customers?active_only=true`,
+      {
+        method: "GET",
+        headers: { Authorization: authorization },
+        cache: "no-store",
+      }
+    )
+    if (customersResponse.ok) {
+      const payload = (await customersResponse.json().catch(() => null)) as
+        | CustomersResponse
+        | null
+      customers = (payload?.websites ?? []).map((customer) => ({
+        id: customer.id,
+        name: customer.name,
+      }))
+    }
+  } catch {
+    // Klantfilter is niet kritiek voor de pagina; lijst blijft leeg.
+  }
 
   try {
     const url = new URL(`${getBackendApiUrl()}/api/landing-pages`)
     url.searchParams.set("page", String(page))
     url.searchParams.set("page_size", String(PAGE_SIZE))
     url.searchParams.set("scope", scope)
+    if (customerFilter) {
+      url.searchParams.set("customer_website_id", customerFilter)
+    }
 
     const response = await fetch(url, {
       method: "GET",
@@ -147,11 +192,11 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
         </Link>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {SCOPE_OPTIONS.map((option) => (
           <Link
             key={option.value}
-            href={buildPageHref(1, option.value)}
+            href={buildPageHref(1, option.value, customerFilter)}
             className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
               scope === option.value
                 ? "border-foreground bg-foreground text-background"
@@ -161,6 +206,14 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
             {option.label}
           </Link>
         ))}
+        <div className="ml-auto">
+          <CustomerFilterSelect
+            customers={customers}
+            selected={customerFilter}
+            scope={scope}
+            basePath="/dashboard/landing-pages"
+          />
+        </div>
       </div>
 
       {errorMessage && (
@@ -186,12 +239,12 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
             </p>
             <div className="flex items-center gap-2">
               <PaginationLink
-                href={buildPageHref(page - 1, scope)}
+                href={buildPageHref(page - 1, scope, customerFilter)}
                 label="Vorige"
                 disabled={!hasPreviousPage}
               />
               <PaginationLink
-                href={buildPageHref(page + 1, scope)}
+                href={buildPageHref(page + 1, scope, customerFilter)}
                 label="Volgende"
                 disabled={!hasNextPage}
               />

@@ -80,6 +80,8 @@ export type LandingPageListItem = {
   created_at: string
   is_public?: boolean
   is_owner?: boolean
+  customer_website_id?: string | null
+  customer_name?: string | null
 }
 
 export type LandingPageListResponse = {
@@ -102,6 +104,8 @@ export type LandingPageDetailPayload = {
   created_at: string
   is_public?: boolean
   is_owner?: boolean
+  customer_website_id?: string | null
+  customer_name?: string | null
 }
 
 export type LandingPageUploadResponse = {
