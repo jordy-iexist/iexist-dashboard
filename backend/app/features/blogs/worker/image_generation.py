@@ -2,7 +2,7 @@ import uuid
 
 from celery.utils.log import get_task_logger
 
-from app.db.models import Blog, BlogImage, CsvRow, Job
+from app.db.models import Blog, BlogGenerationSettings, BlogImage, CsvRow, Job
 from app.db.session import SessionLocal
 from app.features.blogs.services.image_service import (
     build_auto_image_prompt,
@@ -13,6 +13,7 @@ from app.features.blogs.services.generation import (
     generate_blog_image,
     should_generate_image_from_row_data,
 )
+from app.core.config import settings as app_settings
 from app.features.settings.services import MissingUserOpenAIKeyError
 from app.worker._common import build_title, utc_now_iso
 from app.worker.celery_app import celery_app
@@ -22,6 +23,22 @@ logger = get_task_logger(__name__)
 
 def _row_to_dict(obj):
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}
+
+
+def _parse_image_dimensions(size: str | None) -> tuple[int | None, int | None]:
+    """Derive width/height from a size string like "2048x1152".
+
+    The generated image matches the requested size, so we record those
+    dimensions on the BlogImage. Falls back to the configured default size.
+    """
+    raw = (size or app_settings.openai_image_size or "").lower().strip()
+    parts = raw.split("x")
+    if len(parts) != 2:
+        return None, None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None, None
 
 
 def _create_image_generation_job(blog_id: str) -> str:
@@ -261,12 +278,35 @@ def generate_blog_image_task(self, blog_id: str, image_job_id: str | None = None
         )
         row_data = csv_row.data if csv_row and isinstance(csv_row.data, dict) else {}
 
+        gen_settings = (
+            db.query(BlogGenerationSettings)
+            .filter(BlogGenerationSettings.user_id == user_id)
+            .first()
+        )
+
         title = build_title(row_data)
-        image_prompt = build_auto_image_prompt(title=title, content=content)
+        image_prompt = build_auto_image_prompt(
+            title=title,
+            content=content,
+            style_instruction=(
+                gen_settings.image_style_instruction if gen_settings else None
+            ),
+        )
+        image_size = gen_settings.image_size if gen_settings else None
         image_bytes, mime_type, revised_prompt = generate_blog_image(
             image_prompt,
             user_id=user_id,
+            size=image_size,
+            model=gen_settings.image_model if gen_settings else None,
+            quality=gen_settings.image_quality if gen_settings else None,
+            output_format=(
+                gen_settings.image_output_format if gen_settings else None
+            ),
+            output_compression=(
+                gen_settings.image_output_compression if gen_settings else None
+            ),
         )
+        width, height = _parse_image_dimensions(image_size)
         storage_path = build_storage_path(blog_id, "auto_generated", mime_type)
         upload_image_to_storage(storage_path, image_bytes, mime_type)
 
@@ -297,8 +337,8 @@ def generate_blog_image_task(self, blog_id: str, image_job_id: str | None = None
             storage_path=storage_path,
             mime_type=mime_type,
             file_size_bytes=len(image_bytes),
-            width=None,
-            height=None,
+            width=width,
+            height=height,
             is_primary=is_primary,
             generation_prompt=(revised_prompt or image_prompt),
             created_by=blog.created_by,

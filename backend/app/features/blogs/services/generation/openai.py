@@ -94,16 +94,33 @@ def _generate_blog_image_with_responses_api(
     prompt: str,
     *,
     user_id: str,
+    size: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
 ) -> tuple[bytes, str, str | None]:
+    fmt = (output_format or settings.openai_image_output_format or "").strip().lower()
+    compression = (
+        output_compression
+        if output_compression is not None
+        else settings.openai_image_output_compression
+    )
+    output_options: dict = {}
+    if fmt:
+        output_options["output_format"] = fmt
+    if fmt in {"jpeg", "webp"} and compression is not None:
+        output_options["output_compression"] = compression
+
     tools_with_size = [
         {
             "type": "image_generation",
-            "size": settings.openai_image_size,
+            "size": size or settings.openai_image_size,
+            **output_options,
         }
     ]
     tools_without_size = [
         {
             "type": "image_generation",
+            **output_options,
         }
     ]
     attempts = [tools_with_size, tools_without_size]
@@ -151,13 +168,26 @@ def _generate_blog_image_with_images_api(
     prompt: str,
     *,
     user_id: str,
+    size: str | None = None,
+    model: str | None = None,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
 ) -> tuple[bytes, str, str | None]:
+    effective_quality = quality or settings.openai_image_quality
     response = create_image(
         user_id=user_id,
-        model=settings.openai_image_model,
+        model=model or settings.openai_image_model,
         prompt=prompt,
-        size=settings.openai_image_size,
+        size=size or settings.openai_image_size,
         n=1,
+        quality=effective_quality if effective_quality != "auto" else None,
+        output_format=output_format or settings.openai_image_output_format,
+        output_compression=(
+            output_compression
+            if output_compression is not None
+            else settings.openai_image_output_compression
+        ),
     )
 
     data = response.data or []
@@ -189,21 +219,47 @@ def _generate_blog_image_with_images_api(
     return image_response.content, mime_type, revised_prompt
 
 
-def generate_blog_image(prompt: str, *, user_id: str) -> tuple[bytes, str, str | None]:
+def generate_blog_image(
+    prompt: str,
+    *,
+    user_id: str,
+    size: str | None = None,
+    model: str | None = None,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
+) -> tuple[bytes, str, str | None]:
     errors: list[str] = []
 
-    for generator in (
-        _generate_blog_image_with_responses_api,
-        _generate_blog_image_with_images_api,
-    ):
-        try:
-            return generator(prompt, user_id=user_id)
-        except Exception as exc:
-            errors.append(str(exc))
+    # Images API is primary so user-configured model/size/quality take effect.
+    try:
+        return _generate_blog_image_with_images_api(
+            prompt,
+            user_id=user_id,
+            size=size,
+            model=model,
+            quality=quality,
+            output_format=output_format,
+            output_compression=output_compression,
+        )
+    except Exception as exc:
+        errors.append(str(exc))
+
+    # Responses API fallback honours size/output format only (no custom model/quality).
+    try:
+        return _generate_blog_image_with_responses_api(
+            prompt,
+            user_id=user_id,
+            size=size,
+            output_format=output_format,
+            output_compression=output_compression,
+        )
+    except Exception as exc:
+        errors.append(str(exc))
 
     raise ValueError(
-        "Image generatie mislukt. Responses API fout: "
+        "Image generatie mislukt. Images API fout: "
         f"{errors[0] if errors else 'onbekend'}. "
-        "Images API fout: "
+        "Responses API fout: "
         f"{errors[1] if len(errors) > 1 else 'onbekend'}."
     )

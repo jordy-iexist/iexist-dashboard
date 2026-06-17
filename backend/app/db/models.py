@@ -498,6 +498,14 @@ class BlogGenerationSettings(Base):
     reasoning_effort: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     max_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    image_style_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    image_size: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    image_model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    image_quality: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    image_output_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    image_output_compression: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

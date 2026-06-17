@@ -21,6 +21,20 @@ function formatDate(value: string) {
   }).format(date)
 }
 
+function withDownloadParam(value: string) {
+  try {
+    const url = new URL(value)
+    url.searchParams.set("download", "1")
+    return url.toString()
+  } catch {
+    const hashIndex = value.indexOf("#")
+    const base = hashIndex === -1 ? value : value.slice(0, hashIndex)
+    const hash = hashIndex === -1 ? "" : value.slice(hashIndex)
+    const separator = base.includes("?") ? "&" : "?"
+    return `${base}${separator}download=1${hash}`
+  }
+}
+
 export function SharedBlogView({ content, images, createdAt }: SharedBlogViewProps) {
   const articleRef = useRef<HTMLElement>(null)
   const [justCopied, setJustCopied] = useState(false)
@@ -71,7 +85,7 @@ export function SharedBlogView({ content, images, createdAt }: SharedBlogViewPro
               <li key={image.id}>
                 {image.signed_url ? (
                   <a
-                    href={image.signed_url}
+                    href={withDownloadParam(image.signed_url)}
                     download
                     className="inline-flex items-center gap-2 text-sm underline underline-offset-2 hover:text-foreground"
                   >

@@ -87,6 +87,7 @@ from app.features.blogs.services.generation import (
     validate_mapping,
 )
 from app.features.blogs.services.image_service import (
+    DEFAULT_IMAGE_STYLE_INSTRUCTION,
     build_storage_path,
     upload_image_to_storage,
     validate_image_upload,
@@ -408,21 +409,26 @@ async def list_blog_ids(
     return BlogsIdsResponse(blogs=items, total=len(items))
 
 
-@router.get("/api/blogs/settings", response_model=BlogGenerationSettingsResponse)
-async def get_blog_generation_settings(
-    user_id: str = Depends(require_user_id),
-    db: Session = Depends(get_db),
-):
-    user_settings: BlogGenerationSettings | None = (
-        db.query(BlogGenerationSettings)
-        .filter(BlogGenerationSettings.user_id == user_id)
-        .first()  # type: ignore[assignment]
-    )
+def _build_settings_response(
+    user_settings: BlogGenerationSettings | None,
+) -> BlogGenerationSettingsResponse:
     return BlogGenerationSettingsResponse(
         system_prompt=user_settings.system_prompt if user_settings else None,
         reasoning_effort=user_settings.reasoning_effort if user_settings else None,
         model=user_settings.model if user_settings else None,
         max_output_tokens=user_settings.max_output_tokens if user_settings else None,
+        image_style_instruction=(
+            user_settings.image_style_instruction if user_settings else None
+        ),
+        image_size=user_settings.image_size if user_settings else None,
+        image_model=user_settings.image_model if user_settings else None,
+        image_quality=user_settings.image_quality if user_settings else None,
+        image_output_format=(
+            user_settings.image_output_format if user_settings else None
+        ),
+        image_output_compression=(
+            user_settings.image_output_compression if user_settings else None
+        ),
         effective_system_prompt=(
             user_settings.system_prompt
             if user_settings and user_settings.system_prompt
@@ -443,7 +449,50 @@ async def get_blog_generation_settings(
             if user_settings and user_settings.max_output_tokens is not None
             else app_settings.openai_blog_max_output_tokens
         ),
+        effective_image_style_instruction=(
+            user_settings.image_style_instruction
+            if user_settings and user_settings.image_style_instruction
+            else DEFAULT_IMAGE_STYLE_INSTRUCTION
+        ),
+        effective_image_size=(
+            user_settings.image_size
+            if user_settings and user_settings.image_size
+            else app_settings.openai_image_size
+        ),
+        effective_image_model=(
+            user_settings.image_model
+            if user_settings and user_settings.image_model
+            else app_settings.openai_image_model
+        ),
+        effective_image_quality=(
+            user_settings.image_quality
+            if user_settings and user_settings.image_quality
+            else app_settings.openai_image_quality
+        ),
+        effective_image_output_format=(
+            user_settings.image_output_format
+            if user_settings and user_settings.image_output_format
+            else app_settings.openai_image_output_format
+        ),
+        effective_image_output_compression=(
+            user_settings.image_output_compression
+            if user_settings and user_settings.image_output_compression is not None
+            else app_settings.openai_image_output_compression
+        ),
     )
+
+
+@router.get("/api/blogs/settings", response_model=BlogGenerationSettingsResponse)
+async def get_blog_generation_settings(
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    user_settings: BlogGenerationSettings | None = (
+        db.query(BlogGenerationSettings)
+        .filter(BlogGenerationSettings.user_id == user_id)
+        .first()  # type: ignore[assignment]
+    )
+    return _build_settings_response(user_settings)
 
 
 @router.put("/api/blogs/settings", response_model=BlogGenerationSettingsResponse)
@@ -463,6 +512,12 @@ async def update_blog_generation_settings(
         user_settings.reasoning_effort = payload.reasoning_effort
         user_settings.model = payload.model
         user_settings.max_output_tokens = payload.max_output_tokens
+        user_settings.image_style_instruction = payload.image_style_instruction
+        user_settings.image_size = payload.image_size
+        user_settings.image_model = payload.image_model
+        user_settings.image_quality = payload.image_quality
+        user_settings.image_output_format = payload.image_output_format
+        user_settings.image_output_compression = payload.image_output_compression
         user_settings.updated_at = now
     else:
         user_settings = BlogGenerationSettings(
@@ -472,38 +527,19 @@ async def update_blog_generation_settings(
             reasoning_effort=payload.reasoning_effort,
             model=payload.model,
             max_output_tokens=payload.max_output_tokens,
+            image_style_instruction=payload.image_style_instruction,
+            image_size=payload.image_size,
+            image_model=payload.image_model,
+            image_quality=payload.image_quality,
+            image_output_format=payload.image_output_format,
+            image_output_compression=payload.image_output_compression,
             updated_at=now,
         )
         db.add(user_settings)
     db.commit()
     db.refresh(user_settings)
 
-    return BlogGenerationSettingsResponse(
-        system_prompt=user_settings.system_prompt,
-        reasoning_effort=user_settings.reasoning_effort,
-        model=user_settings.model,
-        max_output_tokens=user_settings.max_output_tokens,
-        effective_system_prompt=(
-            user_settings.system_prompt
-            if user_settings.system_prompt
-            else DEFAULT_SYSTEM_PROMPT.strip()
-        ),
-        effective_reasoning_effort=(
-            user_settings.reasoning_effort
-            if user_settings.reasoning_effort
-            else app_settings.openai_blog_reasoning_effort
-        ),
-        effective_model=(
-            user_settings.model
-            if user_settings.model
-            else app_settings.openai_blog_model
-        ),
-        effective_max_output_tokens=(
-            user_settings.max_output_tokens
-            if user_settings.max_output_tokens is not None
-            else app_settings.openai_blog_max_output_tokens
-        ),
-    )
+    return _build_settings_response(user_settings)
 
 
 @router.get("/api/blogs/share/{token}", response_model=BlogShareResponse)
@@ -1098,9 +1134,12 @@ async def get_upload_status(
             images_target += 1
 
     image_generated = 0
+    images_in_flight = 0
     for job in image_jobs:
         if job.status == "completed":
             image_generated += 1
+        elif job.status in {"pending", "queued", "processing"}:
+            images_in_flight += 1
 
     if image_generated > images_target:
         image_generated = images_target
@@ -1112,7 +1151,7 @@ async def get_upload_status(
     canceled = status_counts["canceled"]
     processed = completed + failed + canceled
     remaining = max(total - processed, 0)
-    is_done = processed >= total
+    is_done = processed >= total and images_in_flight == 0
     final_status: Any = (
         "canceled"
         if is_done and canceled > 0 and failed == 0

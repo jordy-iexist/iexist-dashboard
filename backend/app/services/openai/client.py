@@ -46,14 +46,33 @@ def create_response(
     return client.responses.create(**payload)
 
 
-def create_image(*, user_id: str, model: str, prompt: str, size: str, n: int = 1):
+def create_image(
+    *,
+    user_id: str,
+    model: str,
+    prompt: str,
+    size: str,
+    n: int = 1,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
+):
     client = _build_openai_client(user_id)
-    return client.images.generate(
-        model=model,
-        prompt=prompt,
-        size=size,
-        n=n,
-    )
+    payload: dict = {
+        "model": model,
+        "prompt": prompt,
+        "size": size,
+        "n": n,
+    }
+    if quality:
+        payload["quality"] = quality
+    normalized_format = (output_format or "").strip().lower()
+    if normalized_format:
+        payload["output_format"] = normalized_format
+    # output_compression only applies to jpeg/webp, not png.
+    if output_compression is not None and normalized_format in {"jpeg", "webp"}:
+        payload["output_compression"] = output_compression
+    return client.images.generate(**payload)
 
 
 def response_output_text(response) -> str:

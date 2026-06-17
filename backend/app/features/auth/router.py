@@ -108,6 +108,7 @@ async def serve_storage_file(
     storage_path: str,
     exp: int = Query(...),
     sig: str = Query(...),
+    download: bool = Query(default=False),
 ):
     now = int(time.time())
     if exp < now:
@@ -118,4 +119,6 @@ async def serve_storage_file(
     file_path = Path(settings.storage_root).expanduser() / bucket / storage_path
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Afbeelding niet gevonden.")
+    if download:
+        return FileResponse(file_path, filename=Path(storage_path).name)
     return FileResponse(file_path)

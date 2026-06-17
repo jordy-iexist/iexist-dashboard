@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(
         default="redis://localhost:6379/0", validation_alias="REDIS_URL"
     )
-    worker_concurrency: int = Field(default=1, validation_alias="WORKER_CONCURRENCY")
+    worker_concurrency: int = Field(default=3, validation_alias="WORKER_CONCURRENCY")
     wordpress_credentials_key: str = Field(
         default="",
         validation_alias="WORDPRESS_CREDENTIALS_KEY",
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
         validation_alias="BLOG_IMAGE_SIGNED_URL_TTL_SECONDS",
     )
     openai_image_model: str = Field(
-        default="gpt-image-1",
+        default="gpt-image-2",
         validation_alias="OPENAI_IMAGE_MODEL",
     )
     openai_image_responses_model: str = Field(
@@ -91,8 +91,22 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_IMAGE_RESPONSES_MODEL",
     )
     openai_image_size: str = Field(
-        default="1024x1024",
+        default="2048x1152",
         validation_alias="OPENAI_IMAGE_SIZE",
+    )
+    openai_image_quality: str = Field(
+        default="auto",
+        validation_alias="OPENAI_IMAGE_QUALITY",
+    )
+    openai_image_output_format: str = Field(
+        default="jpeg",
+        validation_alias="OPENAI_IMAGE_OUTPUT_FORMAT",
+    )
+    openai_image_output_compression: int = Field(
+        default=80,
+        ge=0,
+        le=100,
+        validation_alias="OPENAI_IMAGE_OUTPUT_COMPRESSION",
     )
     serpapi_api_key: str = Field(
         default="",

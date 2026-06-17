@@ -22,6 +22,16 @@ Geen match betekent: wél genereren, niet koppelen. Klanten worden nooit automat
 
 De blogtitel is de primaire H1-kop van de bloginhoud.
 
+## Hero-afbeelding (uitgelichte afbeelding)
+
+De primaire afbeelding van een blog, bedoeld om als hero/featured image te dienen. Wordt automatisch gegenereerd in **16:9** breedbeeld zodat hij bovenaan een artikel of als uitgelichte afbeelding past. Per blog is er hooguit één primaire afbeelding (`is_primary`); een handmatige upload heeft voorrang op de automatisch gegenereerde.
+
+Zie [docs/adr/0002-hero-afbeelding-16-9.md](docs/adr/0002-hero-afbeelding-16-9.md).
+
+## Stijl-instructie
+
+De aanpasbare stijlzin die de gebruiker meegeeft aan de afbeeldingsgeneratie (bijv. "modern, editorial, clean, geen tekst of logo's"). Het systeem plakt hier automatisch de blogtitel en een samenvatting van de bloginhoud achter; samen vormen ze de prompt. Leeg = systeemstandaard. Staat los van de **Systemprompt**, die de tekstgeneratie van de blog stuurt.
+
 ## Share-link
 
 De publieke leeslink van een blog of landingspagina. Werkt voor iedereen met de link. Dit is het artefact dat naar de linkbuilding-partij gaat: die plaatst de content op haar eigen websites, dus zij ontvangt share-links, geen gepubliceerde klant-URLs.

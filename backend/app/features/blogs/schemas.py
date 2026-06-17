@@ -305,10 +305,22 @@ class BlogGenerationSettingsResponse(BaseModel):
     reasoning_effort: str | None = None
     model: str | None = None
     max_output_tokens: int | None = None
+    image_style_instruction: str | None = None
+    image_size: str | None = None
+    image_model: str | None = None
+    image_quality: str | None = None
+    image_output_format: str | None = None
+    image_output_compression: int | None = None
     effective_system_prompt: str
     effective_reasoning_effort: str
     effective_model: str
     effective_max_output_tokens: int
+    effective_image_style_instruction: str
+    effective_image_size: str
+    effective_image_model: str
+    effective_image_quality: str
+    effective_image_output_format: str
+    effective_image_output_compression: int
 
 
 class BlogGenerationSettingsUpdateRequest(BaseModel):
@@ -316,3 +328,9 @@ class BlogGenerationSettingsUpdateRequest(BaseModel):
     reasoning_effort: str | None = None
     model: str | None = None
     max_output_tokens: int | None = None
+    image_style_instruction: str | None = None
+    image_size: str | None = None
+    image_model: str | None = None
+    image_quality: str | None = None
+    image_output_format: str | None = None
+    image_output_compression: int | None = None

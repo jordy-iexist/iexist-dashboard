@@ -141,14 +141,26 @@ def create_signed_image_url(path: str) -> str:
     return f"{settings.backend_public_url.rstrip('/')}/{signed_path.lstrip('/')}"
 
 
-def build_auto_image_prompt(title: str, content: str) -> str:
+DEFAULT_IMAGE_STYLE_INSTRUCTION = (
+    "Maak een professionele, realistische header afbeelding zonder tekst of logo's. "
+    "Stijl: modern, editorial, clean, hoge kwaliteit, neutrale kleuren."
+)
+
+
+def build_auto_image_prompt(
+    title: str,
+    content: str,
+    *,
+    style_instruction: str | None = None,
+) -> str:
     normalized_title = title.strip() or "Zakelijke blog"
     normalized_content = " ".join(content.split())
     summary = normalized_content[:900].strip()
 
+    style = (style_instruction or "").strip() or DEFAULT_IMAGE_STYLE_INSTRUCTION
+
     return (
-        "Maak een professionele, realistische header afbeelding zonder tekst of logo's. "
-        "Stijl: modern, editorial, clean, hoge kwaliteit, neutrale kleuren. "
+        f"{style} "
         f"Thema/titel: {normalized_title}. "
         f"Context uit de blog: {summary}"
     )
