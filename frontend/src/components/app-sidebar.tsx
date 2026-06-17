@@ -211,32 +211,33 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
-                      asChild
-                      isActive={pathname.startsWith("/dashboard/seo")}
                       tooltip="SEO Tools"
+                      className="text-muted-foreground"
                     >
-                      <Link href="/dashboard/seo">
-                        <Search />
-                        <span>SEO Tools</span>
-                        <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                      </Link>
+                      <Search />
+                      <span>SEO Tools</span>
+                      <span className="ml-auto rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Binnenkort
+                      </span>
+                      <ChevronDown className="transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <SidebarMenuSub>
-                      {seoItems.map((item) => {
-                        const isActive = pathname === item.url;
-                        return (
-                          <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton asChild isActive={isActive}>
-                              <Link href={item.url}>
-                                <item.icon />
-                                <span>{item.title}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
+                      {seoItems.map((item) => (
+                        <SidebarMenuSubItem key={item.title}>
+                          <SidebarMenuSubButton
+                            aria-disabled
+                            className="cursor-not-allowed opacity-50"
+                          >
+                            <item.icon />
+                            <span>{item.title}</span>
+                            <span className="ml-auto rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              Binnenkort
+                            </span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
                     </SidebarMenuSub>
                   </CollapsibleContent>
                 </SidebarMenuItem>
@@ -246,32 +247,33 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
-                      asChild
-                      isActive={pathname.startsWith("/dashboard/audit")}
                       tooltip="Audit Tools"
+                      className="text-muted-foreground"
                     >
-                      <Link href="/dashboard/audit">
-                        <ScanLine />
-                        <span>Audit Tools</span>
-                        <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                      </Link>
+                      <ScanLine />
+                      <span>Audit Tools</span>
+                      <span className="ml-auto rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Binnenkort
+                      </span>
+                      <ChevronDown className="transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <SidebarMenuSub>
-                      {auditItems.map((item) => {
-                        const isActive = pathname === item.url;
-                        return (
-                          <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton asChild isActive={isActive}>
-                              <Link href={item.url}>
-                                <item.icon />
-                                <span>{item.title}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
+                      {auditItems.map((item) => (
+                        <SidebarMenuSubItem key={item.title}>
+                          <SidebarMenuSubButton
+                            aria-disabled
+                            className="cursor-not-allowed opacity-50"
+                          >
+                            <item.icon />
+                            <span>{item.title}</span>
+                            <span className="ml-auto rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              Binnenkort
+                            </span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
                     </SidebarMenuSub>
                   </CollapsibleContent>
                 </SidebarMenuItem>
