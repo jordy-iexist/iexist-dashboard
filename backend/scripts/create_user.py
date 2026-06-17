@@ -1,15 +1,37 @@
-"""Maak (of werk) een gebruikersaccount handmatig aan op de server.
+"""Maak (of werk) een gebruikersaccount handmatig aan.
 
 Publieke registratie is uitgeschakeld; dit script is de enige manier om accounts
 aan te maken. Hergebruikt de bestaande auth-helpers zodat wachtwoorden op exact
 dezelfde manier worden gehasht als bij de reguliere login.
 
-Gebruik (vanuit de backend/ map, met geactiveerde venv):
+Het wachtwoord wordt altijd interactief gevraagd (2x ter controle) en verschijnt
+dus niet in de shell-history of in de procesargumenten.
 
+──────────────────────────────────────────────────────────────────────────────
+LOKAAL (vanuit de backend/ map, met geactiveerde venv)
+──────────────────────────────────────────────────────────────────────────────
+Let op: dit raakt je LOKALE database, niet die van de server.
+
+  # Nieuw account aanmaken:
+  python scripts/create_user.py --email iemand@voorbeeld.nl
+
+  # Wachtwoord van een bestaand account wijzigen:
+  python scripts/create_user.py --email iemand@voorbeeld.nl --update-password
+
+──────────────────────────────────────────────────────────────────────────────
+OP DE SERVER (Docker, vanuit de projectmap, bv. ~/iexist-dashboard)
+──────────────────────────────────────────────────────────────────────────────
+Draai het script in de draaiende `api`-container; die heeft de juiste
+DATABASE_URL en alle dependencies. `exec` geeft een TTY, dus de wachtwoord-prompt
+werkt gewoon.
+
+  # Nieuw account aanmaken:
+  docker compose -f docker-compose.prod.yml exec api \
     python scripts/create_user.py --email iemand@voorbeeld.nl
 
-Het wachtwoord wordt interactief gevraagd (verschijnt niet in de shell-history).
-Met --update-password wordt het wachtwoord van een bestaand account bijgewerkt.
+  # Wachtwoord van een bestaand account wijzigen:
+  docker compose -f docker-compose.prod.yml exec api \
+    python scripts/create_user.py --email iemand@voorbeeld.nl --update-password
 """
 
 from __future__ import annotations
