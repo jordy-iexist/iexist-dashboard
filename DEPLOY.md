@@ -57,7 +57,21 @@ cd iexist-dashboard
 
 ```bash
 cp .env.production.example .env
-# Vul in: DOMAIN, POSTGRES_PASSWORD (openssl rand -hex 24), Supabase keys
+# Vul in: DOMAIN, POSTGRES_PASSWORD (openssl rand -hex 24), Supabase keys, ALLOWED_IPS
+```
+
+**`ALLOWED_IPS`** beperkt de toegang tot `app.iexist.nl` (het dashboard) tot je
+eigen IP('s). Caddy geeft al het overige verkeer een `403 Forbidden`. `api.iexist.nl`
+blijft publiek — dat is nodig voor blog-afbeeldingen die via signed URLs door
+bezoekers/WordPress geladen worden. Achterhaal je publieke IP met `curl ifconfig.me`.
+Meerdere IP's/ranges **spatiegescheiden** (geen komma's), bv. `"91.215.151.210 84.22.33.44"`
+— bij meerdere zijn de quotes verplicht.
+
+IP's later wijzigen kan zonder rebuild — alleen Caddy herladen:
+
+```bash
+# pas ALLOWED_IPS aan in .env, daarna:
+docker compose -f docker-compose.prod.yml up -d caddy
 ```
 
 **`backend/.env`** (backend-secrets):

@@ -1,4 +1,7 @@
 app.{$DOMAIN} {
+	@blocked not remote_ip {$ALLOWED_IPS}
+	respond @blocked "Forbidden" 403
+
 	encode gzip zstd
 	reverse_proxy frontend:3000
 }

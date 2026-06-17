@@ -3,6 +3,7 @@ services:
     image: caddy:2-alpine
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ALLOWED_IPS: ${ALLOWED_IPS:?Set ALLOWED_IPS in .env}
     ports:
       - "80:80"
       - "443:443"
