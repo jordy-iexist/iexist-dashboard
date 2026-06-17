@@ -3,7 +3,7 @@ import re
 import httpx
 from openai import OpenAI
 
-from app.features.settings.services import require_personal_openai_api_key_for_user
+from app.features.settings.services import resolve_openai_api_key_for_user
 
 
 def model_supports_reasoning(model: str) -> bool:
@@ -13,7 +13,7 @@ def model_supports_reasoning(model: str) -> bool:
 
 
 def _build_openai_client(user_id: str) -> OpenAI:
-    api_key = require_personal_openai_api_key_for_user(user_id)
+    api_key = resolve_openai_api_key_for_user(user_id)
     return OpenAI(api_key=api_key)
 
 

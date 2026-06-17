@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.secrets import decrypt_secret, encrypt_secret
 from app.db.models import UserAISettings
 from app.db.session import SessionLocal
@@ -68,6 +69,22 @@ def require_personal_openai_api_key_for_user(user_id: str) -> str:
         return require_personal_openai_api_key(user_id, db)
 
 
+def resolve_openai_api_key(user_id: str, db: Session) -> str:
+    """Persoonlijke key eerst, anders fallback naar de gedeelde .env-key."""
+    personal = get_personal_openai_api_key(_normalize_user_id(user_id), db)
+    if personal:
+        return personal
+    fallback = str(settings.openai_api_key or "").strip()
+    if fallback:
+        return fallback
+    raise MissingUserOpenAIKeyError(user_id=_normalize_user_id(user_id))
+
+
+def resolve_openai_api_key_for_user(user_id: str) -> str:
+    with SessionLocal() as db:
+        return resolve_openai_api_key(user_id, db)
+
+
 def upsert_personal_openai_api_key(
     user_id: str,
     openai_api_key: str | None,
@@ -109,5 +126,7 @@ __all__ = [
     "has_personal_openai_api_key",
     "require_personal_openai_api_key",
     "require_personal_openai_api_key_for_user",
+    "resolve_openai_api_key",
+    "resolve_openai_api_key_for_user",
     "upsert_personal_openai_api_key",
 ]
