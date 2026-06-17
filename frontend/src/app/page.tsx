@@ -12,7 +12,7 @@ export default function Home() {
           width={1776}
           height={422}
           priority
-          className="h-auto w-full max-w-md"
+          className="h-auto w-full max-w-2xs"
         />
 
         <div className="mt-12 flex w-full max-w-sm flex-col gap-3 sm:flex-row">
