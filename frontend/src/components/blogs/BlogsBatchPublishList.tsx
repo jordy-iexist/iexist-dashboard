@@ -17,14 +17,6 @@ type PublishSummary = {
   processing: number
 }
 
-const EMPTY_PUBLISH_SUMMARY: PublishSummary = {
-  total: 0,
-  succeeded: 0,
-  failed: 0,
-  pending: 0,
-  processing: 0,
-}
-
 export type BlogListItem = {
   id: string
   shareToken: string
@@ -65,42 +57,6 @@ function getErrorMessage(payload: unknown, fallback: string) {
     return error
   }
   return fallback
-}
-
-function publicationLabel(blog: BlogListItem) {
-  if (blog.published_at) {
-    return "Gepubliceerd"
-  }
-  const safeSummary = blog.publication ?? EMPTY_PUBLISH_SUMMARY
-  if (safeSummary.total === 0) {
-    return "Nog niet gepubliceerd"
-  }
-  const inFlight = safeSummary.pending + safeSummary.processing
-  if (inFlight > 0) {
-    return `${safeSummary.succeeded} geslaagd · ${safeSummary.failed} mislukt · ${inFlight} lopend`
-  }
-  if (safeSummary.failed > 0 && safeSummary.succeeded === 0) {
-    return `${safeSummary.failed} mislukt`
-  }
-  if (safeSummary.succeeded > 0 && safeSummary.failed === 0) {
-    return `${safeSummary.succeeded} gepubliceerd`
-  }
-  return `${safeSummary.succeeded} geslaagd · ${safeSummary.failed} mislukt`
-}
-
-function publicationBadgeClasses(blog: BlogListItem) {
-  if (blog.published_at) {
-    return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-  }
-  const safeSummary = blog.publication ?? EMPTY_PUBLISH_SUMMARY
-  const inFlight = safeSummary.pending + safeSummary.processing
-  if (safeSummary.total === 0) return "bg-muted text-muted-foreground"
-  if (inFlight > 0) return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-  if (safeSummary.failed > 0 && safeSummary.succeeded === 0)
-    return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-  if (safeSummary.succeeded > 0 && safeSummary.failed === 0)
-    return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-  return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
 }
 
 export type BlogListFilters = {
@@ -688,7 +644,7 @@ export function BlogsBatchPublishList({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {blogs.map((blog) => (
           <article key={blog.id} className="rounded-lg border bg-card p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2">
+            <div className="space-y-2">
               <label className="inline-flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"
@@ -699,7 +655,7 @@ export function BlogsBatchPublishList({
                 />
                 Selecteer
               </label>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {blog.customerName && (
                   <span className="rounded-full bg-violet-100 px-2 py-1 text-[11px] font-medium text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
                     {blog.customerName}
@@ -715,11 +671,6 @@ export function BlogsBatchPublishList({
                     Gedeeld
                   </span>
                 )}
-                <span
-                  className={`rounded-full px-2 py-1 text-[11px] font-medium ${publicationBadgeClasses(blog)}`}
-                >
-                  {publicationLabel(blog)}
-                </span>
               </div>
             </div>
 

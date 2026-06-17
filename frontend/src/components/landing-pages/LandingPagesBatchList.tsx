@@ -261,11 +261,11 @@ export function LandingPagesBatchList({
               href={`/dashboard/landing-pages/${item.id}`}
               className="flex-1 min-w-0 space-y-2 hover:opacity-75 transition-opacity"
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1.5">
                 <p className="font-medium text-sm leading-snug line-clamp-2">
                   {item.onderwerp || "Onbekend onderwerp"}
                 </p>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   {item.customer_name && (
                     <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800">
                       {item.customer_name}
