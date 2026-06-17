@@ -28,6 +28,8 @@ from app.features.customers.services import (
 from app.features.landing_pages.schemas import (
     DeleteBatchRequest,
     DeleteBatchResponse,
+    ShareBatchRequest,
+    ShareBatchResponse,
     LandingPageDetailResponse,
     LandingPageGenerationSettingsResponse,
     LandingPageGenerationSettingsUpdateRequest,
@@ -955,6 +957,33 @@ async def delete_landing_pages_batch(
         db.commit()
 
     return DeleteBatchResponse(requested=len(landing_page_ids), deleted=len(owned_ids), missing=missing)
+
+
+@router.post("/api/landing-pages/share/batch", response_model=ShareBatchResponse)
+async def share_landing_pages_batch(
+    payload: ShareBatchRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+) -> ShareBatchResponse:
+    lp_ids = dedupe_ids(payload.landing_page_ids)
+    if not lp_ids:
+        raise HTTPException(status_code=400, detail="Minimaal één landingspagina is verplicht.")
+
+    owned_rows = (
+        db.query(LandingPage.id)
+        .filter(LandingPage.id.in_(lp_ids), LandingPage.created_by == user_id)
+        .all()
+    )
+    owned_ids = [str(row.id) for row in owned_rows]
+    missing = [lid for lid in lp_ids if lid not in owned_ids]
+
+    if owned_ids:
+        db.query(LandingPage).filter(LandingPage.id.in_(owned_ids)).update(
+            {"is_public": payload.is_public}, synchronize_session=False
+        )
+        db.commit()
+
+    return ShareBatchResponse(requested=len(lp_ids), updated=len(owned_ids), missing=missing)
 
 
 # ---------------------------------------------------------------------------

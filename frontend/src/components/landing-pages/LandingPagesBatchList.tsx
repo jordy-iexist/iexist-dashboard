@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState, useTransition } from "react"
 
+import { Button } from "@/components/ui/button"
 import { type LandingPageListItem } from "@/lib/landing-page-types"
 
 function formatDate(value: string) {
@@ -75,6 +76,22 @@ export function LandingPagesBatchList({
     [landingPages]
   )
 
+  const ownedToShare = useMemo(
+    () =>
+      selectedIds.filter((id) =>
+        landingPages.some((lp) => lp.id === id && lp.is_public === false)
+      ),
+    [selectedIds, landingPages]
+  )
+
+  const ownedToUnshare = useMemo(
+    () =>
+      selectedIds.filter((id) =>
+        landingPages.some((lp) => lp.id === id && lp.is_public === true)
+      ),
+    [selectedIds, landingPages]
+  )
+
   const allSelected = useMemo(
     () => ownedPages.length > 0 && selectedIds.length === ownedPages.length,
     [ownedPages.length, selectedIds.length]
@@ -130,6 +147,53 @@ export function LandingPagesBatchList({
     })
   }
 
+  const shareBatch = () => {
+    if (ownedToShare.length === 0 && ownedToUnshare.length === 0) return
+    setFeedback({ type: null, message: "" })
+    startTransition(async () => {
+      try {
+        const calls: Promise<Response>[] = []
+        if (ownedToShare.length > 0) {
+          calls.push(
+            fetch("/api/landing-pages/share/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ landing_page_ids: ownedToShare, is_public: true }),
+            })
+          )
+        }
+        if (ownedToUnshare.length > 0) {
+          calls.push(
+            fetch("/api/landing-pages/share/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ landing_page_ids: ownedToUnshare, is_public: false }),
+            })
+          )
+        }
+        const responses = await Promise.all(calls)
+        for (const r of responses) {
+          if (!r.ok) {
+            const payload = await r.json().catch(() => null)
+            throw new Error(getErrorMessage(payload, "Deling bijwerken is mislukt."))
+          }
+        }
+        const parts: string[] = []
+        if (ownedToShare.length > 0) parts.push(`${ownedToShare.length} gedeeld`)
+        if (ownedToUnshare.length > 0) parts.push(`${ownedToUnshare.length} niet meer gedeeld`)
+        setFeedback({ type: "success", message: `${parts.join(", ")} met team.` })
+        setSelectedIds([])
+        router.refresh()
+      } catch (error) {
+        setFeedback({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Deling bijwerken is mislukt.",
+        })
+      }
+    })
+  }
+
   return (
     <div className="space-y-4">
       {feedback.type && (
@@ -156,14 +220,24 @@ export function LandingPagesBatchList({
         </label>
 
         {selectedIds.length > 0 && (
-          <button
-            type="button"
-            onClick={deleteBatch}
-            disabled={isPending}
-            className="ml-auto rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-          >
-            Verwijder selectie ({selectedIds.length})
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={shareBatch}
+              disabled={isPending}
+            >
+              Deel met team ({selectedIds.length})
+            </Button>
+            <button
+              type="button"
+              onClick={deleteBatch}
+              disabled={isPending}
+              className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+            >
+              Verwijder selectie ({selectedIds.length})
+            </button>
+          </div>
         )}
       </div>
 

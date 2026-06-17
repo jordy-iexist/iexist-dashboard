@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Check, Link2 } from "lucide-react"
+import { Check, Link2, Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { type BlogsIdsResponse } from "@/lib/blog-types"
@@ -113,6 +113,7 @@ export type BlogListFilters = {
 type SelectedBlogInfo = {
   shareToken: string
   isOwner: boolean
+  isPublic: boolean
 }
 
 export function BlogsBatchPublishList({
@@ -204,6 +205,22 @@ export function BlogsBatchPublishList({
     [selectedBlogs]
   )
 
+  const ownedToShare = useMemo(
+    () =>
+      Object.entries(selectedBlogs)
+        .filter(([, info]) => info.isOwner && !info.isPublic)
+        .map(([id]) => id),
+    [selectedBlogs]
+  )
+
+  const ownedToUnshare = useMemo(
+    () =>
+      Object.entries(selectedBlogs)
+        .filter(([, info]) => info.isOwner && info.isPublic)
+        .map(([id]) => id),
+    [selectedBlogs]
+  )
+
   const sharedSelectedCount = selectedCount - ownedSelectedIds.length
 
   const allSelected = totalBlogs > 0 && selectedCount >= totalBlogs
@@ -213,7 +230,7 @@ export function BlogsBatchPublishList({
       if (checked) {
         return {
           ...current,
-          [blog.id]: { shareToken: blog.shareToken, isOwner: blog.isOwner },
+          [blog.id]: { shareToken: blog.shareToken, isOwner: blog.isOwner, isPublic: blog.isPublic },
         }
       }
       const next = { ...current }
@@ -262,6 +279,7 @@ export function BlogsBatchPublishList({
           next[item.id] = {
             shareToken: item.share_token,
             isOwner: item.is_owner,
+            isPublic: item.is_public ?? false,
           }
         }
         setSelectedBlogs(next)
@@ -415,6 +433,52 @@ export function BlogsBatchPublishList({
     })
   }
 
+  const shareBatch = () => {
+    if (ownedToShare.length === 0 && ownedToUnshare.length === 0) return
+    setFeedback({ type: null, message: "" })
+    startTransition(async () => {
+      try {
+        const calls: Promise<Response>[] = []
+        if (ownedToShare.length > 0) {
+          calls.push(
+            fetch("/api/blogs/share/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ blog_ids: ownedToShare, is_public: true }),
+            })
+          )
+        }
+        if (ownedToUnshare.length > 0) {
+          calls.push(
+            fetch("/api/blogs/share/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ blog_ids: ownedToUnshare, is_public: false }),
+            })
+          )
+        }
+        const responses = await Promise.all(calls)
+        for (const r of responses) {
+          if (!r.ok) {
+            const payload = await r.json().catch(() => null)
+            throw new Error(getErrorMessage(payload, "Deling bijwerken is mislukt."))
+          }
+        }
+        const parts: string[] = []
+        if (ownedToShare.length > 0) parts.push(`${ownedToShare.length} gedeeld`)
+        if (ownedToUnshare.length > 0) parts.push(`${ownedToUnshare.length} niet meer gedeeld`)
+        setFeedback({ type: "success", message: `${parts.join(", ")} met team.` })
+        router.refresh()
+      } catch (error) {
+        setFeedback({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Deling bijwerken is mislukt.",
+        })
+      }
+    })
+  }
+
   const publishBatch = () => {
     setFeedback({ type: null, message: "" })
     startTransition(async () => {
@@ -506,6 +570,14 @@ export function BlogsBatchPublishList({
             >
               {copiedSelection ? <Check /> : <Link2 />}
               Kopieer links ({selectedCount})
+            </Button>
+            <Button
+              variant="outline"
+              onClick={shareBatch}
+              disabled={ownedSelectedIds.length === 0 || isPending}
+            >
+              <Users />
+              Deel met team ({ownedSelectedIds.length})
             </Button>
             <Button
               variant="outline"

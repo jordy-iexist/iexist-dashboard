@@ -128,3 +128,14 @@ class DeleteBatchResponse(BaseModel):
     requested: int
     deleted: int
     missing: list[str] = Field(default_factory=list)
+
+
+class ShareBatchRequest(BaseModel):
+    landing_page_ids: list[str] = Field(default_factory=list)
+    is_public: bool
+
+
+class ShareBatchResponse(BaseModel):
+    requested: int
+    updated: int
+    missing: list[str] = Field(default_factory=list)

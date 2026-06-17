@@ -103,6 +103,7 @@ class BlogIdItem(BaseModel):
     id: str
     share_token: str
     is_owner: bool
+    is_public: bool = False
 
 
 class BlogsIdsResponse(BaseModel):
@@ -247,6 +248,17 @@ class DeleteBatchRequest(BaseModel):
 class DeleteBatchResponse(BaseModel):
     requested: int
     deleted: int
+    missing: list[str] = Field(default_factory=list)
+
+
+class ShareBatchRequest(BaseModel):
+    blog_ids: list[str] = Field(default_factory=list)
+    is_public: bool
+
+
+class ShareBatchResponse(BaseModel):
+    requested: int
+    updated: int
     missing: list[str] = Field(default_factory=list)
 
 

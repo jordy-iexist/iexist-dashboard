@@ -39,6 +39,7 @@ export type BlogIdItemPayload = {
   id: string
   share_token: string
   is_owner: boolean
+  is_public: boolean
 }
 
 export type BlogsIdsResponse = {

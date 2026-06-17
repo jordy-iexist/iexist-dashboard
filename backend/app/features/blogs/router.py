@@ -33,6 +33,8 @@ from app.features.blogs.schemas import (
     BlogShareResponse,
     DeleteBatchRequest,
     DeleteBatchResponse,
+    ShareBatchRequest,
+    ShareBatchResponse,
     BlogGenerationSettingsResponse,
     BlogGenerationSettingsUpdateRequest,
     BlogIdItem,
@@ -389,7 +391,7 @@ async def list_blog_ids(
     )
     rows = (
         base_query
-        .with_entities(Blog.id, Blog.share_token, Blog.created_by)
+        .with_entities(Blog.id, Blog.share_token, Blog.created_by, Blog.is_public)
         .order_by(Blog.created_at.desc())
         .limit(2000)
         .all()
@@ -399,8 +401,9 @@ async def list_blog_ids(
             id=str(blog_id),
             share_token=str(share_token),
             is_owner=str(created_by or "") == user_id,
+            is_public=bool(is_public),
         )
-        for blog_id, share_token, created_by in rows
+        for blog_id, share_token, created_by, is_public in rows
     ]
     return BlogsIdsResponse(blogs=items, total=len(items))
 
@@ -653,6 +656,33 @@ async def delete_blogs_batch(
         deleted=len(owned_ids),
         missing=missing,
     )
+
+
+@router.post("/api/blogs/share/batch", response_model=ShareBatchResponse)
+async def share_blogs_batch(
+    payload: ShareBatchRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+) -> ShareBatchResponse:
+    blog_ids = dedupe_ids(payload.blog_ids)
+    if not blog_ids:
+        raise HTTPException(status_code=400, detail="Minimaal één blog is verplicht.")
+
+    owned_rows = (
+        db.query(Blog.id)
+        .filter(Blog.id.in_(blog_ids), Blog.created_by == user_id)
+        .all()
+    )
+    owned_ids = [str(row.id) for row in owned_rows]
+    missing = [bid for bid in blog_ids if bid not in owned_ids]
+
+    if owned_ids:
+        db.query(Blog).filter(Blog.id.in_(owned_ids)).update(
+            {"is_public": payload.is_public}, synchronize_session=False
+        )
+        db.commit()
+
+    return ShareBatchResponse(requested=len(blog_ids), updated=len(owned_ids), missing=missing)
 
 
 @router.post("/api/csv/upload", response_model=UploadResponse)
