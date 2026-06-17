@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -7,12 +7,20 @@ from pydantic import BaseModel
 class CustomerWebsiteCreateRequest(BaseModel):
     name: str
     base_url: str
+    seo_customer_since: date | None = None
+    seo_goals: str | None = None
+    industry: str | None = None
+    target_blogs_per_month: int | None = None
 
 
 class CustomerWebsiteUpdateRequest(BaseModel):
     name: str | None = None
     base_url: str | None = None
     is_active: bool | None = None
+    seo_customer_since: date | None = None
+    seo_goals: str | None = None
+    industry: str | None = None
+    target_blogs_per_month: int | None = None
 
 
 class CustomerWebsiteItem(BaseModel):
@@ -21,9 +29,18 @@ class CustomerWebsiteItem(BaseModel):
     base_url: str
     domain: str
     is_active: bool
+    seo_customer_since: date | None = None
+    seo_goals: str | None = None
+    industry: str | None = None
+    target_blogs_per_month: int | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime
+
+
+class CustomerWebsiteDetailResponse(CustomerWebsiteItem):
+    placed_this_month: int = 0
+    pending_blogs: int | None = None
 
 
 class CustomerWebsitesResponse(BaseModel):

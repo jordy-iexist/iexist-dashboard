@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -270,6 +271,12 @@ class CustomerWebsite(Base):
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
+    )
+    seo_customer_since: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    seo_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target_blogs_per_month: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
     )
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
