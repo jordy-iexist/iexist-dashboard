@@ -3,6 +3,11 @@
 import { useRouter } from "next/navigation"
 import { X } from "lucide-react"
 
+import { BLOGS_CREATED_DATE_COOKIE } from "@/lib/blogs-date-filter"
+
+// 7 dagen, in dezelfde stijl als de sidebar-cookie.
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+
 export function CreatedDateFilter({
   selectedDay,
   scope,
@@ -30,9 +35,18 @@ export function CreatedDateFilter({
       const start = new Date(`${day}T00:00:00`)
       const end = new Date(start)
       end.setDate(end.getDate() + 1)
+      const createdFrom = start.toISOString()
+      const createdTo = end.toISOString()
       params.set("created_on", day)
-      params.set("created_from", start.toISOString())
-      params.set("created_to", end.toISOString())
+      params.set("created_from", createdFrom)
+      params.set("created_to", createdTo)
+      // Selectie onthouden over routes heen totdat de gebruiker hem wist.
+      const value = encodeURIComponent(
+        JSON.stringify({ createdOn: day, createdFrom, createdTo })
+      )
+      document.cookie = `${BLOGS_CREATED_DATE_COOKIE}=${value}; path=/; max-age=${COOKIE_MAX_AGE}`
+    } else {
+      document.cookie = `${BLOGS_CREATED_DATE_COOKIE}=; path=/; max-age=0`
     }
     const query = params.toString()
     router.push(query ? `${basePath}?${query}` : basePath)

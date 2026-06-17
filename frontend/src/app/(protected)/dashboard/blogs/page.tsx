@@ -22,6 +22,8 @@ import {
   type BlogRowData,
   type BlogsListResponse,
 } from "@/lib/blog-types"
+import { type CreatedDateParams } from "@/lib/blogs-date-filter"
+import { readCreatedDateCookie } from "@/lib/blogs-date-filter.server"
 
 export const metadata = {
   title: "Alle Blogs",
@@ -58,12 +60,6 @@ function parseCustomerParam(value: SearchParamsValue): string | null {
   const raw = Array.isArray(value) ? value[0] : value
   const trimmed = raw?.trim() ?? ""
   return trimmed.length > 0 ? trimmed : null
-}
-
-type CreatedDateParams = {
-  createdOn: string | null
-  createdFrom: string | null
-  createdTo: string | null
 }
 
 function parseCreatedDateParams(
@@ -233,7 +229,12 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   const page = parsePageParam(params.page)
   const scope = parseScopeParam(params.scope)
   const customerFilter = parseCustomerParam(params.customer_website_id)
-  const createdDate = parseCreatedDateParams(params)
+  // URL heeft voorrang; bij een kale URL valt het filter terug op de
+  // onthouden datumselectie uit de cookie (blijft staan tot de gebruiker wist).
+  const createdDateFromUrl = parseCreatedDateParams(params)
+  const createdDate: CreatedDateParams = createdDateFromUrl.createdOn
+    ? createdDateFromUrl
+    : await readCreatedDateCookie()
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
