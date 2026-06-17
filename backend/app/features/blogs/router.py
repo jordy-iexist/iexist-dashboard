@@ -99,7 +99,7 @@ from app.features.blogs.services.wordpress_service import (
 )
 from app.features.settings.services import (
     MissingUserOpenAIKeyError,
-    require_personal_openai_api_key,
+    resolve_openai_api_key,
 )
 from app.worker.tasks import (
     enqueue_blog_image_generation,
@@ -732,7 +732,7 @@ async def upload_csv(
 ):
     """Upload CSV, validate prompt placeholders/mappings, and queue jobs per row."""
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -883,7 +883,7 @@ async def manual_upload(
 ):
     """Accept pre-filled rows (no CSV file) and queue blog generation jobs."""
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1477,7 +1477,7 @@ async def queue_blog_image_generation(
 ):
     ensure_blog_exists(blog_id, user_id)
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

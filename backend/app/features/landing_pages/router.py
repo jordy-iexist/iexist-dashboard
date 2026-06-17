@@ -58,7 +58,7 @@ from app.features.landing_pages.services.generation.openai import (
 )
 from app.features.settings.services import (
     MissingUserOpenAIKeyError,
-    require_personal_openai_api_key,
+    resolve_openai_api_key,
 )
 from app.worker.tasks import generate_landing_page_task
 
@@ -94,7 +94,7 @@ async def upload_landing_page_csv(
         raise HTTPException(status_code=400, detail="Bestand moet een CSV zijn.")
 
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -206,7 +206,7 @@ async def manual_landing_page_upload(
 ):
     """Accept pre-filled rows (no CSV file) and queue landing page generation jobs."""
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

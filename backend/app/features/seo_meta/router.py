@@ -21,7 +21,7 @@ from app.features.seo_meta.schemas import (
 from app.features.seo_meta.services import clamp_meta_page_limit, normalize_path_filters
 from app.features.settings.services import (
     MissingUserOpenAIKeyError,
-    require_personal_openai_api_key,
+    resolve_openai_api_key,
 )
 from app.worker.tasks import run_website_meta_optimization_task
 
@@ -55,7 +55,7 @@ async def start_website_meta_run(
     if not bool(website.is_active):
         raise HTTPException(status_code=400, detail="Website is gedeactiveerd.")
     try:
-        require_personal_openai_api_key(user_id, db)
+        resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
