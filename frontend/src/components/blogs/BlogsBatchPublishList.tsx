@@ -148,6 +148,32 @@ export function BlogsBatchPublishList({
     }
   }, [])
 
+  // Houd de metadata van geselecteerde blogs (isPublic/isOwner) in sync met verse
+  // serverdata na router.refresh(), zodat de deel/ontdeel-keuze niet op een stale
+  // snapshot draait.
+  useEffect(() => {
+    setSelectedBlogs((current) => {
+      if (Object.keys(current).length === 0) return current
+      let changed = false
+      const next = { ...current }
+      for (const blog of blogs) {
+        const selected = next[blog.id]
+        if (
+          selected &&
+          (selected.isPublic !== blog.isPublic || selected.isOwner !== blog.isOwner)
+        ) {
+          next[blog.id] = {
+            ...selected,
+            isPublic: blog.isPublic,
+            isOwner: blog.isOwner,
+          }
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [blogs])
+
   const selectedCount = useMemo(
     () => Object.keys(selectedBlogs).length,
     [selectedBlogs]
