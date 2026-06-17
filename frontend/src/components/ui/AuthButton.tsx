@@ -22,7 +22,7 @@ export function AuthButton({ user }: AuthButtonProps) {
       asChild
       className="bg-[#FAB806] text-[#171d35] hover:bg-[#e5a605]"
     >
-      <Link href="/signup">Sign up</Link>
+      <Link href="/login">Inloggen</Link>
     </Button>
   )
 }

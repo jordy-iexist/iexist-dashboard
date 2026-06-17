@@ -15,20 +15,13 @@ export default function Home() {
           className="h-auto w-full max-w-2xs"
         />
 
-        <div className="mt-12 flex w-full max-w-sm flex-col gap-3 sm:flex-row">
+        <div className="mt-12 flex w-full max-w-sm flex-col gap-3">
           <Button
             asChild
             size="lg"
             className="h-12 flex-1 bg-brand-blue text-white hover:bg-brand-blue-light focus-visible:ring-brand-blue/40"
           >
             <Link href="/login">Inloggen</Link>
-          </Button>
-          <Button
-            asChild
-            size="lg"
-            className="h-12 flex-1 bg-brand-yellow font-semibold text-brand-blue hover:bg-brand-yellow/85 focus-visible:ring-brand-yellow/50"
-          >
-            <Link href="/signup">Registreren</Link>
           </Button>
         </div>
       </div>

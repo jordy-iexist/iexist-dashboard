@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Redirect authenticated users from auth pages to dashboard
-  if ((request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup') && isAuthenticated) {
+  if (request.nextUrl.pathname === '/login' && isAuthenticated) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return Response.redirect(url)
@@ -33,7 +33,6 @@ export const config = {
   matcher: [
     '/',
     '/login',
-    '/signup',
     '/dashboard/:path*',
   ],
 }

@@ -7,8 +7,6 @@ from fastapi.responses import FileResponse
 from app.core.auth import (
     authenticate_user,
     create_access_token,
-    create_user,
-    get_user_by_email,
     get_user_by_id,
     revoke_access_token,
     to_public_user,
@@ -28,41 +26,8 @@ async def root():
     return {"message": "Welcome to FastAPI Backend"}
 
 
-@router.post("/api/auth/signup", response_model=AuthResponse)
-async def signup(payload: AuthCredentialsRequest, request: Request):
-    enforce_rate_limit(request, "signup", limit=5, window_seconds=60)
-    email = str(payload.email or "").strip().lower()
-    password = str(payload.password or "")
-    if not email:
-        raise HTTPException(status_code=400, detail="E-mailadres is verplicht.")
-    if len(password) < 8:
-        raise HTTPException(
-            status_code=400, detail="Wachtwoord moet minimaal 8 tekens lang zijn."
-        )
-
-    if get_user_by_email(email):
-        raise HTTPException(
-            status_code=409, detail="Er bestaat al een account met dit e-mailadres."
-        )
-
-    try:
-        user = create_user(email, password)
-    except ValueError as exc:
-        message = str(exc).lower()
-        if "unique" in message and "email" in message:
-            raise HTTPException(
-                status_code=409,
-                detail="Er bestaat al een account met dit e-mailadres.",
-            ) from exc
-        raise HTTPException(
-            status_code=400,
-            detail="Account aanmaken mislukt.",
-        ) from exc
-    token = create_access_token(user_id=str(user["id"]), email=str(user["email"]))
-    return AuthResponse(
-        access_token=token,
-        user=AuthUserItem(**to_public_user(user)),
-    )
+# Publieke registratie is uitgeschakeld. Accounts worden handmatig op de server
+# aangemaakt via backend/scripts/create_user.py.
 
 
 @router.post("/api/auth/login", response_model=AuthResponse)

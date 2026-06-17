@@ -10,9 +10,6 @@ export default function Header() {
         </Link>
 
         <nav className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/signup">Aanmelden</Link>
-          </Button>
           <Button
             asChild
             className="bg-[#FAB806] text-[#171d35] hover:bg-[#FAB806]/90 font-semibold"
