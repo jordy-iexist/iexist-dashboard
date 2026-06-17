@@ -4,7 +4,7 @@ import { OpenAISettings } from "@/components/settings/OpenAISettings"
 import { WordPressSitesSettings } from "@/components/settings/WordPressSitesSettings"
 
 export const metadata = {
-  title: "Settings",
+  title: "Instellingen",
 }
 
 export default async function SettingsPage() {
@@ -17,7 +17,7 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Instellingen</h1>
         <p className="text-muted-foreground">
           Beheer je account instellingen
         </p>
@@ -25,14 +25,14 @@ export default async function SettingsPage() {
 
       <div className="space-y-6">
         <div className="rounded-lg border p-6">
-          <h2 className="text-lg font-semibold mb-4">Profile</h2>
+          <h2 className="text-lg font-semibold mb-4">Profiel</h2>
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium">Email</label>
               <p className="text-sm text-muted-foreground mt-1">{user.email}</p>
             </div>
             <div>
-              <label className="text-sm font-medium">User ID</label>
+              <label className="text-sm font-medium">Gebruikers id</label>
               <p className="text-sm text-muted-foreground mt-1 font-mono">{user.id}</p>
             </div>
           </div>

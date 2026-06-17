@@ -109,7 +109,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <LayoutDashboard className="size-4" />
+                  <img src="/iExist-favicon-X-blauwgeel.svg" alt="Logo" className="size-4" />
                 </div>
                 <div className="flex flex-col gap-0.5 leading-none">
                   <span className="font-semibold">Dashboard</span>
@@ -123,7 +123,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Navigatie</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => {
@@ -287,11 +287,11 @@ export function AppSidebar({ user }: { user: AuthUser }) {
             <SidebarMenuButton
               asChild
               isActive={pathname === "/dashboard/settings"}
-              tooltip="Settings"
+              tooltip="Instellingen"
             >
               <Link href="/dashboard/settings">
                 <Settings />
-                <span>Settings</span>
+                <span>Instellingen</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -316,7 +316,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
                   className="flex w-full items-center gap-2"
                 >
                   <LogOut />
-                  <span>Logout</span>
+                  <span>Uitloggen</span>
                 </button>
               </form>
             </SidebarMenuButton>

@@ -13,7 +13,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">
-            Login to your account
+            Inloggen op je account
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             Of{' '}
@@ -21,7 +21,7 @@ export default function LoginPage() {
               href="/signup"
               className="font-medium text-blue-600 hover:text-blue-500"
             >
-              create a new account
+              Maak een nieuw account
             </Link>
           </p>
         </div>
