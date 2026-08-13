@@ -5,7 +5,12 @@ import { ChevronRight, CircleAlert, CircleCheck } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { type CustomerWebsiteListItem, type CustomersResponse } from "@/lib/customer-types"
+import { CategoryManagerDialog } from "@/components/klanten/CategoryManagerDialog"
+import {
+  type CustomerCategory,
+  type CustomerWebsiteListItem,
+  type CustomersResponse,
+} from "@/lib/customer-types"
 
 type Feedback = {
   type: "success" | "error" | null
@@ -61,15 +66,45 @@ function PlacementBadge({
   )
 }
 
+function CategoryBadge({ name }: { name: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+      {name}
+    </span>
+  )
+}
+
 export function KlantenManager() {
   const [customers, setCustomers] = useState<CustomerWebsiteListItem[]>([])
+  const [categories, setCategories] = useState<CustomerCategory[]>([])
+  const [categoryFilter, setCategoryFilter] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<Feedback>({ type: null, message: "" })
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
 
-  const loadCustomers = useCallback(async () => {
+  const loadCategories = useCallback(async () => {
+    try {
+      const response = await fetch("/api/customer-categories", { cache: "no-store" })
+      if (!response.ok) return
+      const payload = (await response.json().catch(() => null)) as
+        | { categories?: CustomerCategory[] }
+        | null
+      setCategories(payload?.categories ?? [])
+    } catch {
+      // Filter list keeps its previous state; the manager dialog surfaces errors.
+    }
+  }, [])
+
+  const loadCustomers = useCallback(async (category: string) => {
     setIsLoading(true)
     try {
-      const response = await fetch("/api/customers", { cache: "no-store" })
+      const params = new URLSearchParams()
+      if (category) params.set("category_id", category)
+      const query = params.toString()
+      const response = await fetch(
+        `/api/customers${query ? `?${query}` : ""}`,
+        { cache: "no-store" }
+      )
       const payload = (await response.json().catch(() => null)) as
         | (CustomersResponse & ErrorResponse)
         | null
@@ -89,8 +124,12 @@ export function KlantenManager() {
   }, [])
 
   useEffect(() => {
-    void loadCustomers()
-  }, [loadCustomers])
+    void loadCategories()
+  }, [loadCategories])
+
+  useEffect(() => {
+    void loadCustomers(categoryFilter)
+  }, [loadCustomers, categoryFilter])
 
   return (
     <div className="space-y-6">
@@ -107,11 +146,34 @@ export function KlantenManager() {
       )}
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Alle klanten</h2>
-          <Button asChild size="sm">
-            <Link href="/dashboard/klanten/nieuw">Klant toevoegen</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              aria-label="Filter op categorie"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">Alle categorieën</option>
+              <option value="none">Zonder categorie</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsCategoryDialogOpen(true)}
+            >
+              Categorieën
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/dashboard/klanten/nieuw">Klant toevoegen</Link>
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -138,6 +200,9 @@ export function KlantenManager() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {customer.category_name && (
+                    <CategoryBadge name={customer.category_name} />
+                  )}
                   <PlacementBadge
                     placed={customer.placed_this_month}
                     target={customer.target_blogs_per_month}
@@ -149,6 +214,15 @@ export function KlantenManager() {
           </div>
         )}
       </div>
+
+      <CategoryManagerDialog
+        open={isCategoryDialogOpen}
+        onOpenChange={setIsCategoryDialogOpen}
+        onCategoriesChanged={() => {
+          void loadCategories()
+          void loadCustomers(categoryFilter)
+        }}
+      />
     </div>
   )
 }

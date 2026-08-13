@@ -5,6 +5,7 @@ import { useState, useTransition } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CategorySelect } from "@/components/klanten/CategorySelect"
 
 type Feedback = {
   type: "success" | "error" | null
@@ -24,7 +25,7 @@ type FormState = {
   baseUrl: string
   seoCustomerSince: string
   seoGoals: string
-  industry: string
+  categoryId: string
   targetBlogsPerMonth: string
 }
 
@@ -33,7 +34,7 @@ const EMPTY_FORM: FormState = {
   baseUrl: "",
   seoCustomerSince: "",
   seoGoals: "",
-  industry: "",
+  categoryId: "",
   targetBlogsPerMonth: "",
 }
 
@@ -72,7 +73,7 @@ export function NieuweKlantForm() {
             base_url: form.baseUrl.trim(),
             seo_customer_since: form.seoCustomerSince.trim() || null,
             seo_goals: form.seoGoals.trim() || null,
-            industry: form.industry.trim() || null,
+            category_id: form.categoryId || null,
             target_blogs_per_month: parsedTarget,
           }),
         })
@@ -137,11 +138,10 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">Branche / categorieën</label>
-          <Input
-            placeholder="Bijv. Zakelijke dienstverlening"
-            value={form.industry}
-            onChange={(event) => updateField("industry", event.target.value)}
+          <label className="text-xs font-medium">Branche / categorie</label>
+          <CategorySelect
+            value={form.categoryId}
+            onChange={(value) => updateField("categoryId", value)}
             disabled={isPending}
           />
         </div>

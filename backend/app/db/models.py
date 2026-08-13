@@ -262,6 +262,27 @@ class BlogImage(Base):
     blog: Mapped["Blog"] = relationship("Blog", back_populates="images")
 
 
+class CustomerCategory(Base):
+    __tablename__ = "customer_categories"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_customer_categories_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    customer_websites: Mapped[list["CustomerWebsite"]] = relationship(
+        "CustomerWebsite", back_populates="category"
+    )
+
+
 class CustomerWebsite(Base):
     __tablename__ = "customer_websites"
 
@@ -274,7 +295,12 @@ class CustomerWebsite(Base):
     )
     seo_customer_since: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     seo_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("customer_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     target_blogs_per_month: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
     )
@@ -286,6 +312,9 @@ class CustomerWebsite(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
+    category: Mapped[Optional["CustomerCategory"]] = relationship(
+        "CustomerCategory", back_populates="customer_websites"
+    )
     keywords: Mapped[list["WebsiteKeyword"]] = relationship(
         "WebsiteKeyword", back_populates="website"
     )

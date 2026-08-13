@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.dependencies import require_user_id, utc_now_iso
-from app.db.models import CustomerWebsite, SerpScan, SerpScanResult, WebsiteKeyword, WebsiteMetaRun
+from app.db.models import (
+    CustomerCategory,
+    CustomerWebsite,
+    SerpScan,
+    SerpScanResult,
+    WebsiteKeyword,
+    WebsiteMetaRun,
+)
 from app.db.session import get_db
 from app.features.seo_tracker.mappers import (
     to_customer_website_item,
@@ -42,6 +49,28 @@ router = APIRouter(tags=["seo"])
 
 def _row_to_dict(obj: Any) -> dict[str, Any]:
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}  # type: ignore[union-attr]
+
+
+def _category_name_map(
+    db: Session, category_ids: list[str | None]
+) -> dict[str, str]:
+    ids = {cid for cid in category_ids if cid}
+    if not ids:
+        return {}
+    categories = (
+        db.query(CustomerCategory).filter(CustomerCategory.id.in_(ids)).all()
+    )
+    return {str(c.id): c.name for c in categories}
+
+
+def _with_category_name(db: Session, website: CustomerWebsite) -> dict[str, Any]:
+    names = _category_name_map(db, [website.category_id])
+    return {
+        **_row_to_dict(website),
+        "category_name": names.get(str(website.category_id))
+        if website.category_id
+        else None,
+    }
 
 
 @router.post("/api/seo/websites", response_model=CustomerWebsiteItem)
@@ -83,7 +112,7 @@ async def create_customer_website(
     db.add(website)
     db.commit()
     db.refresh(website)
-    return to_customer_website_item(_row_to_dict(website))
+    return to_customer_website_item(_with_category_name(db, website))
 
 
 @router.get("/api/seo/websites", response_model=CustomerWebsitesResponse)
@@ -96,8 +125,19 @@ async def list_customer_websites(
         .order_by(CustomerWebsite.created_at.desc())
         .all()
     )
+    category_names = _category_name_map(db, [w.category_id for w in websites])
     return CustomerWebsitesResponse(
-        websites=[to_customer_website_item(_row_to_dict(w)) for w in websites]
+        websites=[
+            to_customer_website_item(
+                {
+                    **_row_to_dict(w),
+                    "category_name": category_names.get(str(w.category_id))
+                    if w.category_id
+                    else None,
+                }
+            )
+            for w in websites
+        ]
     )
 
 
@@ -168,7 +208,7 @@ async def update_customer_website(
     )
     if not updated_website:
         raise HTTPException(status_code=500, detail="Kon website niet bijwerken.")
-    return to_customer_website_item(_row_to_dict(updated_website))
+    return to_customer_website_item(_with_category_name(db, updated_website))
 
 
 @router.delete("/api/seo/websites/{website_id}")

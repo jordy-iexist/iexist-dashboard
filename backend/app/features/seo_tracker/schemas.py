@@ -9,7 +9,7 @@ class CustomerWebsiteCreateRequest(BaseModel):
     base_url: str
     seo_customer_since: date | None = None
     seo_goals: str | None = None
-    industry: str | None = None
+    category_id: str | None = None
     target_blogs_per_month: int | None = None
 
 
@@ -19,7 +19,7 @@ class CustomerWebsiteUpdateRequest(BaseModel):
     is_active: bool | None = None
     seo_customer_since: date | None = None
     seo_goals: str | None = None
-    industry: str | None = None
+    category_id: str | None = None
     target_blogs_per_month: int | None = None
 
 
@@ -31,7 +31,8 @@ class CustomerWebsiteItem(BaseModel):
     is_active: bool
     seo_customer_since: date | None = None
     seo_goals: str | None = None
-    industry: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
     target_blogs_per_month: int | None = None
     created_by: str
     created_at: datetime
@@ -53,6 +54,26 @@ class CustomerWebsiteListItem(CustomerWebsiteItem):
 
 class CustomerWebsitesListResponse(BaseModel):
     websites: list[CustomerWebsiteListItem]
+
+
+class CustomerCategoryItem(BaseModel):
+    id: str
+    name: str
+    customer_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class CustomerCategoriesResponse(BaseModel):
+    categories: list[CustomerCategoryItem]
+
+
+class CustomerCategoryCreateRequest(BaseModel):
+    name: str
+
+
+class CustomerCategoryUpdateRequest(BaseModel):
+    name: str
 
 
 class WebsiteKeywordCreateRequest(BaseModel):

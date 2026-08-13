@@ -7,10 +7,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_user_id, utc_now_iso
-from app.db.models import Blog, CustomerWebsite
+from app.db.models import Blog, CustomerCategory, CustomerWebsite
 from app.db.session import get_db
 from app.features.seo_tracker.mappers import to_customer_website_item
 from app.features.seo_tracker.schemas import (
+    CustomerCategoriesResponse,
+    CustomerCategoryCreateRequest,
+    CustomerCategoryItem,
+    CustomerCategoryUpdateRequest,
     CustomerWebsiteCreateRequest,
     CustomerWebsiteDetailResponse,
     CustomerWebsiteItem,
@@ -25,6 +29,28 @@ router = APIRouter(tags=["customers"])
 
 def _row_to_dict(obj: Any) -> dict[str, Any]:
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}  # type: ignore[union-attr]
+
+
+def _category_name_map(
+    db: Session, category_ids: list[str | None]
+) -> dict[str, str]:
+    ids = {cid for cid in category_ids if cid}
+    if not ids:
+        return {}
+    categories = (
+        db.query(CustomerCategory).filter(CustomerCategory.id.in_(ids)).all()
+    )
+    return {str(c.id): c.name for c in categories}
+
+
+def _customer_counts_by_category(db: Session) -> dict[str, int]:
+    rows = (
+        db.query(CustomerWebsite.category_id, func.count(CustomerWebsite.id))
+        .filter(CustomerWebsite.category_id.isnot(None))
+        .group_by(CustomerWebsite.category_id)
+        .all()
+    )
+    return {str(category_id): int(count) for category_id, count in rows}
 
 
 def _current_month_bounds() -> tuple[datetime, datetime]:
@@ -60,18 +86,31 @@ def _placed_counts_by_customer(
 @router.get("/api/customers", response_model=CustomerWebsitesListResponse)
 async def list_customers(
     active_only: bool = Query(default=False),
+    category_id: str | None = Query(default=None),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
     query = db.query(CustomerWebsite)
     if active_only:
         query = query.filter(CustomerWebsite.is_active.is_(True))
+    if category_id == "none":
+        query = query.filter(CustomerWebsite.category_id.is_(None))
+    elif category_id:
+        query = query.filter(CustomerWebsite.category_id == category_id)
     websites = query.order_by(CustomerWebsite.name.asc()).all()
     placed_counts = _placed_counts_by_customer(db, [str(w.id) for w in websites])
+    category_names = _category_name_map(db, [w.category_id for w in websites])
     return CustomerWebsitesListResponse(
         websites=[
             CustomerWebsiteListItem(
-                **to_customer_website_item(_row_to_dict(w)).model_dump(),
+                **to_customer_website_item(
+                    {
+                        **_row_to_dict(w),
+                        "category_name": category_names.get(str(w.category_id))
+                        if w.category_id
+                        else None,
+                    }
+                ).model_dump(),
                 placed_this_month=placed_counts.get(str(w.id), 0),
             )
             for w in websites
@@ -99,7 +138,15 @@ async def get_customer(
         customer_id, 0
     )
 
-    base = to_customer_website_item(_row_to_dict(website))
+    category_names = _category_name_map(db, [website.category_id])
+    base = to_customer_website_item(
+        {
+            **_row_to_dict(website),
+            "category_name": category_names.get(str(website.category_id))
+            if website.category_id
+            else None,
+        }
+    )
     return CustomerWebsiteDetailResponse(
         **base.model_dump(),
         placed_this_month=placed_this_month,
@@ -131,6 +178,16 @@ async def create_customer(
             detail="Er bestaat al een klant met dit domein.",
         )
 
+    category_id = payload.category_id or None
+    if category_id:
+        category = (
+            db.query(CustomerCategory)
+            .filter(CustomerCategory.id == category_id)
+            .first()
+        )
+        if not category:
+            raise HTTPException(status_code=400, detail="Categorie niet gevonden.")
+
     website_id = str(uuid.uuid4())
     now = utc_now_iso()
     website = CustomerWebsite(
@@ -143,9 +200,7 @@ async def create_customer(
         seo_goals=(payload.seo_goals.strip() or None)
         if isinstance(payload.seo_goals, str)
         else None,
-        industry=(payload.industry.strip() or None)
-        if isinstance(payload.industry, str)
-        else None,
+        category_id=category_id,
         target_blogs_per_month=payload.target_blogs_per_month,
         created_by=user_id,
         created_at=now,
@@ -154,7 +209,15 @@ async def create_customer(
     db.add(website)
     db.commit()
     db.refresh(website)
-    return to_customer_website_item(_row_to_dict(website))
+    category_names = _category_name_map(db, [website.category_id])
+    return to_customer_website_item(
+        {
+            **_row_to_dict(website),
+            "category_name": category_names.get(str(website.category_id))
+            if website.category_id
+            else None,
+        }
+    )
 
 
 @router.patch("/api/customers/{customer_id}", response_model=CustomerWebsiteItem)
@@ -214,12 +277,19 @@ async def update_customer(
             if isinstance(payload.seo_goals, str)
             else None
         )
-    if "industry" in provided:
-        updates["industry"] = (
-            payload.industry.strip() or None
-            if isinstance(payload.industry, str)
-            else None
-        )
+    if "category_id" in provided:
+        next_category_id = payload.category_id or None
+        if next_category_id:
+            category = (
+                db.query(CustomerCategory)
+                .filter(CustomerCategory.id == next_category_id)
+                .first()
+            )
+            if not category:
+                raise HTTPException(
+                    status_code=400, detail="Categorie niet gevonden."
+                )
+        updates["category_id"] = next_category_id
     if "target_blogs_per_month" in provided:
         updates["target_blogs_per_month"] = payload.target_blogs_per_month
 
@@ -238,4 +308,135 @@ async def update_customer(
     )
     if not updated_website:
         raise HTTPException(status_code=500, detail="Kon klant niet bijwerken.")
-    return to_customer_website_item(_row_to_dict(updated_website))
+    category_names = _category_name_map(db, [updated_website.category_id])
+    return to_customer_website_item(
+        {
+            **_row_to_dict(updated_website),
+            "category_name": category_names.get(str(updated_website.category_id))
+            if updated_website.category_id
+            else None,
+        }
+    )
+
+
+@router.get("/api/customer-categories", response_model=CustomerCategoriesResponse)
+async def list_customer_categories(
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    categories = db.query(CustomerCategory).order_by(CustomerCategory.name.asc()).all()
+    counts = _customer_counts_by_category(db)
+    return CustomerCategoriesResponse(
+        categories=[
+            CustomerCategoryItem(
+                id=str(c.id),
+                name=c.name,
+                customer_count=counts.get(str(c.id), 0),
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+            )
+            for c in categories
+        ]
+    )
+
+
+@router.post("/api/customer-categories", response_model=CustomerCategoryItem)
+async def create_customer_category(
+    payload: CustomerCategoryCreateRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Naam is verplicht.")
+
+    duplicate = (
+        db.query(CustomerCategory)
+        .filter(func.lower(CustomerCategory.name) == name.lower())
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Deze categorie bestaat al.")
+
+    now = utc_now_iso()
+    category = CustomerCategory(
+        id=str(uuid.uuid4()),
+        name=name,
+        created_by=user_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return CustomerCategoryItem(
+        id=str(category.id),
+        name=category.name,
+        customer_count=0,
+        created_at=category.created_at,
+        updated_at=category.updated_at,
+    )
+
+
+@router.patch(
+    "/api/customer-categories/{category_id}", response_model=CustomerCategoryItem
+)
+async def update_customer_category(
+    category_id: str,
+    payload: CustomerCategoryUpdateRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    category = (
+        db.query(CustomerCategory).filter(CustomerCategory.id == category_id).first()
+    )
+    if not category:
+        raise HTTPException(status_code=404, detail="Categorie niet gevonden.")
+
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Naam mag niet leeg zijn.")
+
+    duplicate = (
+        db.query(CustomerCategory)
+        .filter(
+            func.lower(CustomerCategory.name) == name.lower(),
+            CustomerCategory.id != category_id,
+        )
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Deze categorie bestaat al.")
+
+    category.name = name
+    category.updated_at = utc_now_iso()
+    db.commit()
+    db.refresh(category)
+    counts = _customer_counts_by_category(db)
+    return CustomerCategoryItem(
+        id=str(category.id),
+        name=category.name,
+        customer_count=counts.get(str(category.id), 0),
+        created_at=category.created_at,
+        updated_at=category.updated_at,
+    )
+
+
+@router.delete("/api/customer-categories/{category_id}")
+async def delete_customer_category(
+    category_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    category = (
+        db.query(CustomerCategory).filter(CustomerCategory.id == category_id).first()
+    )
+    if not category:
+        raise HTTPException(status_code=404, detail="Categorie niet gevonden.")
+
+    db.query(CustomerWebsite).filter(
+        CustomerWebsite.category_id == category_id
+    ).update({"category_id": None})
+    db.delete(category)
+    db.commit()
+    return {"success": True}

@@ -6,26 +6,15 @@ import {
   readBackendError,
 } from "@/lib/backend-api"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const userId = await getAuthenticatedUserId()
   if (!userId) {
     return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 })
   }
 
-  const activeOnly = request.nextUrl.searchParams.get("active_only")
-  const categoryId = request.nextUrl.searchParams.get("category_id")
-  const params = new URLSearchParams()
-  if (activeOnly === "true") {
-    params.set("active_only", "true")
-  }
-  if (categoryId) {
-    params.set("category_id", categoryId)
-  }
-  const query = params.toString() ? `?${params.toString()}` : ""
-
   const backendUrl = getBackendApiUrl()
   try {
-    const response = await fetch(`${backendUrl}/api/customers${query}`, {
+    const response = await fetch(`${backendUrl}/api/customer-categories`, {
       method: "GET",
       headers: {
         Authorization: userId,
@@ -34,7 +23,10 @@ export async function GET(request: NextRequest) {
     })
 
     if (!response.ok) {
-      const error = await readBackendError(response, "Kon klanten niet ophalen.")
+      const error = await readBackendError(
+        response,
+        "Kon categorieën niet ophalen."
+      )
       return NextResponse.json({ error }, { status: response.status })
     }
 
@@ -68,7 +60,7 @@ export async function POST(request: NextRequest) {
 
   const backendUrl = getBackendApiUrl()
   try {
-    const response = await fetch(`${backendUrl}/api/customers`, {
+    const response = await fetch(`${backendUrl}/api/customer-categories`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -78,7 +70,10 @@ export async function POST(request: NextRequest) {
     })
 
     if (!response.ok) {
-      const error = await readBackendError(response, "Kon klant niet toevoegen.")
+      const error = await readBackendError(
+        response,
+        "Kon categorie niet toevoegen."
+      )
       return NextResponse.json({ error }, { status: response.status })
     }
 
