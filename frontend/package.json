@@ -24,7 +24,7 @@
     "clsx": "^2.1.1",
     "lodash": "^4.18.1",
     "lucide-react": "^0.562.0",
-    "marked": "^18.0.9",
+    "marked": "^4.0.10",
     "next": "16.2.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -32,6 +32,12 @@
     "react-responsive-carousel": "^3.2.23",
     "tailwind-merge": "^3.4.0",
     "tiptap-markdown": "^0.9.0"
+  },
+  "overrides": {
+    "@glideapps/glide-data-grid": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
