@@ -8,6 +8,8 @@ export type CustomerWebsiteItem = {
   category_id: string | null
   category_name: string | null
   target_blogs_per_month: number | null
+  target_links_per_month: number | null
+  spreadsheet_url: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -15,11 +17,13 @@ export type CustomerWebsiteItem = {
 
 export type CustomerWebsiteDetail = CustomerWebsiteItem & {
   placed_this_month: number
+  links_placed_this_month: number
   pending_blogs: number | null
 }
 
 export type CustomerWebsiteListItem = CustomerWebsiteItem & {
   placed_this_month: number
+  links_placed_this_month: number
 }
 
 export type CustomersResponse = {

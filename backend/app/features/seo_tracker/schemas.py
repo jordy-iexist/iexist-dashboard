@@ -11,6 +11,8 @@ class CustomerWebsiteCreateRequest(BaseModel):
     seo_goals: str | None = None
     category_id: str | None = None
     target_blogs_per_month: int | None = None
+    target_links_per_month: int | None = None
+    spreadsheet_url: str | None = None
 
 
 class CustomerWebsiteUpdateRequest(BaseModel):
@@ -20,6 +22,8 @@ class CustomerWebsiteUpdateRequest(BaseModel):
     seo_goals: str | None = None
     category_id: str | None = None
     target_blogs_per_month: int | None = None
+    target_links_per_month: int | None = None
+    spreadsheet_url: str | None = None
 
 
 class CustomerWebsiteItem(BaseModel):
@@ -32,6 +36,8 @@ class CustomerWebsiteItem(BaseModel):
     category_id: str | None = None
     category_name: str | None = None
     target_blogs_per_month: int | None = None
+    target_links_per_month: int | None = None
+    spreadsheet_url: str | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -39,6 +45,7 @@ class CustomerWebsiteItem(BaseModel):
 
 class CustomerWebsiteDetailResponse(CustomerWebsiteItem):
     placed_this_month: int = 0
+    links_placed_this_month: int = 0
     pending_blogs: int | None = None
 
 
@@ -48,6 +55,7 @@ class CustomerWebsitesResponse(BaseModel):
 
 class CustomerWebsiteListItem(CustomerWebsiteItem):
     placed_this_month: int = 0
+    links_placed_this_month: int = 0
 
 
 class CustomerWebsitesListResponse(BaseModel):

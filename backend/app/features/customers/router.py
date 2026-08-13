@@ -110,6 +110,8 @@ async def list_customers(
                     }
                 ).model_dump(),
                 placed_this_month=placed_counts.get(str(w.id), 0),
+                # Placeholder until linkbuilding registration exists.
+                links_placed_this_month=0,
             )
             for w in websites
         ]
@@ -148,6 +150,8 @@ async def get_customer(
     return CustomerWebsiteDetailResponse(
         **base.model_dump(),
         placed_this_month=placed_this_month,
+        # Placeholder until linkbuilding registration exists.
+        links_placed_this_month=0,
         pending_blogs=None,
     )
 
@@ -199,6 +203,10 @@ async def create_customer(
         else None,
         category_id=category_id,
         target_blogs_per_month=payload.target_blogs_per_month,
+        target_links_per_month=payload.target_links_per_month,
+        spreadsheet_url=(payload.spreadsheet_url.strip() or None)
+        if isinstance(payload.spreadsheet_url, str)
+        else None,
         created_by=user_id,
         created_at=now,
         updated_at=now,
@@ -286,6 +294,14 @@ async def update_customer(
         updates["category_id"] = next_category_id
     if "target_blogs_per_month" in provided:
         updates["target_blogs_per_month"] = payload.target_blogs_per_month
+    if "target_links_per_month" in provided:
+        updates["target_links_per_month"] = payload.target_links_per_month
+    if "spreadsheet_url" in provided:
+        updates["spreadsheet_url"] = (
+            payload.spreadsheet_url.strip() or None
+            if isinstance(payload.spreadsheet_url, str)
+            else None
+        )
 
     if len(updates) == 1:
         raise HTTPException(status_code=400, detail="Geen wijzigingen ontvangen.")

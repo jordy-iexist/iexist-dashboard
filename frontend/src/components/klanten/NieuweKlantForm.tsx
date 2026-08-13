@@ -27,6 +27,8 @@ type FormState = {
   seoGoals: string
   categoryId: string
   targetBlogsPerMonth: string
+  targetLinksPerMonth: string
+  spreadsheetUrl: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -36,6 +38,8 @@ const EMPTY_FORM: FormState = {
   seoGoals: "",
   categoryId: "",
   targetBlogsPerMonth: "",
+  targetLinksPerMonth: "",
+  spreadsheetUrl: "",
 }
 
 export function NieuweKlantForm() {
@@ -62,6 +66,20 @@ export function NieuweKlantForm() {
       return
     }
 
+    const trimmedLinksTarget = form.targetLinksPerMonth.trim()
+    const parsedLinksTarget =
+      trimmedLinksTarget === "" ? null : Number(trimmedLinksTarget)
+    if (
+      parsedLinksTarget !== null &&
+      (!Number.isFinite(parsedLinksTarget) || parsedLinksTarget < 0)
+    ) {
+      setFeedback({
+        type: "error",
+        message: "Aantal links per maand moet een positief getal zijn.",
+      })
+      return
+    }
+
     setFeedback({ type: null, message: "" })
     startTransition(async () => {
       try {
@@ -75,6 +93,8 @@ export function NieuweKlantForm() {
             seo_goals: form.seoGoals.trim() || null,
             category_id: form.categoryId || null,
             target_blogs_per_month: parsedTarget,
+            target_links_per_month: parsedLinksTarget,
+            spreadsheet_url: form.spreadsheetUrl.trim() || null,
           }),
         })
         const payload = (await response.json().catch(() => null)) as ErrorResponse | null
@@ -127,7 +147,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">SEO klant sinds</label>
+          <label className="text-xs font-medium">Traject gestart</label>
           <Input
             type="date"
             value={form.seoCustomerSince}
@@ -156,6 +176,33 @@ export function NieuweKlantForm() {
             value={form.targetBlogsPerMonth}
             onChange={(event) =>
               updateField("targetBlogsPerMonth", event.target.value)
+            }
+            disabled={isPending}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">
+            Aantal links per maand (doel)
+          </label>
+          <Input
+            type="number"
+            min={0}
+            placeholder="Bijv. 2"
+            value={form.targetLinksPerMonth}
+            onChange={(event) =>
+              updateField("targetLinksPerMonth", event.target.value)
+            }
+            disabled={isPending}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Spreadsheet URL</label>
+          <Input
+            type="url"
+            placeholder="https://docs.google.com/..."
+            value={form.spreadsheetUrl}
+            onChange={(event) =>
+              updateField("spreadsheetUrl", event.target.value)
             }
             disabled={isPending}
           />

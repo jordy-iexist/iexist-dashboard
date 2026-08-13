@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight, CircleAlert, CircleCheck, Search } from "lucide-react"
+import { CircleAlert, CircleCheck, Search } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -73,6 +73,55 @@ function CategoryBadge({ name }: { name: string }) {
       {name}
     </span>
   )
+}
+
+function LinksBadge({
+  placed,
+  target,
+}: {
+  placed: number
+  target: number | null
+}) {
+  return (
+    <span
+      title="Linkregistratie volgt nog."
+      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
+    >
+      {placed} / {typeof target === "number" ? target : "—"}
+    </span>
+  )
+}
+
+function getCustomerStage(since: string | null): "Nieuw" | "Oud" | null {
+  if (!since) return null
+  const start = new Date(since)
+  if (Number.isNaN(start.getTime())) return null
+  const cutoff = new Date()
+  cutoff.setFullYear(cutoff.getFullYear() - 1)
+  return start > cutoff ? "Nieuw" : "Oud"
+}
+
+function StageBadge({ since }: { since: string | null }) {
+  const stage = getCustomerStage(since)
+  if (!stage) {
+    return <span className="text-xs text-muted-foreground">—</span>
+  }
+  return (
+    <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+      {stage}
+    </span>
+  )
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "—"
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return "—"
+  }
+  return new Intl.DateTimeFormat("nl-NL", { dateStyle: "medium" }).format(date)
 }
 
 export function KlantenManager() {
@@ -209,31 +258,111 @@ export function KlantenManager() {
             Geen klanten gevonden voor deze zoekopdracht.
           </p>
         ) : (
-          <div className="space-y-2">
-            {visibleCustomers.map((customer) => (
-              <Link
-                key={customer.id}
-                href={`/dashboard/klanten/${customer.id}`}
-                className="flex items-center justify-between gap-2 rounded-lg bg-[#FAB806]/10 px-3 py-2 text-sm transition-colors hover:bg-[#FAB806]/20"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium">{customer.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {customer.domain}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {customer.category_name && (
-                    <CategoryBadge name={customer.category_name} />
-                  )}
-                  <PlacementBadge
-                    placed={customer.placed_this_month}
-                    target={customer.target_blogs_per_month}
-                  />
-                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                </div>
-              </Link>
-            ))}
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Klant
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    URL
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Type
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Traject gestart
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Links
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Blogs
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Categorie
+                  </th>
+                  <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
+                    Spreadsheet
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCustomers.map((customer) => (
+                  <tr
+                    key={customer.id}
+                    className="border-b last:border-0 hover:bg-muted/25"
+                  >
+                    <td className="px-3 py-2">
+                      <Link
+                        href={`/dashboard/klanten/${customer.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {customer.name}
+                      </Link>
+                    </td>
+                    <td className="max-w-[220px] truncate px-3 py-2">
+                      <a
+                        href={customer.base_url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        {customer.domain}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2">
+                      <StageBadge since={customer.seo_customer_since} />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {formatDate(customer.seo_customer_since)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <LinksBadge
+                        placed={customer.links_placed_this_month}
+                        target={customer.target_links_per_month}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <PlacementBadge
+                        placed={customer.placed_this_month}
+                        target={customer.target_blogs_per_month}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      {customer.category_name ? (
+                        <CategoryBadge name={customer.category_name} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {customer.spreadsheet_url ? (
+                        <Button size="sm" variant="outline" asChild>
+                          <a
+                            href={customer.spreadsheet_url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            Spreadsheet
+                          </a>
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled
+                          title="Nog niet gekoppeld"
+                        >
+                          Spreadsheet
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

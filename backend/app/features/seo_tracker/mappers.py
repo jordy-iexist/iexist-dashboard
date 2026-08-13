@@ -20,6 +20,8 @@ def to_customer_website_item(record: dict) -> CustomerWebsiteItem:
         category_id=record.get("category_id"),
         category_name=record.get("category_name"),
         target_blogs_per_month=record.get("target_blogs_per_month"),
+        target_links_per_month=record.get("target_links_per_month"),
+        spreadsheet_url=record.get("spreadsheet_url"),
         created_by=str(record["created_by"]),
         created_at=record["created_at"],
         updated_at=record["updated_at"],
