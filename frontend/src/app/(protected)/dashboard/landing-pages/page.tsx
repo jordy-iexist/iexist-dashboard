@@ -119,7 +119,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
 
   try {
     const customersResponse = await fetch(
-      `${getBackendApiUrl()}/api/customers?active_only=true`,
+      `${getBackendApiUrl()}/api/customers`,
       {
         method: "GET",
         headers: { Authorization: authorization },

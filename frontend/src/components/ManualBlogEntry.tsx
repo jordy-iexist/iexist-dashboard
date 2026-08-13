@@ -43,7 +43,7 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch("/api/customers?active_only=true", { cache: "no-store" })
+    fetch("/api/customers", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((payload: CustomersResponse | null) => {
         if (!cancelled && payload?.websites) {

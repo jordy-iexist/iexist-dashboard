@@ -12,12 +12,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 })
   }
 
-  const activeOnly = request.nextUrl.searchParams.get("active_only")
   const categoryId = request.nextUrl.searchParams.get("category_id")
   const params = new URLSearchParams()
-  if (activeOnly === "true") {
-    params.set("active_only", "true")
-  }
   if (categoryId) {
     params.set("category_id", categoryId)
   }

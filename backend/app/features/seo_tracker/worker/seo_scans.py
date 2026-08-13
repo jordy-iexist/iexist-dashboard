@@ -94,8 +94,6 @@ def scan_website_keywords_task(self, scan_id: str):
         )
         if not website:
             raise ValueError("Website niet gevonden.")
-        if not bool(website.is_active):
-            raise ValueError("Website is gedeactiveerd.")
 
         domain = str(website.domain or "").strip().lower()
         if not domain:

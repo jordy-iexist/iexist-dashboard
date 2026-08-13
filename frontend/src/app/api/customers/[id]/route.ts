@@ -93,3 +93,34 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const payload = await response.json()
   return NextResponse.json(payload)
 }
+
+export async function DELETE(_request: NextRequest, context: RouteContext) {
+  const userId = await getAuthenticatedUserId()
+  if (!userId) {
+    return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 })
+  }
+
+  const { id } = await context.params
+  if (!id?.trim()) {
+    return NextResponse.json({ error: "Klant id ontbreekt." }, { status: 400 })
+  }
+
+  const backendUrl = getBackendApiUrl()
+  const response = await fetch(
+    `${backendUrl}/api/customers/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: userId,
+      },
+    }
+  )
+
+  if (!response.ok) {
+    const error = await readBackendError(response, "Kon klant niet verwijderen.")
+    return NextResponse.json({ error }, { status: response.status })
+  }
+
+  const payload = await response.json().catch(() => ({ success: true }))
+  return NextResponse.json(payload)
+}

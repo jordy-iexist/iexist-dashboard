@@ -51,7 +51,6 @@ export function KlantProfielForm({
 }) {
   const router = useRouter()
   const [form, setForm] = useState<ProfileFormState>(() => toFormState(customer))
-  const [isActive, setIsActive] = useState(customer.is_active)
   const [feedback, setFeedback] = useState<Feedback>({ type: null, message: "" })
   const [isPending, startTransition] = useTransition()
 
@@ -111,28 +110,40 @@ export function KlantProfielForm({
     )
   }
 
-  const toggleActive = () => {
-    const next = !isActive
-    setIsActive(next)
-    submit(
-      { is_active: next },
-      next ? "Klant is geactiveerd." : "Klant is gedeactiveerd."
+  const deleteCustomer = () => {
+    const confirmed = window.confirm(
+      `Klant "${customer.name}" definitief verwijderen? Keywords, scans en meta runs worden ook verwijderd. Blogs blijven bestaan maar verliezen hun klantkoppeling.`
     )
+    if (!confirmed) {
+      return
+    }
+
+    setFeedback({ type: null, message: "" })
+    startTransition(async () => {
+      try {
+        const response = await fetch(
+          `/api/customers/${encodeURIComponent(customer.id)}`,
+          { method: "DELETE" }
+        )
+        const payload = (await response.json().catch(() => null)) as ErrorResponse | null
+        if (!response.ok) {
+          throw new Error(getErrorMessage(payload, "Kon klant niet verwijderen."))
+        }
+        router.push("/dashboard/klanten")
+        router.refresh()
+      } catch (error) {
+        setFeedback({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Kon klant niet verwijderen.",
+        })
+      }
+    })
   }
 
   return (
     <section className="space-y-4 rounded-lg border p-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Klantprofiel</h2>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={toggleActive}
-          disabled={isPending}
-        >
-          {isActive ? "Deactiveren" : "Activeren"}
-        </Button>
-      </div>
+      <h2 className="text-sm font-semibold">Klantprofiel</h2>
 
       {feedback.message && (
         <div
@@ -224,6 +235,23 @@ export function KlantProfielForm({
           disabled={isPending}
         >
           Herstellen
+        </Button>
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        <h3 className="text-sm font-semibold text-destructive">Gevarenzone</h3>
+        <p className="text-xs text-muted-foreground">
+          Verwijdert deze klant, inclusief keywords, SERP-scans en meta runs,
+          definitief. Blogs en landingspagina&apos;s blijven bestaan maar
+          verliezen hun klantkoppeling.
+        </p>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={deleteCustomer}
+          disabled={isPending}
+        >
+          Klant verwijderen
         </Button>
       </div>
     </section>

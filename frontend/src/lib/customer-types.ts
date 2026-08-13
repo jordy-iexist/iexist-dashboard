@@ -3,7 +3,6 @@ export type CustomerWebsiteItem = {
   name: string
   base_url: string
   domain: string
-  is_active: boolean
   seo_customer_since: string | null
   seo_goals: string | null
   category_id: string | null

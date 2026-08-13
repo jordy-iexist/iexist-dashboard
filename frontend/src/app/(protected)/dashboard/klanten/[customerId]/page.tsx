@@ -97,11 +97,6 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
             {customer.domain}
           </a>
         </p>
-        {!customer.is_active && (
-          <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
-            Gedeactiveerd
-          </span>
-        )}
       </div>
 
       <section className="space-y-3">

@@ -7,8 +7,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_user_id, utc_now_iso
-from app.db.models import Blog, CustomerCategory, CustomerWebsite
+from app.db.models import Blog, CustomerCategory, CustomerWebsite, SerpScan, WebsiteMetaRun
 from app.db.session import get_db
+from app.features.customers.services import delete_customer_website_cascade
 from app.features.seo_tracker.mappers import to_customer_website_item
 from app.features.seo_tracker.schemas import (
     CustomerCategoriesResponse,
@@ -85,14 +86,11 @@ def _placed_counts_by_customer(
 
 @router.get("/api/customers", response_model=CustomerWebsitesListResponse)
 async def list_customers(
-    active_only: bool = Query(default=False),
     category_id: str | None = Query(default=None),
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
     query = db.query(CustomerWebsite)
-    if active_only:
-        query = query.filter(CustomerWebsite.is_active.is_(True))
     if category_id == "none":
         query = query.filter(CustomerWebsite.category_id.is_(None))
     elif category_id:
@@ -195,7 +193,6 @@ async def create_customer(
         name=name,
         base_url=normalized_base_url,
         domain=root_domain,
-        is_active=True,
         seo_customer_since=payload.seo_customer_since,
         seo_goals=(payload.seo_goals.strip() or None)
         if isinstance(payload.seo_goals, str)
@@ -265,9 +262,6 @@ async def update_customer(
         updates["base_url"] = next_base_url
         updates["domain"] = next_domain
 
-    if payload.is_active is not None:
-        updates["is_active"] = payload.is_active
-
     provided = payload.model_fields_set
     if "seo_customer_since" in provided:
         updates["seo_customer_since"] = payload.seo_customer_since
@@ -317,6 +311,53 @@ async def update_customer(
             else None,
         }
     )
+
+
+@router.delete("/api/customers/{customer_id}")
+async def delete_customer(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    website = (
+        db.query(CustomerWebsite)
+        .filter(CustomerWebsite.id == customer_id)
+        .first()
+    )
+    if not website:
+        raise HTTPException(status_code=404, detail="Klant niet gevonden.")
+
+    running_scan = (
+        db.query(SerpScan)
+        .filter(
+            SerpScan.website_id == customer_id,
+            SerpScan.status.in_(["pending", "processing"]),
+        )
+        .first()
+    )
+    if running_scan:
+        raise HTTPException(
+            status_code=409,
+            detail="Er draait nog een scan voor deze klant. Annuleer de scan eerst.",
+        )
+
+    running_meta = (
+        db.query(WebsiteMetaRun)
+        .filter(
+            WebsiteMetaRun.website_id == customer_id,
+            WebsiteMetaRun.status.in_(["pending", "processing"]),
+        )
+        .first()
+    )
+    if running_meta:
+        raise HTTPException(
+            status_code=409,
+            detail="Er draait nog een meta run voor deze klant.",
+        )
+
+    delete_customer_website_cascade(db, customer_id)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/api/customer-categories", response_model=CustomerCategoriesResponse)

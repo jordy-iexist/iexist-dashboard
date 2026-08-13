@@ -248,7 +248,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
 
   try {
     const customersResponse = await fetch(
-      `${getBackendApiUrl()}/api/customers?active_only=true`,
+      `${getBackendApiUrl()}/api/customers`,
       {
         method: "GET",
         headers: { Authorization: authorization },

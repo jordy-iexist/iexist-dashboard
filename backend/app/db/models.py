@@ -290,9 +290,6 @@ class CustomerWebsite(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     domain: Mapped[str] = mapped_column(Text, nullable=False)
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
     seo_customer_since: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     seo_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     category_id: Mapped[Optional[str]] = mapped_column(

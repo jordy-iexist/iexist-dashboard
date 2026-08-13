@@ -57,8 +57,6 @@ def run_website_meta_optimization_task(self, run_id: str):
         )
         if not website:
             raise ValueError("Website niet gevonden voor meta run.")
-        if not bool(website.is_active):
-            raise ValueError("Website is gedeactiveerd.")
         requested_by = str(run.requested_by or "").strip()
         if not requested_by:
             raise ValueError("Meta run mist gebruiker.")

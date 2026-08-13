@@ -52,8 +52,6 @@ async def start_website_meta_run(
     )
     if not website:
         raise HTTPException(status_code=404, detail="Website niet gevonden.")
-    if not bool(website.is_active):
-        raise HTTPException(status_code=400, detail="Website is gedeactiveerd.")
     try:
         resolve_openai_api_key(user_id, db)
     except MissingUserOpenAIKeyError as exc:

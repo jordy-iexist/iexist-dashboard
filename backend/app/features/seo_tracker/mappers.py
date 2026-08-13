@@ -15,7 +15,6 @@ def to_customer_website_item(record: dict) -> CustomerWebsiteItem:
         name=str(record["name"]),
         base_url=str(record["base_url"]),
         domain=str(record["domain"]),
-        is_active=bool(record.get("is_active", True)),
         seo_customer_since=record.get("seo_customer_since"),
         seo_goals=record.get("seo_goals"),
         category_id=record.get("category_id"),

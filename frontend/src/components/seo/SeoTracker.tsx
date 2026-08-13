@@ -693,11 +693,6 @@ export function SeoTracker() {
                     <p className="text-xs text-muted-foreground truncate">
                       {website.domain}
                     </p>
-                    {!website.is_active && (
-                      <p className="text-[11px] text-amber-600 mt-1">
-                        Gedeactiveerd
-                      </p>
-                    )}
                   </button>
                 ))}
               </div>

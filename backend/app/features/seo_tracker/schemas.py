@@ -16,7 +16,6 @@ class CustomerWebsiteCreateRequest(BaseModel):
 class CustomerWebsiteUpdateRequest(BaseModel):
     name: str | None = None
     base_url: str | None = None
-    is_active: bool | None = None
     seo_customer_since: date | None = None
     seo_goals: str | None = None
     category_id: str | None = None
@@ -28,7 +27,6 @@ class CustomerWebsiteItem(BaseModel):
     name: str
     base_url: str
     domain: str
-    is_active: bool
     seo_customer_since: date | None = None
     seo_goals: str | None = None
     category_id: str | None = None

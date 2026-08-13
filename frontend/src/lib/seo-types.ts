@@ -3,7 +3,6 @@ export type CustomerWebsite = {
   name: string
   base_url: string
   domain: string
-  is_active: boolean
   created_by: string
   created_at: string
   updated_at: string

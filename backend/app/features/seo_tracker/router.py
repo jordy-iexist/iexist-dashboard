@@ -15,6 +15,7 @@ from app.db.models import (
     WebsiteMetaRun,
 )
 from app.db.session import get_db
+from app.features.customers.services import delete_customer_website_cascade
 from app.features.seo_tracker.mappers import (
     to_customer_website_item,
     to_serp_scan_item,
@@ -104,7 +105,6 @@ async def create_customer_website(
         name=name,
         base_url=normalized_base_url,
         domain=root_domain,
-        is_active=True,
         created_by=user_id,
         created_at=now,
         updated_at=now,
@@ -188,9 +188,6 @@ async def update_customer_website(
         updates["base_url"] = next_base_url
         updates["domain"] = next_domain
 
-    if payload.is_active is not None:
-        updates["is_active"] = payload.is_active
-
     if len(updates) == 1:
         raise HTTPException(status_code=400, detail="Geen wijzigingen ontvangen.")
 
@@ -255,9 +252,7 @@ async def delete_customer_website(
             detail="Er draait nog een meta run voor deze website.",
         )
 
-    db.query(CustomerWebsite).filter(
-        CustomerWebsite.id == website_id,
-    ).delete()
+    delete_customer_website_cascade(db, website_id)
     db.commit()
     return {
         "status": "deleted",
@@ -485,8 +480,6 @@ async def start_website_scan(
     )
     if not website:
         raise HTTPException(status_code=404, detail="Website niet gevonden.")
-    if not bool(website.is_active):
-        raise HTTPException(status_code=400, detail="Website is gedeactiveerd.")
 
     active_keywords = (
         db.query(WebsiteKeyword)

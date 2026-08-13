@@ -221,9 +221,6 @@ export function KlantenManager() {
                   <p className="truncate text-xs text-muted-foreground">
                     {customer.domain}
                   </p>
-                  {!customer.is_active && (
-                    <p className="mt-1 text-[11px] text-amber-600">Gedeactiveerd</p>
-                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {customer.category_name && (
