@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
 from app.core.dependencies import require_user_id, utc_now_iso
-from app.db.models import Blog, BlogGenerationSettings, BlogImage, BlogPublication, CsvRow, CsvUpload, CustomerWebsite, Job, WordPressSite
+from app.db.models import Blog, BlogGenerationSettings, BlogImage, BlogPublication, CsvRow, CsvUpload, CustomerSheetCell, CustomerWebsite, Job, WordPressSite
 from app.db.session import get_db
 from app.features.blogs.dependencies import (
     dedupe_ids,
@@ -174,6 +174,7 @@ def _get_blog_record(
         "share_token": blog.share_token,
         "created_at": blog.created_at,
         "published_at": blog.published_at,
+        "placement_url": blog.placement_url,
         "created_by": blog.created_by,
         "is_public": bool(blog.is_public),
         "customer_website_id": blog.customer_website_id,
@@ -354,6 +355,7 @@ async def list_blogs(
                 filename=filename,
                 created_at=cast(Any, blog.created_at),
                 published_at=cast(Any, blog.published_at),
+                placement_url=blog.placement_url,
                 publication=publication,
                 share_token=str(blog.share_token),
                 is_public=bool(blog.is_public),
@@ -581,6 +583,7 @@ async def get_blog(
         status=status,
         created_at=blog["created_at"],
         published_at=blog.get("published_at"),
+        placement_url=blog.get("placement_url"),
         share_token=str(blog["share_token"]),
         is_public=bool(blog.get("is_public")),
         is_owner=str(blog.get("created_by") or "") == user_id,
@@ -629,6 +632,9 @@ async def update_blog(
                 updates["published_at"] = utc_now_iso()
         elif existing.get("published_at"):
             updates["published_at"] = None
+    if "placement_url" in payload.model_fields_set:
+        updates["placement_url"] = (payload.placement_url or "").strip() or None
+        has_changes = True
     if not has_changes:
         raise HTTPException(status_code=400, detail="Minimaal één veld moet worden meegegeven.")
 
@@ -648,6 +654,7 @@ async def update_blog(
         status=status,
         created_at=refreshed["created_at"],
         published_at=refreshed.get("published_at"),
+        placement_url=refreshed.get("placement_url"),
         share_token=str(refreshed["share_token"]),
         is_public=bool(refreshed.get("is_public")),
         is_owner=True,
@@ -668,6 +675,7 @@ async def delete_blog(
 
     db.query(BlogPublication).filter(BlogPublication.blog_id == blog_id).delete()
     db.query(BlogImage).filter(BlogImage.blog_id == blog_id).delete()
+    db.query(CustomerSheetCell).filter(CustomerSheetCell.blog_id == blog_id).delete()
     db.query(Job).filter(Job.blog_id == blog_id).delete()
     db.query(Blog).filter(Blog.id == blog_id).delete()
     db.commit()
@@ -696,6 +704,7 @@ async def delete_blogs_batch(
     if owned_ids:
         db.query(BlogPublication).filter(BlogPublication.blog_id.in_(owned_ids)).delete(synchronize_session=False)
         db.query(BlogImage).filter(BlogImage.blog_id.in_(owned_ids)).delete(synchronize_session=False)
+        db.query(CustomerSheetCell).filter(CustomerSheetCell.blog_id.in_(owned_ids)).delete(synchronize_session=False)
         db.query(Job).filter(Job.blog_id.in_(owned_ids)).delete(synchronize_session=False)
         db.query(Blog).filter(Blog.id.in_(owned_ids)).delete(synchronize_session=False)
         db.commit()

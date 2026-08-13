@@ -84,6 +84,7 @@ class BlogsListItem(BaseModel):
     filename: str
     created_at: datetime
     published_at: datetime | None = None
+    placement_url: str | None = None
     publication: BlogPublicationSummary | None = None
     share_token: str
     is_public: bool = False
@@ -119,6 +120,7 @@ class BlogDetailResponse(BaseModel):
     status: str
     created_at: datetime
     published_at: datetime | None = None
+    placement_url: str | None = None
     share_token: str
     is_public: bool = False
     is_owner: bool = True
@@ -138,6 +140,7 @@ class BlogUpdateRequest(BaseModel):
     is_public: bool | None = None
     customer_website_id: str | None = None
     is_published: bool | None = None
+    placement_url: str | None = None
 
 
 BlogImageSource = Literal["auto_generated", "manual_upload"]

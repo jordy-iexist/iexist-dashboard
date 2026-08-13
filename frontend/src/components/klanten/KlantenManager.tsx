@@ -338,26 +338,11 @@ export function KlantenManager() {
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {customer.spreadsheet_url ? (
-                        <Button size="sm" variant="outline" asChild>
-                          <a
-                            href={customer.spreadsheet_url}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                          >
-                            Spreadsheet
-                          </a>
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled
-                          title="Nog niet gekoppeld"
-                        >
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
                           Spreadsheet
-                        </Button>
-                      )}
+                        </Link>
+                      </Button>
                     </td>
                   </tr>
                 ))}

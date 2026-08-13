@@ -247,7 +247,9 @@ export function KlantProfielForm({
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">Spreadsheet URL</label>
+          <label className="text-xs font-medium">
+            Externe spreadsheet (optioneel)
+          </label>
           <Input
             type="url"
             placeholder="https://docs.google.com/..."
@@ -257,6 +259,10 @@ export function KlantProfielForm({
             }
             disabled={isPending}
           />
+          <p className="text-xs text-muted-foreground">
+            De interne spreadsheet is altijd bereikbaar via de
+            Spreadsheet-knop in de klantenlijst.
+          </p>
         </div>
         <div className="space-y-1 md:col-span-2">
           <label className="text-xs font-medium">

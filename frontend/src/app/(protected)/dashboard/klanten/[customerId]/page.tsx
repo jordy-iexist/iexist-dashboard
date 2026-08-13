@@ -2,6 +2,7 @@ import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
+import { Button } from "@/components/ui/button"
 import { KlantProfielForm } from "@/components/klanten/KlantProfielForm"
 import {
   getBackendApiUrl,
@@ -86,7 +87,14 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
         >
           Terug naar klanten
         </Link>
-        <h1 className="text-3xl font-bold tracking-tight">{customer.name}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">{customer.name}</h1>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
+              Open spreadsheet
+            </Link>
+          </Button>
+        </div>
         <p className="text-sm text-muted-foreground">
           <a
             href={customer.base_url}

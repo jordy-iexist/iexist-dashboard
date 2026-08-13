@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Blog,
+    CustomerSheetCell,
+    CustomerSheetColumn,
     CustomerWebsite,
     LandingPage,
     SerpScan,
@@ -120,6 +122,20 @@ def delete_customer_website_cascade(db: Session, website_id: str) -> None:
     db.query(LandingPage).filter(
         LandingPage.customer_website_id == website_id
     ).update({"customer_website_id": None}, synchronize_session=False)
+
+    column_ids = [
+        column_id
+        for (column_id,) in db.query(CustomerSheetColumn.id)
+        .filter(CustomerSheetColumn.customer_website_id == website_id)
+        .all()
+    ]
+    if column_ids:
+        db.query(CustomerSheetCell).filter(
+            CustomerSheetCell.column_id.in_(column_ids)
+        ).delete(synchronize_session=False)
+    db.query(CustomerSheetColumn).filter(
+        CustomerSheetColumn.customer_website_id == website_id
+    ).delete(synchronize_session=False)
 
     db.query(CustomerWebsite).filter(CustomerWebsite.id == website_id).delete(
         synchronize_session=False

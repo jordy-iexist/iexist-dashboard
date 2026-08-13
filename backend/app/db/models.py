@@ -154,6 +154,7 @@ class Blog(Base):
     published_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    placement_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     generation_job: Mapped[list["Job"]] = relationship(
         "Job", back_populates="blog", foreign_keys="Job.blog_id"
@@ -324,6 +325,71 @@ class CustomerWebsite(Base):
     )
     meta_runs: Mapped[list["WebsiteMetaRun"]] = relationship(
         "WebsiteMetaRun", back_populates="website"
+    )
+    sheet_columns: Mapped[list["CustomerSheetColumn"]] = relationship(
+        "CustomerSheetColumn", back_populates="customer_website"
+    )
+
+
+class CustomerSheetColumn(Base):
+    __tablename__ = "customer_sheet_columns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    customer_website: Mapped["CustomerWebsite"] = relationship(
+        "CustomerWebsite", back_populates="sheet_columns"
+    )
+    cells: Mapped[list["CustomerSheetCell"]] = relationship(
+        "CustomerSheetCell", back_populates="column"
+    )
+
+
+class CustomerSheetCell(Base):
+    __tablename__ = "customer_sheet_cells"
+    __table_args__ = (
+        UniqueConstraint(
+            "column_id", "blog_id", name="uq_customer_sheet_cells_column_blog"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    column_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_sheet_columns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    blog_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("blogs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    column: Mapped["CustomerSheetColumn"] = relationship(
+        "CustomerSheetColumn", back_populates="cells"
     )
 
 
@@ -770,6 +836,8 @@ __all__ = [
     "BlogPublication",
     "BlogImage",
     "CustomerWebsite",
+    "CustomerSheetColumn",
+    "CustomerSheetCell",
     "WebsiteKeyword",
     "SerpScan",
     "SerpScanResult",

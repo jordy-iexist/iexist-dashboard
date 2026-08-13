@@ -72,6 +72,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           is_public?: unknown
           customer_website_id?: unknown
           is_published?: unknown
+          placement_url?: unknown
         }
       | null
     const rawContent = payload?.content
@@ -88,6 +89,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       payload.customer_website_id.trim()
         ? payload.customer_website_id.trim()
         : null
+    // null is ook hier een geldige waarde (leegmaken), dus afwezig vs. null onderscheiden.
+    const hasPlacementUrl =
+      payload !== null && "placement_url" in payload
+    const placementUrl =
+      typeof payload?.placement_url === "string" && payload.placement_url.trim()
+        ? payload.placement_url.trim()
+        : null
 
     if (content !== null && !content) {
       return NextResponse.json(
@@ -99,7 +107,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       content === null &&
       isPublic === null &&
       isPublished === null &&
-      !hasCustomer
+      !hasCustomer &&
+      !hasPlacementUrl
     ) {
       return NextResponse.json(
         { error: "Minimaal één veld moet worden meegegeven." },
@@ -119,6 +128,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if (hasCustomer) {
       body.customer_website_id = customerWebsiteId
+    }
+    if (hasPlacementUrl) {
+      body.placement_url = placementUrl
     }
 
     const response = await fetch(
