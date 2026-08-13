@@ -47,6 +47,14 @@ class CustomerWebsitesResponse(BaseModel):
     websites: list[CustomerWebsiteItem]
 
 
+class CustomerWebsiteListItem(CustomerWebsiteItem):
+    placed_this_month: int = 0
+
+
+class CustomerWebsitesListResponse(BaseModel):
+    websites: list[CustomerWebsiteListItem]
+
+
 class WebsiteKeywordCreateRequest(BaseModel):
     keyword: str
 

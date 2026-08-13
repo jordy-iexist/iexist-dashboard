@@ -29,6 +29,7 @@ export type BlogListItem = {
   preview: string
   publication: PublishSummary
   published_at: string | null
+  placedDate: string | null
   isPublic: boolean
   isOwner: boolean
   customerName: string | null
@@ -96,6 +97,10 @@ export function BlogsBatchPublishList({
   }>({ type: null, message: "" })
   const [copiedShareBlogId, setCopiedShareBlogId] = useState<string | null>(null)
   const [copiedSelection, setCopiedSelection] = useState(false)
+  const [placedOverrides, setPlacedOverrides] = useState<
+    Record<string, { isPublished: boolean; placedDate: string | null }>
+  >({})
+  const [savingPlacedIds, setSavingPlacedIds] = useState<Record<string, boolean>>({})
   const [isPending, startTransition] = useTransition()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -167,6 +172,24 @@ export function BlogsBatchPublishList({
             isPublic: blog.isPublic,
             isOwner: blog.isOwner,
           }
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [blogs])
+
+  // Zodra verse serverdata de optimistische geplaatst-status bevestigt (na
+  // router.refresh()), laten we de lokale override los.
+  useEffect(() => {
+    setPlacedOverrides((current) => {
+      if (Object.keys(current).length === 0) return current
+      let changed = false
+      const next = { ...current }
+      for (const blog of blogs) {
+        const override = next[blog.id]
+        if (override && override.isPublished === Boolean(blog.published_at)) {
+          delete next[blog.id]
           changed = true
         }
       }
@@ -375,6 +398,56 @@ export function BlogsBatchPublishList({
         message: "Kopiëren naar klembord is mislukt.",
       })
     }
+  }
+
+  const togglePlaced = (blog: BlogListItem, checked: boolean) => {
+    if (!blog.isOwner) return
+    const previousOverride = placedOverrides[blog.id]
+    setFeedback({ type: null, message: "" })
+    setPlacedOverrides((current) => ({
+      ...current,
+      [blog.id]: { isPublished: checked, placedDate: checked ? blog.placedDate : null },
+    }))
+    setSavingPlacedIds((current) => ({ ...current, [blog.id]: true }))
+    void (async () => {
+      try {
+        const response = await fetch(`/api/blogs/${blog.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_published: checked }),
+        })
+        const payload = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(
+            getErrorMessage(payload, "Geplaatst-status aanpassen is mislukt.")
+          )
+        }
+        router.refresh()
+      } catch (error) {
+        setPlacedOverrides((current) => {
+          const next = { ...current }
+          if (previousOverride) {
+            next[blog.id] = previousOverride
+          } else {
+            delete next[blog.id]
+          }
+          return next
+        })
+        setFeedback({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Geplaatst-status aanpassen is mislukt.",
+        })
+      } finally {
+        setSavingPlacedIds((current) => {
+          const next = { ...current }
+          delete next[blog.id]
+          return next
+        })
+      }
+    })()
   }
 
   const deleteBatch = () => {
@@ -668,23 +741,58 @@ export function BlogsBatchPublishList({
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {blogs.map((blog) => (
+        {blogs.map((blog) => {
+          const placedOverride = placedOverrides[blog.id]
+          const isPlaced = placedOverride
+            ? placedOverride.isPublished
+            : Boolean(blog.published_at)
+          const placedDate = placedOverride
+            ? placedOverride.placedDate
+            : blog.placedDate
+          const isSavingPlaced = Boolean(savingPlacedIds[blog.id])
+
+          return (
           <article key={blog.id} className="rounded-lg border bg-card p-4 space-y-3">
             <div className="space-y-2">
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={Boolean(selectedBlogs[blog.id])}
-                  onChange={(event) =>
-                    toggleBlogSelection(blog, event.target.checked)
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedBlogs[blog.id])}
+                    onChange={(event) =>
+                      toggleBlogSelection(blog, event.target.checked)
+                    }
+                  />
+                  Selecteer
+                </label>
+                <label
+                  className="inline-flex items-center gap-2 text-xs"
+                  title={
+                    blog.isOwner
+                      ? undefined
+                      : "Alleen de eigenaar kan dit aanpassen."
                   }
-                />
-                Selecteer
-              </label>
+                >
+                  <input
+                    type="checkbox"
+                    checked={isPlaced}
+                    disabled={!blog.isOwner || isSavingPlaced}
+                    onChange={(event) =>
+                      togglePlaced(blog, event.target.checked)
+                    }
+                  />
+                  Geplaatst
+                </label>
+              </div>
               <div className="flex flex-wrap items-center gap-1">
                 {blog.customerName && (
                   <span className="rounded-full bg-violet-100 px-2 py-1 text-[11px] font-medium text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
                     {blog.customerName}
+                  </span>
+                )}
+                {isPlaced && (
+                  <span className="rounded-full bg-green-100 px-2 py-1 text-[11px] font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                    {placedDate ? `Geplaatst op ${placedDate}` : "Geplaatst"}
                   </span>
                 )}
                 {!blog.isOwner && (
@@ -729,7 +837,8 @@ export function BlogsBatchPublishList({
               </Button>
             </div>
           </article>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

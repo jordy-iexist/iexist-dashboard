@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { type CustomerWebsiteItem, type CustomersResponse } from "@/lib/customer-types"
+import { type CustomerWebsiteListItem, type CustomersResponse } from "@/lib/customer-types"
 
 type Feedback = {
   type: "success" | "error" | null
@@ -21,7 +21,7 @@ function getErrorMessage(payload: ErrorResponse | null, fallback: string): strin
 }
 
 export function KlantenManager() {
-  const [customers, setCustomers] = useState<CustomerWebsiteItem[]>([])
+  const [customers, setCustomers] = useState<CustomerWebsiteListItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<Feedback>({ type: null, message: "" })
 
@@ -96,7 +96,15 @@ export function KlantenManager() {
                     <p className="mt-1 text-[11px] text-amber-600">Gedeactiveerd</p>
                   )}
                 </div>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                    {customer.placed_this_month} /{" "}
+                    {typeof customer.target_blogs_per_month === "number"
+                      ? customer.target_blogs_per_month
+                      : "—"}
+                  </span>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </div>
               </Link>
             ))}
           </div>

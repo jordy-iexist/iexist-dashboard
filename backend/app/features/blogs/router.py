@@ -596,14 +596,21 @@ async def update_blog(
     user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
+    existing = _get_blog_record(blog_id, user_id, db)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Blog niet gevonden.")
+
     updates: dict[str, Any] = {}
+    has_changes = False
     if payload.content is not None:
         content = str(payload.content or "").strip()
         if not content:
             raise HTTPException(status_code=400, detail="Blog inhoud mag niet leeg zijn.")
         updates["content"] = content
+        has_changes = True
     if payload.is_public is not None:
         updates["is_public"] = bool(payload.is_public)
+        has_changes = True
     # null betekent hier expliciet ontkoppelen, dus afwezig vs. null onderscheiden.
     if "customer_website_id" in payload.model_fields_set:
         if payload.customer_website_id:
@@ -613,15 +620,21 @@ async def update_blog(
             updates["customer_website_id"] = resolved
         else:
             updates["customer_website_id"] = None
-    if not updates:
+        has_changes = True
+    if payload.is_published is not None:
+        has_changes = True
+        if payload.is_published:
+            # Bestaande datum (bv. van een WordPress-publicatie) niet overschrijven.
+            if not existing.get("published_at"):
+                updates["published_at"] = utc_now_iso()
+        elif existing.get("published_at"):
+            updates["published_at"] = None
+    if not has_changes:
         raise HTTPException(status_code=400, detail="Minimaal één veld moet worden meegegeven.")
 
-    existing = _get_blog_record(blog_id, user_id, db)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Blog niet gevonden.")
-
-    db.query(Blog).filter(Blog.id == blog_id, Blog.created_by == user_id).update(updates)
-    db.commit()
+    if updates:
+        db.query(Blog).filter(Blog.id == blog_id, Blog.created_by == user_id).update(updates)
+        db.commit()
 
     refreshed = _get_blog_record(blog_id, user_id, db)
     if not refreshed:

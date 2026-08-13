@@ -137,6 +137,7 @@ class BlogUpdateRequest(BaseModel):
     content: str | None = None
     is_public: bool | None = None
     customer_website_id: str | None = None
+    is_published: bool | None = None
 
 
 BlogImageSource = Literal["auto_generated", "manual_upload"]

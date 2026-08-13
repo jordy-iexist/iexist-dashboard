@@ -189,6 +189,7 @@ function mapBlogListItem(blog: {
     preview: buildPreview(blog.content),
     publication: normalizePublicationSummary(blog.publication),
     published_at: blog.published_at ?? null,
+    placedDate: blog.published_at ? formatCreatedDate(blog.published_at) : null,
     isPublic: blog.is_public ?? false,
     isOwner: blog.is_owner ?? true,
     customerName: blog.customer_name ?? null,

@@ -14,7 +14,8 @@ from app.features.seo_tracker.schemas import (
     CustomerWebsiteCreateRequest,
     CustomerWebsiteDetailResponse,
     CustomerWebsiteItem,
-    CustomerWebsitesResponse,
+    CustomerWebsiteListItem,
+    CustomerWebsitesListResponse,
     CustomerWebsiteUpdateRequest,
 )
 from app.features.seo_tracker.services import normalize_website_url
@@ -38,7 +39,25 @@ def _current_month_bounds() -> tuple[datetime, datetime]:
     return month_start, next_month_start
 
 
-@router.get("/api/customers", response_model=CustomerWebsitesResponse)
+def _placed_counts_by_customer(
+    db: Session, customer_ids: list[str] | None = None
+) -> dict[str, int]:
+    month_start, next_month_start = _current_month_bounds()
+    query = db.query(Blog.customer_website_id, func.count(Blog.id)).filter(
+        Blog.customer_website_id.isnot(None),
+        Blog.published_at.isnot(None),
+        Blog.published_at >= month_start,
+        Blog.published_at < next_month_start,
+    )
+    if customer_ids is not None:
+        query = query.filter(Blog.customer_website_id.in_(customer_ids))
+    return {
+        str(customer_id): int(count)
+        for customer_id, count in query.group_by(Blog.customer_website_id).all()
+    }
+
+
+@router.get("/api/customers", response_model=CustomerWebsitesListResponse)
 async def list_customers(
     active_only: bool = Query(default=False),
     user_id: str = Depends(require_user_id),
@@ -48,8 +67,15 @@ async def list_customers(
     if active_only:
         query = query.filter(CustomerWebsite.is_active.is_(True))
     websites = query.order_by(CustomerWebsite.name.asc()).all()
-    return CustomerWebsitesResponse(
-        websites=[to_customer_website_item(_row_to_dict(w)) for w in websites]
+    placed_counts = _placed_counts_by_customer(db, [str(w.id) for w in websites])
+    return CustomerWebsitesListResponse(
+        websites=[
+            CustomerWebsiteListItem(
+                **to_customer_website_item(_row_to_dict(w)).model_dump(),
+                placed_this_month=placed_counts.get(str(w.id), 0),
+            )
+            for w in websites
+        ]
     )
 
 
@@ -69,23 +95,14 @@ async def get_customer(
     if not website:
         raise HTTPException(status_code=404, detail="Klant niet gevonden.")
 
-    month_start, next_month_start = _current_month_bounds()
-    placed_this_month = (
-        db.query(func.count(Blog.id))
-        .filter(
-            Blog.customer_website_id == customer_id,
-            Blog.published_at.isnot(None),
-            Blog.published_at >= month_start,
-            Blog.published_at < next_month_start,
-        )
-        .scalar()
-        or 0
+    placed_this_month = _placed_counts_by_customer(db, [customer_id]).get(
+        customer_id, 0
     )
 
     base = to_customer_website_item(_row_to_dict(website))
     return CustomerWebsiteDetailResponse(
         **base.model_dump(),
-        placed_this_month=int(placed_this_month),
+        placed_this_month=placed_this_month,
         pending_blogs=None,
     )
 

@@ -72,6 +72,10 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
 
   const target = customer.target_blogs_per_month
   const targetLabel = typeof target === "number" ? String(target) : "—"
+  const placedLabel =
+    typeof target === "number"
+      ? `${customer.placed_this_month} / ${target}`
+      : String(customer.placed_this_month)
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -109,10 +113,7 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
             value="—"
             hint="Nog niet beschikbaar (volgt via check blogplaatsing)"
           />
-          <StatCard
-            label="Geplaatst deze maand"
-            value={String(customer.placed_this_month)}
-          />
+          <StatCard label="Geplaatst deze maand" value={placedLabel} />
         </div>
       </section>
 

@@ -18,6 +18,10 @@ export type CustomerWebsiteDetail = CustomerWebsiteItem & {
   pending_blogs: number | null
 }
 
+export type CustomerWebsiteListItem = CustomerWebsiteItem & {
+  placed_this_month: number
+}
+
 export type CustomersResponse = {
-  websites: CustomerWebsiteItem[]
+  websites: CustomerWebsiteListItem[]
 }
