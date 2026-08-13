@@ -1,10 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight, CircleAlert, CircleCheck } from "lucide-react"
+import { ChevronRight, CircleAlert, CircleCheck, Search } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { CategoryManagerDialog } from "@/components/klanten/CategoryManagerDialog"
 import {
   type CustomerCategory,
@@ -78,6 +79,7 @@ export function KlantenManager() {
   const [customers, setCustomers] = useState<CustomerWebsiteListItem[]>([])
   const [categories, setCategories] = useState<CustomerCategory[]>([])
   const [categoryFilter, setCategoryFilter] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<Feedback>({ type: null, message: "" })
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
@@ -131,6 +133,15 @@ export function KlantenManager() {
     void loadCustomers(categoryFilter)
   }, [loadCustomers, categoryFilter])
 
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const visibleCustomers = normalizedQuery
+    ? customers.filter(
+        (customer) =>
+          customer.name.toLowerCase().includes(normalizedQuery) ||
+          customer.domain?.toLowerCase().includes(normalizedQuery)
+      )
+    : customers
+
   return (
     <div className="space-y-6">
       {feedback.message && (
@@ -149,6 +160,17 @@ export function KlantenManager() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Alle klanten</h2>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Zoek op klantnaam..."
+                aria-label="Zoek op klantnaam"
+                className="h-9 w-full pl-8 sm:w-56"
+              />
+            </div>
             <select
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
@@ -182,9 +204,13 @@ export function KlantenManager() {
           <p className="text-sm text-muted-foreground">
             Nog geen klanten toegevoegd.
           </p>
+        ) : visibleCustomers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Geen klanten gevonden voor deze zoekopdracht.
+          </p>
         ) : (
           <div className="space-y-2">
-            {customers.map((customer) => (
+            {visibleCustomers.map((customer) => (
               <Link
                 key={customer.id}
                 href={`/dashboard/klanten/${customer.id}`}
