@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, CircleAlert, CircleCheck } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,47 @@ type ErrorResponse = {
 
 function getErrorMessage(payload: ErrorResponse | null, fallback: string): string {
   return payload?.error?.trim() ? payload.error : fallback
+}
+
+function PlacementBadge({
+  placed,
+  target,
+}: {
+  placed: number
+  target: number | null
+}) {
+  if (typeof target !== "number") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+        {placed} / —
+      </span>
+    )
+  }
+
+  const remaining = Math.max(target - placed, 0)
+  const isOnTrack = remaining === 0
+
+  return (
+    <span
+      title={
+        isOnTrack
+          ? "Doel deze maand behaald."
+          : `Nog ${remaining} blog${remaining === 1 ? "" : "s"} te plaatsen deze maand.`
+      }
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${
+        isOnTrack
+          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+          : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+      }`}
+    >
+      {isOnTrack ? (
+        <CircleCheck className="size-3" />
+      ) : (
+        <CircleAlert className="size-3" />
+      )}
+      {placed} / {target}
+    </span>
+  )
 }
 
 export function KlantenManager() {
@@ -97,12 +138,10 @@ export function KlantenManager() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                    {customer.placed_this_month} /{" "}
-                    {typeof customer.target_blogs_per_month === "number"
-                      ? customer.target_blogs_per_month
-                      : "—"}
-                  </span>
+                  <PlacementBadge
+                    placed={customer.placed_this_month}
+                    target={customer.target_blogs_per_month}
+                  />
                   <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                 </div>
               </Link>
