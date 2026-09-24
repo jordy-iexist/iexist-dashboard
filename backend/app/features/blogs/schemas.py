@@ -246,6 +246,8 @@ class WordPressCategoriesResponse(BaseModel):
 
 class PublishItemOptions(BaseModel):
     blog_id: str
+    # Leeg = val terug op de top-level site_ids van de batch.
+    site_ids: list[str] = Field(default_factory=list)
     scheduled_at: datetime | None = None
     category_ids_by_site: dict[str, list[int]] = Field(default_factory=dict)
 

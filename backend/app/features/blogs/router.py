@@ -1869,24 +1869,36 @@ async def publish_blogs_batch(
     db: Session = Depends(get_db),
 ):
     blog_ids = dedupe_ids(payload.blog_ids)
-    site_ids = dedupe_ids(payload.site_ids)
+    default_site_ids = dedupe_ids(payload.site_ids)
 
     if not blog_ids:
         raise HTTPException(status_code=400, detail="Minimaal één blog is verplicht.")
-    if not site_ids:
+
+    options_by_blog = {item.blog_id: item for item in payload.items}
+    # Elke blog kan naar eigen sites; zonder eigen keuze gelden de batch-sites.
+    site_ids_by_blog: dict[str, list[str]] = {}
+    for blog_id in blog_ids:
+        options = options_by_blog.get(blog_id)
+        own_site_ids = dedupe_ids(options.site_ids) if options else []
+        site_ids_by_blog[blog_id] = own_site_ids or default_site_ids
+
+    all_site_ids = dedupe_ids(
+        [site_id for ids in site_ids_by_blog.values() for site_id in ids]
+    )
+    if not all_site_ids:
         raise HTTPException(
             status_code=400, detail="Minimaal één WordPress site is verplicht."
         )
 
     ensure_blogs_exist(blog_ids, user_id)
-    ensure_active_sites(site_ids)
+    ensure_active_sites(all_site_ids)
 
     existing_pubs = (
         db.query(BlogPublication)
         .filter(
             BlogPublication.requested_by == user_id,
             BlogPublication.blog_id.in_(blog_ids),
-            BlogPublication.wordpress_site_id.in_(site_ids),
+            BlogPublication.wordpress_site_id.in_(all_site_ids),
         )
         .all()
     )
@@ -1894,14 +1906,13 @@ async def publish_blogs_batch(
         (str(pub.blog_id), str(pub.wordpress_site_id)) for pub in existing_pubs
     }
 
-    options_by_blog = {item.blog_id: item for item in payload.items}
     blocked_items: list[BlockedPublicationItem] = []
     now = utc_now_iso()
     queued_ids: list[str] = []
 
     for blog_id in blog_ids:
         options = options_by_blog.get(blog_id)
-        for site_id in site_ids:
+        for site_id in site_ids_by_blog[blog_id]:
             if (blog_id, site_id) in existing_pairs:
                 blocked_items.append(
                     BlockedPublicationItem(blog_id=blog_id, wordpress_site_id=site_id)
@@ -1934,7 +1945,7 @@ async def publish_blogs_batch(
 
     publications = fetch_publication_items(queued_ids)
     return PublishActionResponse(
-        requested=len(blog_ids) * len(site_ids),
+        requested=sum(len(ids) for ids in site_ids_by_blog.values()),
         queued=len(publications),
         blocked_duplicates=len(blocked_items),
         publications=publications,

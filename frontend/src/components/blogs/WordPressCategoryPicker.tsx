@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 
+import { cn } from "@/lib/utils"
 import { WordPressCategory } from "@/lib/wordpress-types"
 
 const categoriesCache = new Map<string, Promise<WordPressCategory[]>>()
@@ -71,6 +72,7 @@ type WordPressCategoryPickerProps = {
   selectedIds: number[]
   onChange: (ids: number[]) => void
   disabled?: boolean
+  variant?: "list" | "chips"
 }
 
 export function WordPressCategoryPicker({
@@ -79,6 +81,7 @@ export function WordPressCategoryPicker({
   selectedIds,
   onChange,
   disabled,
+  variant = "list",
 }: WordPressCategoryPickerProps) {
   const [result, setResult] = useState<{
     siteId: string
@@ -123,18 +126,46 @@ export function WordPressCategoryPicker({
     }
   }
 
+  const isChips = variant === "chips"
+
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-medium text-muted-foreground">
-        Categorieën{siteName ? ` – ${siteName}` : ""}
-        {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
-      </p>
+      {(!isChips || siteName) && (
+        <p className="text-xs font-medium text-muted-foreground">
+          {isChips ? siteName : `Categorieën${siteName ? ` – ${siteName}` : ""}`}
+          {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
+        </p>
+      )}
       {error ? (
         <p className="text-xs text-red-600">{error}</p>
       ) : categories === null ? (
         <p className="text-xs text-muted-foreground">Categorieën laden...</p>
       ) : ordered.length === 0 ? (
         <p className="text-xs text-muted-foreground">Geen categorieën gevonden.</p>
+      ) : isChips ? (
+        <div className="flex flex-wrap gap-1.5">
+          {ordered.map(({ category, depth }) => {
+            const selected = selectedIds.includes(category.id)
+            return (
+              <button
+                key={category.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => toggle(category.id, !selected)}
+                disabled={disabled}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors disabled:opacity-50",
+                  selected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "hover:bg-accent"
+                )}
+              >
+                {depth > 0 ? "↳ " : ""}
+                {category.name || `#${category.id}`}
+              </button>
+            )
+          })}
+        </div>
       ) : (
         <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border px-2 py-1.5">
           {ordered.map(({ category, depth }) => (
