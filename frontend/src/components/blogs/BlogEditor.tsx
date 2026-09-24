@@ -244,7 +244,7 @@ export function BlogEditor({
   }
 
   return (
-    <section className="space-y-4 rounded-lg border bg-card p-5">
+    <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Blog inhoud</h2>
 
@@ -305,7 +305,7 @@ export function BlogEditor({
             ) : (
               <>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   onClick={cancelEditing}
                   disabled={isPending}
                 >

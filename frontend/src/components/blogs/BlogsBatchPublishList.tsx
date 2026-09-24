@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Check, Link2, Users } from "lucide-react"
+import { Check, LayoutGrid, Link2, List, Users } from "lucide-react"
 
 import {
   WordPressCategoryPicker,
@@ -13,6 +13,7 @@ import {
 import { WordPressSiteMultiSelect } from "@/components/blogs/WordPressSiteMultiSelect"
 import { Button } from "@/components/ui/button"
 import { type BlogsIdsResponse } from "@/lib/blog-types"
+import { BLOGS_VIEW_COOKIE, type BlogsView } from "@/lib/blogs-view"
 import {
   PublishActionResponse,
   WordPressPostStatus,
@@ -95,16 +96,27 @@ const EMPTY_PUBLISH_OPTIONS: BlogPublishOptions = {
   categoryIdsBySite: {},
 }
 
+// 1 jaar; de weergavekeuze is een blijvende voorkeur.
+const VIEW_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+const VIEW_OPTIONS: { value: BlogsView; label: string; icon: typeof List }[] = [
+  { value: "list", label: "Lijst", icon: List },
+  { value: "grid", label: "Kaarten", icon: LayoutGrid },
+]
+
 export function BlogsBatchPublishList({
   blogs,
   totalBlogs,
   filters,
+  initialView,
 }: {
   blogs: BlogListItem[]
   totalBlogs: number
   filters: BlogListFilters
+  initialView: BlogsView
 }) {
   const router = useRouter()
+  const [view, setView] = useState<BlogsView>(initialView)
   const [selectedBlogs, setSelectedBlogs] = useState<
     Record<string, SelectedBlogInfo>
   >({})
@@ -482,6 +494,23 @@ export function BlogsBatchPublishList({
     }
   }
 
+  const changeView = (next: BlogsView) => {
+    setView(next)
+    document.cookie = `${BLOGS_VIEW_COOKIE}=${next}; path=/; max-age=${VIEW_COOKIE_MAX_AGE}`
+  }
+
+  // Optimistische override gaat voor op de serverdata totdat die bevestigd is.
+  const getPlacedState = (blog: BlogListItem) => {
+    const placedOverride = placedOverrides[blog.id]
+    return {
+      isPlaced: placedOverride
+        ? placedOverride.isPublished
+        : Boolean(blog.published_at),
+      placedDate: placedOverride ? placedOverride.placedDate : blog.placedDate,
+      isSavingPlaced: Boolean(savingPlacedIds[blog.id]),
+    }
+  }
+
   const togglePlaced = (blog: BlogListItem, checked: boolean) => {
     if (!blog.isOwner) return
     const previousOverride = placedOverrides[blog.id]
@@ -705,9 +734,33 @@ export function BlogsBatchPublishList({
           </label>
 
           <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="group"
+              aria-label="Weergave"
+              className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+            >
+              {VIEW_OPTIONS.map((option) => {
+                const Icon = option.icon
+                const isActive = view === option.value
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant={isActive ? "outline" : "ghost"}
+                    size="icon-sm"
+                    onClick={() => changeView(option.value)}
+                    aria-pressed={isActive}
+                    aria-label={option.label}
+                    title={option.label}
+                  >
+                    <Icon />
+                  </Button>
+                )
+              })}
+            </div>
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={copySelectionLinks}
               disabled={selectedCount === 0}
               aria-label={
@@ -725,7 +778,7 @@ export function BlogsBatchPublishList({
               Kopieer links ({selectedCount})
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={shareBatch}
               disabled={ownedSelectedIds.length === 0 || isPending}
             >
@@ -733,7 +786,6 @@ export function BlogsBatchPublishList({
               Deel met team ({ownedSelectedIds.length})
             </Button>
             <Button
-              variant="outline"
               onClick={openBatchPanel}
               disabled={ownedSelectedIds.length === 0 || isPending}
             >
@@ -903,7 +955,7 @@ export function BlogsBatchPublishList({
 
             <div className="flex justify-end gap-2">
               <Button
-                variant="outline"
+                variant="secondary"
                 onClick={() => setShowBatchPanel(false)}
                 disabled={isPending}
               >
@@ -941,16 +993,132 @@ export function BlogsBatchPublishList({
         )}
       </div>
 
+      {view === "list" ? (
+        <div className="divide-y rounded-lg border bg-card">
+          <div className="hidden px-4 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[1rem_minmax(0,1fr)_10rem_9rem_12rem_7rem] md:items-center md:gap-3">
+            <span aria-hidden />
+            <span>Titel</span>
+            <span>Klant</span>
+            <span>Aangemaakt</span>
+            <span>Geplaatst</span>
+            <span aria-hidden />
+          </div>
+          {blogs.map((blog) => {
+            const { isPlaced, placedDate, isSavingPlaced } = getPlacedState(blog)
+            const isSelected = Boolean(selectedBlogs[blog.id])
+
+            return (
+              <div
+                key={blog.id}
+                className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 transition-colors hover:bg-muted/50 md:grid md:grid-cols-[1rem_minmax(0,1fr)_10rem_9rem_12rem_7rem] ${
+                  isSelected ? "bg-muted/40" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(event) =>
+                    toggleBlogSelection(blog, event.target.checked)
+                  }
+                  aria-label={`Selecteer ${blog.title}`}
+                />
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Link
+                    href={`/dashboard/blogs/${blog.id}`}
+                    className="truncate text-sm font-medium hover:underline"
+                    title={blog.title}
+                  >
+                    {blog.title}
+                  </Link>
+                  {!blog.isOwner && (
+                    <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                      Gedeeld met jou
+                    </span>
+                  )}
+                  {blog.isOwner && blog.isPublic && (
+                    <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                      Gedeeld
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  {blog.customerName ? (
+                    <span
+                      className="inline-block max-w-full truncate rounded-full bg-violet-100 px-2 py-0.5 align-middle text-[11px] font-medium text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
+                      title={blog.customerName}
+                    >
+                      {blog.customerName}
+                    </span>
+                  ) : (
+                    <span className="hidden text-xs text-muted-foreground md:inline">
+                      -
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {blog.createdDate}
+                </span>
+                <label
+                  className="inline-flex items-center gap-2 text-xs"
+                  title={
+                    blog.isOwner
+                      ? undefined
+                      : "Alleen de eigenaar kan dit aanpassen."
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={isPlaced}
+                    disabled={!blog.isOwner || isSavingPlaced}
+                    onChange={(event) =>
+                      togglePlaced(blog, event.target.checked)
+                    }
+                  />
+                  <span
+                    className={
+                      isPlaced
+                        ? "text-green-700 dark:text-green-400"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {isPlaced
+                      ? placedDate
+                        ? `Geplaatst op ${placedDate}`
+                        : "Geplaatst"
+                      : "Niet geplaatst"}
+                  </span>
+                </label>
+                <div className="ml-auto flex items-center justify-end gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/dashboard/blogs/${blog.id}`}>Open</Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => copyShareLink(blog)}
+                    aria-label={
+                      copiedShareBlogId === blog.id
+                        ? "Gekopieerd"
+                        : "Kopieer deel-link"
+                    }
+                    title={
+                      copiedShareBlogId === blog.id
+                        ? "Gekopieerd"
+                        : "Kopieer deel-link"
+                    }
+                  >
+                    {copiedShareBlogId === blog.id ? <Check /> : <Link2 />}
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {blogs.map((blog) => {
-          const placedOverride = placedOverrides[blog.id]
-          const isPlaced = placedOverride
-            ? placedOverride.isPublished
-            : Boolean(blog.published_at)
-          const placedDate = placedOverride
-            ? placedOverride.placedDate
-            : blog.placedDate
-          const isSavingPlaced = Boolean(savingPlacedIds[blog.id])
+          const { isPlaced, placedDate, isSavingPlaced } = getPlacedState(blog)
 
           return (
           <article key={blog.id} className="rounded-lg border bg-card p-4 space-y-3">
@@ -1041,6 +1209,7 @@ export function BlogsBatchPublishList({
           )
         })}
       </div>
+      )}
     </div>
   )
 }

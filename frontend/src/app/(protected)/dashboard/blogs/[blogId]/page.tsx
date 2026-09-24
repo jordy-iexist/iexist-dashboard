@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -6,6 +5,7 @@ import { BlogDeleteButton } from "@/components/blogs/BlogDeleteButton"
 import { BlogEditor } from "@/components/blogs/BlogEditor"
 import { BlogImagePanel } from "@/components/blogs/BlogImagePanel"
 import { BlogPublishPanel } from "@/components/blogs/BlogPublishPanel"
+import { KlantHero } from "@/components/klanten/KlantHero"
 import {
   getBackendApiUrl,
   getBackendAuthorizationValue,
@@ -32,6 +32,21 @@ function formatCreatedAt(value: string) {
   }).format(date)
 }
 
+function DetailItem({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words font-medium">{children}</dd>
+    </div>
+  )
+}
+
 function AnchorDisplay({
   label,
   text,
@@ -41,27 +56,21 @@ function AnchorDisplay({
   text?: string
   url?: string
 }) {
-  if (!text || !url) {
-    return (
-      <p>
-        <span className="font-medium">{label}:</span>{" "}
-        <span className="text-muted-foreground">-</span>
-      </p>
-    )
-  }
-
   return (
-    <p>
-      <span className="font-medium">{label}:</span>{" "}
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="underline underline-offset-2 hover:text-foreground"
-      >
-        {text}
-      </a>
-    </p>
+    <DetailItem label={label}>
+      {text && url ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="underline underline-offset-2 hover:text-primary"
+        >
+          {text}
+        </a>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      )}
+    </DetailItem>
   )
 }
 
@@ -106,55 +115,50 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
   const words = rowData?.woorden || "-"
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6">
-      <div className="space-y-2">
-        <Link
-          href="/dashboard/blogs"
-          className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-        >
-          Terug naar alle blogs
-        </Link>
-        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="mx-auto w-full max-w-5xl space-y-8">
+      <KlantHero
+        backHref="/dashboard/blogs"
+        backLabel="Terug naar alle blogs"
+        eyebrow={blog.customer_name}
+        title={title}
+      >
+        <p className="text-muted-foreground">
           {formatCreatedAt(blog.created_at)} · {words} woorden · status:{" "}
           {blog.status}
         </p>
-        {blog.published_at && (
-          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
-            Gepubliceerd
-          </span>
+        {(blog.published_at || blog.is_owner === false) && (
+          <div className="flex flex-wrap gap-2">
+            {blog.published_at && (
+              <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                Gepubliceerd
+              </span>
+            )}
+            {blog.is_owner === false && (
+              <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                Gedeeld met jou · alleen lezen
+              </span>
+            )}
+          </div>
         )}
-        {blog.is_owner === false && (
-          <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
-            Gedeeld met jou · alleen lezen
-          </span>
-        )}
+        <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <DetailItem label="Bestand">{blog.filename}</DetailItem>
+          <DetailItem label="Onderwerp/Klant">{rowData?.klant || "-"}</DetailItem>
+          <DetailItem label="Klant">
+            {blog.customer_name || "Geen klant gekoppeld"}
+          </DetailItem>
+          <AnchorDisplay
+            label="Anker 1"
+            text={rowData?.anker_1}
+            url={rowData?.anker_1_url}
+          />
+          <AnchorDisplay
+            label="Anker 2"
+            text={rowData?.anker_2}
+            url={rowData?.anker_2_url}
+          />
+        </dl>
         {blog.is_owner !== false && <BlogDeleteButton blogId={blog.id} />}
-      </div>
-
-      <section className="grid gap-3 rounded-lg border bg-card p-5 text-sm md:grid-cols-2">
-        <p>
-          <span className="font-medium">Bestand:</span> {blog.filename}
-        </p>
-        <p>
-          <span className="font-medium">Onderwerp/Klant:</span>{" "}
-          {rowData?.klant || "-"}
-        </p>
-        <p>
-          <span className="font-medium">Klant:</span>{" "}
-          {blog.customer_name || "Geen klant gekoppeld"}
-        </p>
-        <AnchorDisplay
-          label="Anker 1"
-          text={rowData?.anker_1}
-          url={rowData?.anker_1_url}
-        />
-        <AnchorDisplay
-          label="Anker 2"
-          text={rowData?.anker_2}
-          url={rowData?.anker_2_url}
-        />
-      </section>
+      </KlantHero>
 
       <BlogEditor
         blogId={blog.id}
@@ -166,8 +170,11 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
       />
       {blog.is_owner !== false && (
         <>
-          <BlogImagePanel blogId={blog.id} />
-          <BlogPublishPanel blogId={blog.id} />
+          <hr className="border-t-2 border-foreground/15" />
+          <div className="panel-iexist divide-y divide-foreground/10">
+            <BlogImagePanel blogId={blog.id} />
+            <BlogPublishPanel blogId={blog.id} />
+          </div>
         </>
       )}
     </div>

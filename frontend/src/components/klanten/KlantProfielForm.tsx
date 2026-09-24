@@ -278,13 +278,13 @@ export function KlantProfielForm({
 
         <div className="flex gap-2">
           <Button
-            className="rounded-full px-6"
+            className="px-6"
             onClick={saveProfile}
             disabled={isPending}
           >
             Opslaan
           </Button>
-          <Button variant="ghost" className="rounded-full" asChild>
+          <Button variant="outline" className="px-6" asChild>
             <Link href={`/dashboard/klanten/${customer.id}`}>Annuleren</Link>
           </Button>
         </div>
@@ -302,7 +302,6 @@ export function KlantProfielForm({
         </p>
         <Button
           variant="destructive"
-          className="rounded-full"
           onClick={deleteCustomer}
           disabled={isPending}
         >

@@ -258,7 +258,7 @@ export function CategoryManagerDialog({
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={cancelEdit}
                       disabled={isSavingEdit}
                     >

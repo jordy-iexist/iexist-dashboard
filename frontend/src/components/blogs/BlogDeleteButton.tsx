@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
+import { Button } from "@/components/ui/button"
+
 type Props = {
   blogId: string
 }
@@ -43,13 +45,14 @@ export function BlogDeleteButton({ blogId }: Props) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="destructive"
+        size="sm"
         onClick={handleDelete}
         disabled={deleting}
-        className="inline-flex items-center rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground shadow-sm hover:bg-destructive/90 disabled:opacity-50"
       >
         {deleting ? "Verwijderen..." : "Verwijder blog"}
-      </button>
+      </Button>
       {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
     </div>
   )

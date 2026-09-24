@@ -12,7 +12,7 @@ export default function Header() {
         <nav className="flex items-center gap-2">
           <Button
             asChild
-            className="bg-[#FAB806] text-[#171d35] hover:bg-[#FAB806]/90 font-semibold"
+            className="font-semibold"
           >
             <Link href="/login">Inloggen</Link>
           </Button>

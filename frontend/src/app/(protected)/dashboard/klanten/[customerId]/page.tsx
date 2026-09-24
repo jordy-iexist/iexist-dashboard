@@ -100,7 +100,7 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
               Open spreadsheet
             </Link>
           </Button>
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <Link href={`/dashboard/klanten/${customer.id}/bewerken`}>
               <Pencil />
               Bewerken

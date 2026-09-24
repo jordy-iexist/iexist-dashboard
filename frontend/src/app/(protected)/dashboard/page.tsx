@@ -184,7 +184,7 @@ export default async function DashboardPage() {
               website auditen — alles begint hier.
             </p>
             <div className="flex flex-wrap gap-3 pt-1">
-              <Button asChild className="bg-[#fab806] text-[#161D35] hover:bg-[#fab806]/90">
+              <Button asChild>
                 <Link href="/dashboard/blogs/upload">
                   <Upload />
                   Nieuwe blogs uploaden

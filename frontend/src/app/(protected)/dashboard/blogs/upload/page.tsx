@@ -1,5 +1,6 @@
 import { BlogUploadTabs } from "@/components/blogs/BlogUploadTabs"
 import { RecentCsvUploads } from "@/components/blogs/RecentCsvUploads"
+import { KlantHero } from "@/components/klanten/KlantHero"
 
 export const metadata = {
   title: "Blogs aanmaken",
@@ -7,17 +8,14 @@ export const metadata = {
 
 export default async function BlogsUploadPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Blogs aanmaken</h1>
-        <p className="text-muted-foreground">
+    <div className="space-y-8">
+      <KlantHero backHref={null} eyebrow="Content" title="Blogs aanmaken">
+        <p className="max-w-xl text-muted-foreground">
           Upload een CSV bestand of vul rijen handmatig in om blogs te genereren
         </p>
-      </div>
+      </KlantHero>
 
-      <div className="rounded-lg border p-4 sm:p-6 md:p-8">
-        <BlogUploadTabs />
-      </div>
+      <BlogUploadTabs />
 
       <RecentCsvUploads />
     </div>

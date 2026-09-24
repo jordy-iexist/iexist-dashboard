@@ -313,7 +313,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
   }
 
   return (
-    <section className="space-y-4 rounded-lg border bg-card p-5">
+    <section className="space-y-4 p-6 sm:p-8">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">Publiceer naar WordPress</h2>
         <p className="text-sm text-muted-foreground">
@@ -344,12 +344,12 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
         </div>
       )}
 
-      <div className="space-y-3 rounded-md border p-3">
-        <div className="space-y-2">
+      <div className="space-y-3">
+        <div className="divide-y border-y">
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">WordPress sites laden...</p>
+            <p className="py-2 text-sm text-muted-foreground">WordPress sites laden...</p>
           ) : sites.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="py-2 text-sm text-muted-foreground">
               Geen actieve WordPress sites. Voeg eerst sites toe in{" "}
               <Link href="/dashboard/settings/wordpress" className="underline underline-offset-2">
                 Instellingen
@@ -358,8 +358,8 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
             </p>
           ) : (
             sites.map((site) => (
-              <div key={site.id} className="rounded-md border text-sm">
-                <label className="flex items-center justify-between gap-3 px-3 py-2">
+              <div key={site.id} className="text-sm">
+                <label className="flex cursor-pointer items-center justify-between gap-3 py-2">
                   <div className="space-y-0.5">
                     <p className="font-medium">{site.name}</p>
                     <p className="text-xs text-muted-foreground">{site.base_url}</p>
@@ -372,7 +372,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
                   />
                 </label>
                 {selectedSiteIds.includes(site.id) && (
-                  <div className="border-t px-3 py-2">
+                  <div className="pb-3">
                     <WordPressCategoryPicker
                       siteId={site.id}
                       selectedIds={categoryIdsBySite[site.id] ?? []}
@@ -441,7 +441,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
         )}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 border-t pt-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold">Publicatiegeschiedenis</h3>
           <Button variant="outline" size="sm" onClick={() => refreshData()} disabled={isPending}>
@@ -454,13 +454,13 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
             Deze blog is nog niet naar WordPress gepost.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="divide-y">
             {publications.map((publication) => {
               const site = siteMap.get(publication.wordpress_site_id)
               return (
                 <article
                   key={publication.id}
-                  className="rounded-md border px-3 py-2 text-sm"
+                  className="py-2 text-sm first:pt-0"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-medium">

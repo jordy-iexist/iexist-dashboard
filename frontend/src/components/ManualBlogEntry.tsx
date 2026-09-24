@@ -172,7 +172,7 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Template editor */}
-      <div className="space-y-2">
+      <div className="panel-iexist space-y-2 p-5">
         <label className="text-sm font-medium" htmlFor="manual-template">
           Prompt template
         </label>
@@ -201,8 +201,8 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
 
       {/* Spreadsheet table */}
       {!templateError && fields.length > 0 && (
-        <div className="space-y-3">
-          <div className="overflow-x-auto rounded-lg border">
+        <div className="panel-iexist space-y-3 p-5">
+          <div className="overflow-x-auto rounded-lg border bg-background">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -281,15 +281,16 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
             </table>
           </div>
 
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={addRow}
             disabled={submitting}
-            className="flex items-center gap-2 text-sm text-primary hover:underline disabled:opacity-50"
           >
-            <Plus className="h-4 w-4" />
+            <Plus />
             Rij toevoegen
-          </button>
+          </Button>
         </div>
       )}
 
@@ -306,7 +307,11 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
         </div>
       )}
 
-      <Button type="submit" disabled={!canSubmit}>
+      <Button
+        type="submit"
+        disabled={!canSubmit}
+        className="h-11 px-8"
+      >
         {submitting ? "Verwerken..." : "Genereren"}
       </Button>
     </form>

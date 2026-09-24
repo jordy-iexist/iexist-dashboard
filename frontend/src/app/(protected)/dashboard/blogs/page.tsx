@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
+import { Upload } from "lucide-react"
 
 import {
   BlogsBatchPublishList,
@@ -11,6 +12,8 @@ import {
   type CustomerFilterOption,
 } from "@/components/klanten/CustomerFilterSelect"
 import { CreatedDateFilter } from "@/components/blogs/CreatedDateFilter"
+import { KlantHero } from "@/components/klanten/KlantHero"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { type CustomersResponse } from "@/lib/customer-types"
 import {
   getBackendApiUrl,
@@ -24,6 +27,7 @@ import {
 } from "@/lib/blog-types"
 import { type CreatedDateParams } from "@/lib/blogs-date-filter"
 import { readCreatedDateCookie } from "@/lib/blogs-date-filter.server"
+import { readBlogsViewCookie } from "@/lib/blogs-view.server"
 
 export const metadata = {
   title: "Alle Blogs",
@@ -207,7 +211,13 @@ function PaginationLink({
 }) {
   if (disabled) {
     return (
-      <span className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground">
+      <span
+        className={buttonVariants({
+          variant: "outline",
+          size: "sm",
+          className: "pointer-events-none text-muted-foreground opacity-50",
+        })}
+      >
         {label}
       </span>
     )
@@ -216,7 +226,7 @@ function PaginationLink({
   return (
     <Link
       href={href}
-      className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+      className={buttonVariants({ variant: "outline", size: "sm" })}
     >
       {label}
     </Link>
@@ -236,6 +246,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   const createdDate: CreatedDateParams = createdDateFromUrl.createdOn
     ? createdDateFromUrl
     : await readCreatedDateCookie()
+  const initialView = await readBlogsViewCookie()
   const authorization = await getBackendAuthorizationValue()
   if (!authorization) {
     redirect("/login")
@@ -315,24 +326,32 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
   const hasNextPage = page < totalPages
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Alle Blogs</h1>
-        <p className="text-muted-foreground">
+    <div className="space-y-8">
+      <KlantHero backHref={null} eyebrow="Content" title="Alle blogs">
+        <p className="max-w-xl text-muted-foreground">
           Bekijk alle gegenereerde blogs vanuit de backend
         </p>
-      </div>
+        <Button asChild>
+          <Link href="/dashboard/blogs/upload">
+            <Upload />
+            Blogs aanmaken
+          </Link>
+        </Button>
+      </KlantHero>
 
       <div className="flex flex-wrap items-center gap-2">
         {SCOPE_OPTIONS.map((option) => (
           <Link
             key={option.value}
             href={buildPageHref(1, option.value, customerFilter, createdDate)}
-            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-              scope === option.value
-                ? "border-foreground bg-foreground text-background"
-                : "hover:bg-muted"
-            }`}
+            className={buttonVariants({
+              variant: "outline",
+              size: "sm",
+              className:
+                scope === option.value
+                  ? "border-brand-blue font-semibold dark:border-white"
+                  : "text-muted-foreground",
+            })}
           >
             {option.label}
           </Link>
@@ -401,6 +420,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             key={`${scope}|${customerFilter ?? ""}|${createdDate.createdOn ?? ""}`}
             blogs={blogs}
             totalBlogs={totalBlogs}
+            initialView={initialView}
             filters={{
               scope,
               customerWebsiteId: customerFilter,

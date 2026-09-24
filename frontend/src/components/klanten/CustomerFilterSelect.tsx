@@ -44,7 +44,7 @@ export function CustomerFilterSelect({
       value={selected ?? ""}
       onChange={(event) => onChange(event.target.value)}
       aria-label="Filter op klant"
-      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="h-9 rounded-full border border-brand-blue/60 bg-transparent dark:border-white/50 px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <option value="">Alle klanten</option>
       <option value="none">Zonder klant</option>

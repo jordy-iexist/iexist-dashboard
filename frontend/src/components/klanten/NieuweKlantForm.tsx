@@ -231,7 +231,7 @@ export function NieuweKlantForm() {
         </div>
       </div>
 
-      <Button className="rounded-full px-6" onClick={create} disabled={!canSubmit}>
+      <Button className="px-6" onClick={create} disabled={!canSubmit}>
         Klant toevoegen
       </Button>
     </section>

@@ -9,7 +9,7 @@ export function KlantHero({
   title,
   children,
 }: {
-  backHref?: string
+  backHref?: string | null
   backLabel?: string
   eyebrow?: string | null
   title: string
@@ -17,13 +17,15 @@ export function KlantHero({
 }) {
   return (
     <div className="space-y-3">
-      <Link
-        href={backHref}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        {backLabel}
-      </Link>
+      {backHref && (
+        <Link
+          href={backHref}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          {backLabel}
+        </Link>
+      )}
 
       <section className="hero-iexist p-6 sm:p-10">
         <Image

@@ -263,6 +263,14 @@ function parseStoredUploadProgress(payload: unknown): UploadProgress | null {
   }
 }
 
+function StepBadge({ step }: { step: number }) {
+  return (
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-yellow text-xs font-bold text-brand-blue">
+      {step}
+    </span>
+  )
+}
+
 function toFieldId(input: string): string {
   return input
     .toLowerCase()
@@ -695,8 +703,11 @@ export function CsvUpload() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
-      <div className="space-y-3 rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-semibold">Prompt opbouw</h3>
+      <div className="panel-iexist space-y-3 p-5">
+        <div className="flex items-center gap-2">
+          <StepBadge step={1} />
+          <h3 className="text-sm font-semibold">Prompt opbouw</h3>
+        </div>
         <p className="text-xs text-muted-foreground">
           Maak je eigen prompt. Alles tussen {"{"} en {"}"} wordt een mappingveld.
           Laat leeg om de standaardprompt te gebruiken.
@@ -719,9 +730,12 @@ export function CsvUpload() {
       </div>
 
       {headers.length > 0 && templateFieldNames.length > 0 && (
-        <div className="space-y-4 rounded-lg border p-4">
+        <div className="panel-iexist space-y-4 p-5">
           <div>
-            <h3 className="text-sm font-semibold">Placeholder mapping</h3>
+            <div className="flex items-center gap-2">
+              <StepBadge step={2} />
+              <h3 className="text-sm font-semibold">Placeholder mapping</h3>
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Koppel elke placeholder aan de juiste CSV-kolom.
             </p>
@@ -781,11 +795,14 @@ export function CsvUpload() {
       )}
 
       {headers.length > 0 && (
-        <div className="space-y-3 rounded-lg border p-4">
+        <div className="panel-iexist space-y-3 p-5">
           <div>
-            <h3 className="text-sm font-semibold">
-              Afbeelding per rij (optioneel)
-            </h3>
+            <div className="flex items-center gap-2">
+              <StepBadge step={3} />
+              <h3 className="text-sm font-semibold">
+                Afbeelding per rij (optioneel)
+              </h3>
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Kies een CSV-kolom met ja/nee. Leeg of null betekent geen
               afbeelding voor die rij.
@@ -813,12 +830,12 @@ export function CsvUpload() {
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
-          className="cursor-pointer rounded-lg border-2 border-dashed p-12 transition-colors hover:bg-muted/50"
+          className="cursor-pointer rounded-3xl border-2 border-dashed border-brand-yellow/50 bg-brand-yellow/5 p-12 transition-colors hover:border-brand-yellow hover:bg-brand-yellow/10"
           onClick={() => document.getElementById("csv-input")?.click()}
         >
           <div className="flex flex-col items-center justify-center gap-4">
-            <div className="rounded-full bg-muted p-4">
-              <Upload className="h-8 w-8 text-muted-foreground" />
+            <div className="rounded-full bg-brand-yellow/20 p-4">
+              <Upload className="h-8 w-8 text-brand-blue dark:text-brand-yellow" />
             </div>
             <div className="text-center">
               <p className="text-sm font-medium">
@@ -838,10 +855,10 @@ export function CsvUpload() {
           </div>
         </div>
       ) : (
-        <div className="flex items-center justify-between rounded-lg border bg-card p-4">
+        <div className="panel-iexist flex items-center justify-between p-4">
           <div className="flex min-w-0 items-center gap-4">
-            <div className="shrink-0 rounded bg-muted p-2">
-              <FileText className="h-6 w-6" />
+            <div className="shrink-0 rounded-xl bg-brand-yellow/20 p-2">
+              <FileText className="h-6 w-6 text-brand-blue dark:text-brand-yellow" />
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{file.name}</p>
@@ -874,7 +891,7 @@ export function CsvUpload() {
       )}
 
       {uploadProgress && (
-        <div className="space-y-4 rounded-lg border bg-card p-4">
+        <div className="panel-iexist space-y-4 p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Verwerkingsvoortgang</h3>
             <div className="flex items-center gap-2">
@@ -925,23 +942,35 @@ export function CsvUpload() {
             Verwerkt: {uploadProgress.processed}/{uploadProgress.jobsCreated} jobs
           </p>
 
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-brand-yellow/15">
             <div
-              className="h-full rounded-full bg-primary transition-all duration-300"
+              className="h-full rounded-full bg-brand-yellow transition-all duration-300"
               style={{ width: `${progressPercentage}%` }}
             />
           </div>
 
-          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-            <p>Jobs aangemaakt: {uploadProgress.jobsCreated}</p>
-            <p>Rijen overgeslagen: {uploadProgress.skippedRows}</p>
-            <p>Nog te verwerken: {uploadProgress.remaining}</p>
-            <p>In behandeling: {uploadProgress.processing}</p>
-            <p>
-              Afbeeldingen gegenereerd: {uploadProgress.imagesGenerated}/
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+              Jobs aangemaakt: {uploadProgress.jobsCreated}
+            </span>
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+              In behandeling: {uploadProgress.processing}
+            </span>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+              Nog te verwerken: {uploadProgress.remaining}
+            </span>
+            <span className="rounded-full bg-violet-100 px-2.5 py-1 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
+              Afbeeldingen: {uploadProgress.imagesGenerated}/
               {uploadProgress.imagesTarget}
-            </p>
-            {uploadProgress.failed > 0 && <p>Mislukt: {uploadProgress.failed}</p>}
+            </span>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+              Rijen overgeslagen: {uploadProgress.skippedRows}
+            </span>
+            {uploadProgress.failed > 0 && (
+              <span className="rounded-full bg-red-100 px-2.5 py-1 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                Mislukt: {uploadProgress.failed}
+              </span>
+            )}
           </div>
 
           {uploadProgress.failed > 0 &&
@@ -968,7 +997,11 @@ export function CsvUpload() {
         </div>
       )}
 
-      <Button className="w-full" onClick={handleUpload} disabled={!canUpload}>
+      <Button
+        className="h-11 w-full"
+        onClick={handleUpload}
+        disabled={!canUpload}
+      >
         {isUploading ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

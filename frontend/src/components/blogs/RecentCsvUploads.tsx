@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { X } from "lucide-react"
+import { History, X } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -109,7 +109,10 @@ export function RecentCsvUploads() {
   if (isLoading) {
     return (
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Recente uploads</h2>
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <History className="size-5 text-brand-yellow" />
+          Recente uploads
+        </h2>
         <div className="space-y-2">
           {[...Array(3)].map((_, i) => (
             <Skeleton key={i} className="h-16 w-full" />
@@ -121,7 +124,10 @@ export function RecentCsvUploads() {
 
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">Recente uploads</h2>
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <History className="size-5 text-brand-yellow" />
+          Recente uploads
+        </h2>
 
       {error && (
         <p className="text-sm text-destructive">{error}</p>
@@ -136,7 +142,7 @@ export function RecentCsvUploads() {
           {uploads.map((upload) => (
             <div
               key={upload.upload_id}
-              className="rounded-lg border bg-card p-4 flex flex-col gap-2"
+              className="panel-iexist flex flex-col gap-2 p-4"
             >
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1 space-y-1">

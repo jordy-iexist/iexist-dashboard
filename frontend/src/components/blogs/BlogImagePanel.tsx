@@ -299,7 +299,7 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
   }
 
   return (
-    <section className="space-y-4 rounded-lg border bg-card p-5">
+    <section className="space-y-4 p-6 sm:p-8">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">Afbeelding</h2>
         <p className="text-sm text-muted-foreground">
@@ -320,9 +320,9 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-md border p-3">
-          <p className="text-sm font-medium">Primaire afbeelding</p>
+      <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold">Primaire afbeelding</h3>
 
           <div
             className={`space-y-2 rounded-md border px-3 py-2 text-xs ${generationTone.badge}`}
@@ -372,8 +372,8 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
           )}
         </div>
 
-        <div className="space-y-3 rounded-md border p-3">
-          <p className="text-sm font-medium">Acties</p>
+        <div className="space-y-3 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
+          <h3 className="text-sm font-semibold">Acties</h3>
           <div className="space-y-2">
             <label className="text-xs font-medium">Upload afbeelding</label>
             <input
@@ -398,7 +398,7 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
           <div className="space-y-2">
             <label className="text-xs font-medium">Automatisch genereren</label>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={generateImage}
               disabled={isPending || isGenerationInFlight}
               className="w-full"
@@ -423,22 +423,25 @@ export function BlogImagePanel({ blogId }: { blogId: string }) {
       </div>
 
       {images.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Recente afbeeldingen</p>
-          <div className="grid gap-2 md:grid-cols-2">
+        <div className="space-y-2 border-t pt-4">
+          <h3 className="text-sm font-semibold">Recente afbeeldingen</h3>
+          <div className="divide-y">
             {images.slice(0, 6).map((image) => (
-              <article key={image.id} className="rounded-md border p-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span>{sourceLabel(image.source)}</span>
+              <article
+                key={image.id}
+                className="flex items-center justify-between gap-3 py-2 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{sourceLabel(image.source)}</span>
                   {image.is_primary && (
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700">
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-300">
                       Primair
                     </span>
                   )}
                 </div>
-                <p className="text-muted-foreground mt-1">
+                <span className="text-muted-foreground">
                   {formatDate(image.created_at)}
-                </p>
+                </span>
               </article>
             ))}
           </div>

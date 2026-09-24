@@ -1,11 +1,17 @@
 "use client"
 
 import { useState } from "react"
+import { FileSpreadsheet, PencilLine } from "lucide-react"
 
 import { CsvUpload } from "@/components/CsvUpload"
 import { ManualBlogEntry } from "@/components/ManualBlogEntry"
 
 type Tab = "csv" | "manual"
+
+const TABS: { id: Tab; label: string; icon: typeof FileSpreadsheet }[] = [
+  { id: "csv", label: "CSV uploaden", icon: FileSpreadsheet },
+  { id: "manual", label: "Handmatig invullen", icon: PencilLine },
+]
 
 export function BlogUploadTabs() {
   const [activeTab, setActiveTab] = useState<Tab>("csv")
@@ -13,29 +19,22 @@ export function BlogUploadTabs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-1 rounded-lg border p-1 w-fit">
-        <button
-          type="button"
-          onClick={() => setActiveTab("csv")}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-            activeTab === "csv"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          CSV uploaden
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("manual")}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-            activeTab === "manual"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Handmatig invullen
-        </button>
+      <div className="flex w-fit gap-1 rounded-full bg-brand-yellow/10 p-1">
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveTab(id)}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === id
+                ? "bg-brand-yellow text-brand-blue shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Icon className="size-4" />
+            {label}
+          </button>
+        ))}
       </div>
 
       {activeTab === "csv" ? (
