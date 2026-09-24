@@ -218,6 +218,10 @@ class BlogPublication(Base):
     wp_status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'draft'")
     )
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    wp_category_ids: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     warning_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

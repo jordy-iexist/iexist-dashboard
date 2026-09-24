@@ -15,7 +15,12 @@ from app.features.blogs.services.wordpress_service import (
     publish_post_to_wordpress,
     upload_media_to_wordpress,
 )
-from app.worker._common import build_excerpt, build_title, utc_now_iso
+from app.worker._common import (
+    build_excerpt,
+    build_title,
+    split_markdown_title,
+    utc_now_iso,
+)
 from app.worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -101,9 +106,10 @@ def publish_blog_to_wordpress_task(self, publication_id: str):
         if not content:
             raise ValueError("Blog inhoud is leeg.")
 
-        html_content = md.markdown(content, extensions=["extra"])
-        title = build_title(row_data)
-        excerpt = build_excerpt(content)
+        heading_title, body = split_markdown_title(content)
+        html_content = md.markdown(body, extensions=["extra"])
+        title = heading_title or build_title(row_data)
+        excerpt = build_excerpt(body)
         wp_password = decrypt_secret(str(site.app_password_encrypted or ""))
         featured_media_id: str | None = None
         selected_blog_image_id: str | None = None
@@ -153,6 +159,10 @@ def publish_blog_to_wordpress_task(self, publication_id: str):
             excerpt=excerpt,
             post_status=str(publication.wp_status or "draft"),
             featured_media=featured_media_id,
+            date_gmt=publication.scheduled_at,
+            categories=[
+                int(category_id) for category_id in (publication.wp_category_ids or [])
+            ],
         )
 
         publication.status = "succeeded"

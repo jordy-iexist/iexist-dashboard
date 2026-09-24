@@ -1,5 +1,7 @@
 import base64
+import html
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -30,6 +32,13 @@ class WordPressPostResult:
 class WordPressMediaResult:
     media_id: str
     media_url: str
+
+
+@dataclass
+class WordPressCategory:
+    id: int
+    name: str
+    parent: int
 
 
 def normalize_wordpress_url(raw_url: str) -> str:
@@ -236,6 +245,8 @@ def publish_post_to_wordpress(
     excerpt: str,
     post_status: str = "draft",
     featured_media: str | None = None,
+    date_gmt: datetime | None = None,
+    categories: list[int] | None = None,
 ) -> WordPressPostResult:
     normalized_url = normalize_wordpress_url(base_url)
     auth_headers = {
@@ -253,6 +264,14 @@ def publish_post_to_wordpress(
             payload["featured_media"] = int(featured_media)
         except ValueError:
             payload["featured_media"] = featured_media
+    if date_gmt is not None:
+        if date_gmt.tzinfo is None:
+            date_gmt = date_gmt.replace(tzinfo=timezone.utc)
+        payload["date_gmt"] = (
+            date_gmt.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+        )
+    if categories:
+        payload["categories"] = [int(category_id) for category_id in categories]
 
     response = _request_with_auth_redirect(
         method="POST",
@@ -287,6 +306,74 @@ def publish_post_to_wordpress(
 
     post_url = str(raw_post_url or "").strip()
     return WordPressPostResult(post_id=str(raw_post_id), post_url=post_url)
+
+
+def list_wordpress_categories(
+    *,
+    base_url: str,
+    username: str,
+    app_password: str,
+) -> list[WordPressCategory]:
+    normalized_url = normalize_wordpress_url(base_url)
+    auth_headers = _build_basic_auth_header(username, app_password)
+
+    categories: list[WordPressCategory] = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages and page <= 20:
+        route = f"wp/v2/categories?per_page=100&page={page}&hide_empty=false&_fields=id,name,parent"
+        response = _request_with_auth_redirect(
+            method="GET",
+            url=_wordpress_rest_url(normalized_url, route),
+            headers=auth_headers,
+        )
+
+        if response.status_code in {401, 403}:
+            message = _extract_error_message(response)
+            raise WordPressServiceError(
+                f"WordPress authenticatie mislukt bij ophalen categorieën: {message}",
+                code="invalid_credentials",
+            )
+
+        if response.status_code >= 400:
+            message = _extract_error_message(response)
+            raise WordPressServiceError(
+                f"WordPress categorieën ophalen mislukt: {message}",
+                code="categories_failed",
+            )
+
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise WordPressServiceError(
+                "WordPress gaf een ongeldige categorieënlijst terug.",
+                code="invalid_response",
+            ) from exc
+
+        if not isinstance(payload, list):
+            raise WordPressServiceError(
+                "WordPress gaf een ongeldige categorieënlijst terug.",
+                code="invalid_response",
+            )
+
+        for item in payload:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            categories.append(
+                WordPressCategory(
+                    id=int(item["id"]),
+                    name=html.unescape(str(item.get("name") or "")).strip(),
+                    parent=int(item.get("parent") or 0),
+                )
+            )
+
+        try:
+            total_pages = int(response.headers.get("x-wp-totalpages") or 1)
+        except ValueError:
+            total_pages = 1
+        page += 1
+
+    return categories
 
 
 def upload_media_to_wordpress(

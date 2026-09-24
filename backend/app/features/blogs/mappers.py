@@ -20,8 +20,14 @@ def to_publication_item(record: dict) -> PublicationItem:
     if status not in {"pending", "processing", "succeeded", "failed", "blocked_duplicate"}:
         status = "pending"
     wp_status = str(record.get("wp_status") or "draft")
-    if wp_status not in {"draft", "publish"}:
+    if wp_status not in {"draft", "publish", "future"}:
         wp_status = "draft"
+    raw_category_ids = record.get("wp_category_ids") or []
+    wp_category_ids = [
+        int(category_id)
+        for category_id in raw_category_ids
+        if isinstance(category_id, int) or str(category_id).isdigit()
+    ] if isinstance(raw_category_ids, list) else []
 
     return PublicationItem(
         id=str(record["id"]),
@@ -50,6 +56,8 @@ def to_publication_item(record: dict) -> PublicationItem:
             else None
         ),
         wp_status=wp_status,
+        scheduled_at=record.get("scheduled_at"),
+        wp_category_ids=wp_category_ids,
         error_code=(
             str(record["error_code"])
             if record.get("error_code") not in {None, ""}

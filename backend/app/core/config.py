@@ -83,7 +83,7 @@ class Settings(BaseSettings):
         validation_alias="BLOG_IMAGE_SIGNED_URL_TTL_SECONDS",
     )
     openai_image_model: str = Field(
-        default="gpt-image-2",
+        default="gpt-image-2.5-sunburst",
         validation_alias="OPENAI_IMAGE_MODEL",
     )
     openai_image_responses_model: str = Field(
@@ -166,7 +166,7 @@ class Settings(BaseSettings):
         validation_alias="SEO_META_OPENAI_MODEL",
     )
     openai_blog_model: str = Field(
-        default="gpt-5.4-mini",
+        default="gpt-6-luna",
         validation_alias="OPENAI_BLOG_MODEL",
     )
     openai_blog_reasoning_effort: str = Field(

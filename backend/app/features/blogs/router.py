@@ -60,6 +60,8 @@ from app.features.blogs.schemas import (
     RecentUploadsResponse,
     UploadResponse,
     UploadStatus,
+    WordPressCategoriesResponse,
+    WordPressCategoryItem,
     WordPressSiteCreateRequest,
     WordPressSiteItem,
     WordPressSitesResponse,
@@ -94,6 +96,7 @@ from app.features.blogs.services.image_service import (
 )
 from app.features.blogs.services.wordpress_service import (
     WordPressServiceError,
+    list_wordpress_categories,
     normalize_wordpress_url,
     validate_wordpress_credentials,
 )
@@ -1751,6 +1754,42 @@ async def update_wordpress_site(
     return to_wordpress_site_item(_row_to_dict(updated_site))
 
 
+@router.get(
+    "/api/wordpress/sites/{site_id}/categories",
+    response_model=WordPressCategoriesResponse,
+)
+def list_wordpress_site_categories(
+    site_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    site = (
+        db.query(WordPressSite)
+        .filter(WordPressSite.id == site_id, WordPressSite.created_by == user_id)
+        .first()
+    )
+    if not site:
+        raise HTTPException(status_code=404, detail="WordPress site niet gevonden.")
+    if not site.is_active:
+        raise HTTPException(status_code=400, detail="WordPress site is niet actief.")
+
+    try:
+        categories = list_wordpress_categories(
+            base_url=site.base_url,
+            username=site.wp_login,
+            app_password=decrypt_secret(site.app_password_encrypted),
+        )
+    except WordPressServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return WordPressCategoriesResponse(
+        categories=[
+            WordPressCategoryItem(id=c.id, name=c.name, parent=c.parent)
+            for c in sorted(categories, key=lambda c: c.name.lower())
+        ]
+    )
+
+
 @router.post("/api/blogs/{blog_id}/publish", response_model=PublishActionResponse)
 async def publish_single_blog(
     blog_id: str,
@@ -1801,6 +1840,8 @@ async def publish_single_blog(
             status="pending",
             requested_by=user_id,
             wp_status=payload.wp_status,
+            scheduled_at=payload.scheduled_at,
+            wp_category_ids=payload.category_ids_by_site.get(site_id) or None,
             created_at=now,
             updated_at=now,
         )
@@ -1853,11 +1894,13 @@ async def publish_blogs_batch(
         (str(pub.blog_id), str(pub.wordpress_site_id)) for pub in existing_pubs
     }
 
+    options_by_blog = {item.blog_id: item for item in payload.items}
     blocked_items: list[BlockedPublicationItem] = []
     now = utc_now_iso()
     queued_ids: list[str] = []
 
     for blog_id in blog_ids:
+        options = options_by_blog.get(blog_id)
         for site_id in site_ids:
             if (blog_id, site_id) in existing_pairs:
                 blocked_items.append(
@@ -1873,6 +1916,12 @@ async def publish_blogs_batch(
                 status="pending",
                 requested_by=user_id,
                 wp_status=payload.wp_status,
+                scheduled_at=options.scheduled_at if options else None,
+                wp_category_ids=(
+                    options.category_ids_by_site.get(site_id) or None
+                    if options
+                    else None
+                ),
                 created_at=now,
                 updated_at=now,
             )

@@ -23,6 +23,18 @@ def build_title(row_data: dict) -> str:
     return "Gegenereerde blog"
 
 
+_H1_PATTERN = re.compile(r"^#\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+
+def split_markdown_title(content: str) -> tuple[str | None, str]:
+    """Splits de eerste H1 af van de markdown; geeft (titel, body zonder die kop)."""
+    match = _H1_PATTERN.search(content or "")
+    if not match or not match.group(1).strip():
+        return None, content
+    body = (content[: match.start()] + content[match.end() :]).strip()
+    return match.group(1).strip(), body
+
+
 def _strip_markdown(text: str) -> str:
     # Links: keep link text, drop URL
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)

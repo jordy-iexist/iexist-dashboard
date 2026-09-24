@@ -5,9 +5,18 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Check, Link2, Users } from "lucide-react"
 
+import {
+  WordPressCategoryPicker,
+  isFutureLocalDateTime,
+  localDateTimeToIso,
+} from "@/components/blogs/WordPressCategoryPicker"
 import { Button } from "@/components/ui/button"
 import { type BlogsIdsResponse } from "@/lib/blog-types"
-import { PublishActionResponse, WordPressSite } from "@/lib/wordpress-types"
+import {
+  PublishActionResponse,
+  WordPressPostStatus,
+  WordPressSite,
+} from "@/lib/wordpress-types"
 
 type PublishSummary = {
   total: number
@@ -73,6 +82,16 @@ type SelectedBlogInfo = {
   isPublic: boolean
 }
 
+type BlogPublishOptions = {
+  scheduledAt: string
+  categoryIdsBySite: Record<string, number[]>
+}
+
+const EMPTY_PUBLISH_OPTIONS: BlogPublishOptions = {
+  scheduledAt: "",
+  categoryIdsBySite: {},
+}
+
 export function BlogsBatchPublishList({
   blogs,
   totalBlogs,
@@ -88,7 +107,10 @@ export function BlogsBatchPublishList({
   >({})
   const [isSelectingAll, setIsSelectingAll] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
-  const [wpStatus, setWpStatus] = useState<"draft" | "publish">("draft")
+  const [wpStatus, setWpStatus] = useState<WordPressPostStatus>("draft")
+  const [publishOptions, setPublishOptions] = useState<
+    Record<string, BlogPublishOptions>
+  >({})
   const [sites, setSites] = useState<WordPressSite[]>([])
   const [showBatchPanel, setShowBatchPanel] = useState(false)
   const [feedback, setFeedback] = useState<{
@@ -227,6 +249,47 @@ export function BlogsBatchPublishList({
   )
 
   const sharedSelectedCount = selectedCount - ownedSelectedIds.length
+
+  const blogTitles = useMemo(
+    () => new Map(blogs.map((blog) => [blog.id, blog.title])),
+    [blogs]
+  )
+
+  const selectedSites = useMemo(
+    () => sites.filter((site) => selectedSiteIds.includes(site.id)),
+    [sites, selectedSiteIds]
+  )
+
+  const missingScheduleCount = useMemo(() => {
+    if (wpStatus !== "future") return 0
+    return ownedSelectedIds.filter(
+      (blogId) => !isFutureLocalDateTime(publishOptions[blogId]?.scheduledAt ?? "")
+    ).length
+  }, [ownedSelectedIds, publishOptions, wpStatus])
+
+  const updatePublishOptions = (
+    blogId: string,
+    update: (current: BlogPublishOptions) => BlogPublishOptions
+  ) => {
+    setPublishOptions((current) => ({
+      ...current,
+      [blogId]: update(current[blogId] ?? EMPTY_PUBLISH_OPTIONS),
+    }))
+  }
+
+  const applyOptionsToAll = (sourceBlogId: string) => {
+    const source = publishOptions[sourceBlogId] ?? EMPTY_PUBLISH_OPTIONS
+    setPublishOptions((current) => {
+      const next = { ...current }
+      for (const blogId of ownedSelectedIds) {
+        next[blogId] = {
+          scheduledAt: source.scheduledAt,
+          categoryIdsBySite: { ...source.categoryIdsBySite },
+        }
+      }
+      return next
+    })
+  }
 
   const allSelected = totalBlogs > 0 && selectedCount >= totalBlogs
 
@@ -547,6 +610,22 @@ export function BlogsBatchPublishList({
             blog_ids: ownedSelectedIds,
             site_ids: selectedSiteIds,
             wp_status: wpStatus,
+            items: ownedSelectedIds.map((blogId) => {
+              const options = publishOptions[blogId] ?? EMPTY_PUBLISH_OPTIONS
+              return {
+                blog_id: blogId,
+                scheduled_at:
+                  wpStatus === "publish"
+                    ? null
+                    : localDateTimeToIso(options.scheduledAt),
+                category_ids_by_site: Object.fromEntries(
+                  selectedSiteIds.map((siteId) => [
+                    siteId,
+                    options.categoryIdsBySite[siteId] ?? [],
+                  ])
+                ),
+              }
+            }),
           }),
         })
         const payload = (await response.json().catch(() => null)) as
@@ -569,6 +648,7 @@ export function BlogsBatchPublishList({
         })
         setSelectedSiteIds([])
         setSelectedBlogs({})
+        setPublishOptions({})
         router.refresh()
       } catch (error) {
         setFeedback({
@@ -695,15 +775,104 @@ export function BlogsBatchPublishList({
               <select
                 value={wpStatus}
                 onChange={(event) =>
-                  setWpStatus(event.target.value as "draft" | "publish")
+                  setWpStatus(event.target.value as WordPressPostStatus)
                 }
                 disabled={isPending}
                 className="rounded-md border bg-background px-2 py-1 text-sm"
               >
                 <option value="draft">Concept (draft)</option>
-                <option value="publish">Gepubliceerd (publish)</option>
+                <option value="publish">Direct publiceren (publish)</option>
+                <option value="future">Inplannen (future)</option>
               </select>
             </label>
+
+            {ownedSelectedIds.length > 0 && selectedSites.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">
+                  {wpStatus === "publish"
+                    ? "Categorieën per blog"
+                    : "Datum en categorieën per blog"}
+                </p>
+                <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-1">
+                  {ownedSelectedIds.map((blogId) => {
+                    const options = publishOptions[blogId] ?? EMPTY_PUBLISH_OPTIONS
+                    const needsDate =
+                      wpStatus === "future" &&
+                      !isFutureLocalDateTime(options.scheduledAt)
+                    return (
+                      <div
+                        key={blogId}
+                        className="space-y-2 rounded-md border bg-background p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {blogTitles.get(blogId) ?? `Blog ${blogId.slice(0, 8)}`}
+                          </p>
+                          {wpStatus !== "publish" && (
+                            <label className="flex items-center gap-2 text-xs">
+                              <span className="text-muted-foreground">
+                                {wpStatus === "future" ? "Publiceren op:" : "Postdatum:"}
+                              </span>
+                              <input
+                                type="datetime-local"
+                                value={options.scheduledAt}
+                                onChange={(event) =>
+                                  updatePublishOptions(blogId, (current) => ({
+                                    ...current,
+                                    scheduledAt: event.target.value,
+                                  }))
+                                }
+                                disabled={isPending}
+                                className={`rounded-md border bg-background px-2 py-1 text-sm ${
+                                  needsDate ? "border-amber-400" : ""
+                                }`}
+                              />
+                            </label>
+                          )}
+                          {ownedSelectedIds.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => applyOptionsToAll(blogId)}
+                              disabled={isPending}
+                            >
+                              Toepassen op alle
+                            </Button>
+                          )}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {selectedSites.map((site) => (
+                            <WordPressCategoryPicker
+                              key={site.id}
+                              siteId={site.id}
+                              siteName={selectedSites.length > 1 ? site.name : undefined}
+                              selectedIds={options.categoryIdsBySite[site.id] ?? []}
+                              onChange={(ids) =>
+                                updatePublishOptions(blogId, (current) => ({
+                                  ...current,
+                                  categoryIdsBySite: {
+                                    ...current.categoryIdsBySite,
+                                    [site.id]: ids,
+                                  },
+                                }))
+                              }
+                              disabled={isPending}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                {missingScheduleCount > 0 && (
+                  <p className="text-xs text-amber-700">
+                    {missingScheduleCount} blog(s) hebben nog geen datum in de
+                    toekomst.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2">
               <Button
@@ -718,10 +887,15 @@ export function BlogsBatchPublishList({
                 disabled={
                   isPending ||
                   ownedSelectedIds.length === 0 ||
-                  selectedSiteIds.length === 0
+                  selectedSiteIds.length === 0 ||
+                  missingScheduleCount > 0
                 }
               >
-                {isPending ? "Publiceren..." : "Start batch publicatie"}
+                {isPending
+                  ? "Publiceren..."
+                  : wpStatus === "future"
+                    ? "Start batch inplannen"
+                    : "Start batch publicatie"}
               </Button>
             </div>
           </div>

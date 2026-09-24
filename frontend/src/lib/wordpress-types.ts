@@ -9,6 +9,14 @@ export type WordPressSite = {
   updated_at: string
 }
 
+export type WordPressPostStatus = "draft" | "publish" | "future"
+
+export type WordPressCategory = {
+  id: number
+  name: string
+  parent: number
+}
+
 export type PublicationStatus =
   | "pending"
   | "processing"
@@ -26,7 +34,9 @@ export type PublicationItem = {
   wp_post_url: string | null
   wp_media_id: string | null
   blog_image_id: string | null
-  wp_status: "draft" | "publish"
+  wp_status: WordPressPostStatus
+  scheduled_at: string | null
+  wp_category_ids: number[]
   error_code: string | null
   error_message: string | null
   warning_code: string | null

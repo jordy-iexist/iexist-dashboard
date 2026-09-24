@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ManualUploadRequest(BaseModel):
@@ -201,7 +201,7 @@ PublicationStatus = Literal[
     "failed",
     "blocked_duplicate",
 ]
-WordPressPostStatus = Literal["draft", "publish"]
+WordPressPostStatus = Literal["draft", "publish", "future"]
 
 
 class WordPressSiteCreateRequest(BaseModel):
@@ -234,15 +234,62 @@ class WordPressSitesResponse(BaseModel):
     sites: list[WordPressSiteItem]
 
 
+class WordPressCategoryItem(BaseModel):
+    id: int
+    name: str
+    parent: int = 0
+
+
+class WordPressCategoriesResponse(BaseModel):
+    categories: list[WordPressCategoryItem]
+
+
+class PublishItemOptions(BaseModel):
+    blog_id: str
+    scheduled_at: datetime | None = None
+    category_ids_by_site: dict[str, list[int]] = Field(default_factory=dict)
+
+
+def _validate_schedule(wp_status: str, scheduled_at: datetime | None, label: str) -> None:
+    if wp_status != "future":
+        return
+    if scheduled_at is None:
+        raise ValueError(f"{label}: kies een datum om in te plannen.")
+    aware = scheduled_at if scheduled_at.tzinfo else scheduled_at.replace(tzinfo=timezone.utc)
+    if aware <= datetime.now(timezone.utc):
+        raise ValueError(f"{label}: de geplande datum moet in de toekomst liggen.")
+
+
 class PublishBlogRequest(BaseModel):
     site_ids: list[str] = Field(default_factory=list)
     wp_status: WordPressPostStatus = "draft"
+    scheduled_at: datetime | None = None
+    category_ids_by_site: dict[str, list[int]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_schedule(self) -> "PublishBlogRequest":
+        _validate_schedule(self.wp_status, self.scheduled_at, "Inplannen")
+        return self
 
 
 class PublishBatchRequest(BaseModel):
     blog_ids: list[str] = Field(default_factory=list)
     site_ids: list[str] = Field(default_factory=list)
     wp_status: WordPressPostStatus = "draft"
+    items: list[PublishItemOptions] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_schedule(self) -> "PublishBatchRequest":
+        if self.wp_status == "future":
+            options_by_blog = {item.blog_id: item for item in self.items}
+            for blog_id in self.blog_ids:
+                item = options_by_blog.get(blog_id)
+                _validate_schedule(
+                    self.wp_status,
+                    item.scheduled_at if item else None,
+                    f"Blog {blog_id}",
+                )
+        return self
 
 
 class DeleteBatchRequest(BaseModel):
@@ -277,6 +324,8 @@ class PublicationItem(BaseModel):
     wp_media_id: str | None = None
     blog_image_id: str | None = None
     wp_status: WordPressPostStatus
+    scheduled_at: datetime | None = None
+    wp_category_ids: list[int] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
     warning_code: str | None = None

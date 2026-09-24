@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 
+import {
+  WordPressCategoryPicker,
+  isFutureLocalDateTime,
+  localDateTimeToIso,
+} from "@/components/blogs/WordPressCategoryPicker"
 import { Button } from "@/components/ui/button"
 import {
   BlogImage,
   PublicationItem,
   PublishActionResponse,
+  WordPressPostStatus,
   WordPressSite,
 } from "@/lib/wordpress-types"
 
@@ -85,6 +91,19 @@ function statusClasses(status: PublicationItem["status"]) {
   }
 }
 
+function wpStatusLabel(status: WordPressPostStatus) {
+  switch (status) {
+    case "draft":
+      return "concept"
+    case "publish":
+      return "direct gepubliceerd"
+    case "future":
+      return "ingepland"
+    default:
+      return status
+  }
+}
+
 function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
@@ -101,7 +120,11 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
   const [publications, setPublications] = useState<PublicationItem[]>([])
   const [hasPrimaryImage, setHasPrimaryImage] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
-  const [wpStatus, setWpStatus] = useState<"draft" | "publish">("draft")
+  const [wpStatus, setWpStatus] = useState<WordPressPostStatus>("draft")
+  const [scheduledAt, setScheduledAt] = useState("")
+  const [categoryIdsBySite, setCategoryIdsBySite] = useState<
+    Record<string, number[]>
+  >({})
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<{
     type: "success" | "error" | null
@@ -224,6 +247,15 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
     })
   }
 
+  const scheduleError =
+    wpStatus === "future"
+      ? !scheduledAt
+        ? "Kies een datum en tijd om in te plannen."
+        : !isFutureLocalDateTime(scheduledAt)
+          ? "De geplande datum moet in de toekomst liggen."
+          : null
+      : null
+
   const publishToSelectedSites = () => {
     setFeedback({ type: null, message: "" })
     startTransition(async () => {
@@ -236,6 +268,14 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
           body: JSON.stringify({
             site_ids: selectedSiteIds,
             wp_status: wpStatus,
+            scheduled_at:
+              wpStatus === "publish" ? null : localDateTimeToIso(scheduledAt),
+            category_ids_by_site: Object.fromEntries(
+              selectedSiteIds.map((siteId) => [
+                siteId,
+                categoryIdsBySite[siteId] ?? [],
+              ])
+            ),
           }),
         })
         const payload = (await response.json().catch(() => null)) as
@@ -258,6 +298,8 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
           message: `${payload.queued} publicatie(s) gestart${blockedPart}.`,
         })
         setSelectedSiteIds([])
+        setCategoryIdsBySite({})
+        setScheduledAt("")
         await loadPublications()
       } catch (error) {
         setFeedback({
@@ -275,7 +317,12 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
         <h2 className="text-lg font-semibold">Publiceer naar WordPress</h2>
         <p className="text-sm text-muted-foreground">
           Kies één of meerdere sites om deze blog als{" "}
-          {wpStatus === "draft" ? "concept" : "gepubliceerd"} te plaatsen.
+          {wpStatus === "draft"
+            ? "concept"
+            : wpStatus === "future"
+              ? "ingeplande post"
+              : "gepubliceerd"}{" "}
+          te plaatsen.
         </p>
         <p className="text-xs text-muted-foreground">
           {hasPrimaryImage
@@ -306,47 +353,87 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
             </p>
           ) : (
             sites.map((site) => (
-              <label
-                key={site.id}
-                className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
-              >
-                <div className="space-y-0.5">
-                  <p className="font-medium">{site.name}</p>
-                  <p className="text-xs text-muted-foreground">{site.base_url}</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={selectedSiteIds.includes(site.id)}
-                  onChange={(event) => toggleSite(site.id, event.target.checked)}
-                  disabled={isPending}
-                />
-              </label>
+              <div key={site.id} className="rounded-md border text-sm">
+                <label className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="space-y-0.5">
+                    <p className="font-medium">{site.name}</p>
+                    <p className="text-xs text-muted-foreground">{site.base_url}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={selectedSiteIds.includes(site.id)}
+                    onChange={(event) => toggleSite(site.id, event.target.checked)}
+                    disabled={isPending}
+                  />
+                </label>
+                {selectedSiteIds.includes(site.id) && (
+                  <div className="border-t px-3 py-2">
+                    <WordPressCategoryPicker
+                      siteId={site.id}
+                      selectedIds={categoryIdsBySite[site.id] ?? []}
+                      onChange={(ids) =>
+                        setCategoryIdsBySite((current) => ({
+                          ...current,
+                          [site.id]: ids,
+                        }))
+                      }
+                      disabled={isPending}
+                    />
+                  </div>
+                )}
+              </div>
             ))
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Status:</span>
-            <select
-              value={wpStatus}
-              onChange={(event) =>
-                setWpStatus(event.target.value as "draft" | "publish")
-              }
-              disabled={isPending}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
-            >
-              <option value="draft">Concept (draft)</option>
-              <option value="publish">Gepubliceerd (publish)</option>
-            </select>
-          </label>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Status:</span>
+              <select
+                value={wpStatus}
+                onChange={(event) =>
+                  setWpStatus(event.target.value as WordPressPostStatus)
+                }
+                disabled={isPending}
+                className="rounded-md border bg-background px-2 py-1 text-sm"
+              >
+                <option value="draft">Concept (draft)</option>
+                <option value="publish">Direct publiceren (publish)</option>
+                <option value="future">Inplannen (future)</option>
+              </select>
+            </label>
+            {wpStatus !== "publish" && (
+              <label className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">
+                  {wpStatus === "future" ? "Publiceren op:" : "Postdatum:"}
+                </span>
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(event) => setScheduledAt(event.target.value)}
+                  disabled={isPending}
+                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                />
+              </label>
+            )}
+          </div>
           <Button
             onClick={publishToSelectedSites}
-            disabled={isPending || selectedSiteIds.length === 0}
+            disabled={
+              isPending || selectedSiteIds.length === 0 || Boolean(scheduleError)
+            }
           >
-            {isPending ? "Publiceren..." : "Publiceer geselecteerde sites"}
+            {isPending
+              ? "Publiceren..."
+              : wpStatus === "future"
+                ? "Plan in op geselecteerde sites"
+                : "Publiceer geselecteerde sites"}
           </Button>
         </div>
+        {scheduleError && selectedSiteIds.length > 0 && (
+          <p className="text-xs text-amber-700">{scheduleError}</p>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -383,7 +470,11 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {formatDate(publication.created_at)}
+                    {formatDate(publication.created_at)} · {wpStatusLabel(publication.wp_status)}
+                    {publication.scheduled_at &&
+                      ` · ${publication.wp_status === "future" ? "gepland op" : "postdatum"} ${formatDate(publication.scheduled_at)}`}
+                    {publication.wp_category_ids.length > 0 &&
+                      ` · ${publication.wp_category_ids.length} categorie(ën)`}
                   </p>
                   {publication.wp_post_url && (
                     <p className="mt-1">
