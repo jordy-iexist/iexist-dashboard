@@ -746,8 +746,11 @@ export function BlogsBatchPublishList({
             <p className="text-sm font-medium">Kies WordPress sites</p>
             {sites.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Geen actieve WordPress sites gevonden. Voeg eerst sites toe in
-                Instellingen.
+                Geen actieve WordPress sites gevonden. Voeg eerst sites toe in{" "}
+                <Link href="/dashboard/settings/wordpress" className="underline underline-offset-2">
+                  Instellingen
+                </Link>
+                .
               </p>
             ) : (
               <div className="grid gap-2 md:grid-cols-2">

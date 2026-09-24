@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  SettingsFeedback,
+  SettingsSection,
+} from "@/components/settings/SettingsSection"
 import { WordPressSite } from "@/lib/wordpress-types"
 
 type SitesApiResponse =
@@ -241,29 +245,190 @@ export function WordPressSitesSettings() {
   }
 
   return (
-    <section className="rounded-lg border p-6 space-y-5">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">WordPress Sites</h2>
-        <p className="text-sm text-muted-foreground">
-          Voeg zelf WordPress sites toe met URL, login en wachtwoord zodat het
-          team blogs kan publiceren.
-        </p>
-      </div>
-
+    <div>
       {feedback.message && (
-        <div
-          className={`rounded-md border px-3 py-2 text-sm ${
-            feedback.type === "success"
-              ? "border-green-200 bg-green-50 text-green-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {feedback.message}
+        <div className="mb-6">
+          <SettingsFeedback type={feedback.type === "success" ? "success" : "error"}>
+            {feedback.message}
+          </SettingsFeedback>
         </div>
       )}
 
-      <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-        <h3 className="text-sm font-semibold">Nieuwe site toevoegen</h3>
+      <SettingsSection
+        title="Gekoppelde sites"
+        description="Alleen actieve sites zijn beschikbaar bij het publiceren."
+      >
+        {isLoading && (
+          <p className="text-sm text-muted-foreground">WordPress sites laden...</p>
+        )}
+
+        {!isLoading && sortedSites.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Nog geen WordPress sites gekoppeld.
+          </p>
+        )}
+
+        {!isLoading && sortedSites.length > 0 && (
+          <ul className="divide-y border-y">
+            {sortedSites.map((site) => {
+              const isEditing = editingSiteId === site.id && editForm
+              return (
+                <li key={site.id} className="space-y-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-sm font-medium">{site.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {site.base_url} · {site.wp_login}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Toegevoegd: {formatDate(site.created_at)}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-xs ${
+                          site.is_active ? "text-green-700" : "text-muted-foreground"
+                        }`}
+                      >
+                        <span
+                          className={`size-1.5 rounded-full ${
+                            site.is_active ? "bg-green-600" : "bg-zinc-400"
+                          }`}
+                        />
+                        {site.is_active ? "Actief" : "Inactief"}
+                      </span>
+                      {!isEditing && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => startEditing(site)}
+                          disabled={isPending}
+                        >
+                          Bewerk
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isEditing && editForm && (
+                    <div className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Naam</label>
+                          <Input
+                            value={editForm.name}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, name: event.target.value }
+                                  : current
+                              )
+                            }
+                            disabled={isPending}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Site URL</label>
+                          <Input
+                            value={editForm.baseUrl}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, baseUrl: event.target.value }
+                                  : current
+                              )
+                            }
+                            disabled={isPending}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">
+                            WordPress login
+                          </label>
+                          <Input
+                            value={editForm.wpLogin}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, wpLogin: event.target.value }
+                                  : current
+                              )
+                            }
+                            disabled={isPending}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">
+                            Nieuw wachtwoord (optioneel)
+                          </label>
+                          <Input
+                            type="password"
+                            value={editForm.wpPassword}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, wpPassword: event.target.value }
+                                  : current
+                              )
+                            }
+                            placeholder="Laat leeg om ongewijzigd te laten"
+                            disabled={isPending}
+                          />
+                        </div>
+                      </div>
+
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editForm.isActive}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, isActive: event.target.checked }
+                                : current
+                            )
+                          }
+                          disabled={isPending}
+                        />
+                        Site actief
+                      </label>
+
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={cancelEditing}
+                          disabled={isPending}
+                        >
+                          Annuleren
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => saveEdit(site.id)}
+                          disabled={
+                            isPending ||
+                            editForm.name.trim().length === 0 ||
+                            editForm.baseUrl.trim().length === 0 ||
+                            editForm.wpLogin.trim().length === 0
+                          }
+                        >
+                          {isPending ? "Opslaan..." : "Opslaan"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Nieuwe site toevoegen"
+        description="Gebruik een WordPress Application Password, niet je gewone wachtwoord."
+      >
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1">
             <label className="text-xs font-medium">Naam (optioneel)</label>
@@ -337,171 +502,7 @@ export function WordPressSitesSettings() {
             {isPending ? "Toevoegen..." : "Site toevoegen"}
           </Button>
         </div>
-      </div>
-
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Gekoppelde sites</h3>
-
-        {isLoading && (
-          <p className="text-sm text-muted-foreground">WordPress sites laden...</p>
-        )}
-
-        {!isLoading && sortedSites.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Nog geen WordPress sites gekoppeld.
-          </p>
-        )}
-
-        {!isLoading &&
-          sortedSites.map((site) => {
-            const isEditing = editingSiteId === site.id && editForm
-            return (
-              <article key={site.id} className="rounded-lg border p-4 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="font-medium">{site.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {site.base_url} · {site.wp_login}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Toegevoegd: {formatDate(site.created_at)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                        site.is_active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-zinc-200 text-zinc-700"
-                      }`}
-                    >
-                      {site.is_active ? "Actief" : "Inactief"}
-                    </span>
-                    {!isEditing && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => startEditing(site)}
-                        disabled={isPending}
-                      >
-                        Bewerk
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {isEditing && editForm && (
-                  <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">Naam</label>
-                        <Input
-                          value={editForm.name}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, name: event.target.value }
-                                : current
-                            )
-                          }
-                          disabled={isPending}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">Site URL</label>
-                        <Input
-                          value={editForm.baseUrl}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, baseUrl: event.target.value }
-                                : current
-                            )
-                          }
-                          disabled={isPending}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">
-                          WordPress login
-                        </label>
-                        <Input
-                          value={editForm.wpLogin}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, wpLogin: event.target.value }
-                                : current
-                            )
-                          }
-                          disabled={isPending}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">
-                          Nieuw wachtwoord (optioneel)
-                        </label>
-                        <Input
-                          type="password"
-                          value={editForm.wpPassword}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, wpPassword: event.target.value }
-                                : current
-                            )
-                          }
-                          placeholder="Laat leeg om ongewijzigd te laten"
-                          disabled={isPending}
-                        />
-                      </div>
-                    </div>
-
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={editForm.isActive}
-                        onChange={(event) =>
-                          setEditForm((current) =>
-                            current
-                              ? { ...current, isActive: event.target.checked }
-                              : current
-                          )
-                        }
-                        disabled={isPending}
-                      />
-                      Site actief
-                    </label>
-
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={cancelEditing}
-                        disabled={isPending}
-                      >
-                        Annuleren
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => saveEdit(site.id)}
-                        disabled={
-                          isPending ||
-                          editForm.name.trim().length === 0 ||
-                          editForm.baseUrl.trim().length === 0 ||
-                          editForm.wpLogin.trim().length === 0
-                        }
-                      >
-                        {isPending ? "Opslaan..." : "Opslaan"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </article>
-            )
-          })}
-      </div>
-    </section>
+      </SettingsSection>
+    </div>
   )
 }

@@ -64,17 +64,11 @@ const blogItems = [
     url: "/dashboard/blogs/upload",
     icon: Upload,
   },
-  {
-    title: "Instellingen",
-    url: "/dashboard/blogs/settings",
-    icon: Settings,
-  },
 ];
 
 const landingPageItems = [
   { title: "Alle pagina's", url: "/dashboard/landing-pages", icon: FileText },
   { title: "CSV Upload", url: "/dashboard/landing-pages/upload", icon: Upload },
-  { title: "Instellingen", url: "/dashboard/landing-pages/settings", icon: Settings },
 ]
 
 const seoItems = [
@@ -288,7 +282,7 @@ export function AppSidebar({ user }: { user: AuthUser }) {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              isActive={pathname === "/dashboard/settings"}
+              isActive={pathname.startsWith("/dashboard/settings")}
               tooltip="Instellingen"
             >
               <Link href="/dashboard/settings">

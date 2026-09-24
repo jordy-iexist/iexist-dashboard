@@ -4,6 +4,11 @@ import { useEffect, useState, useTransition } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  SettingsFeedback,
+  SettingsField,
+  SettingsSection,
+} from "@/components/settings/SettingsSection"
 
 type OpenAISettingsResponse =
   | {
@@ -190,29 +195,15 @@ export function OpenAISettings() {
   }
 
   return (
-    <div className="rounded-lg border p-6 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold mb-1">OpenAI API key</h2>
-        <p className="text-sm text-muted-foreground">
-          Deze key wordt alleen voor jouw account gebruikt voor blog- en
-          SEO-functies.
-        </p>
-      </div>
+    <div>
+      <SettingsSection
+        title="Status"
+        description="De opgeslagen key wordt niet teruggetoond."
+      >
+        {feedback.type && (
+          <SettingsFeedback type={feedback.type}>{feedback.message}</SettingsFeedback>
+        )}
 
-      {feedback.type && (
-        <div
-          className={
-            feedback.type === "success"
-              ? "rounded-md border border-green-500 bg-green-50 px-3 py-2 text-sm text-green-700"
-              : "rounded-md border border-destructive bg-red-50 px-3 py-2 text-sm text-destructive"
-          }
-        >
-          {feedback.message}
-        </div>
-      )}
-
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Status</p>
         <p className="text-sm text-muted-foreground">
           {isLoading
             ? "Instellingen laden..."
@@ -220,48 +211,54 @@ export function OpenAISettings() {
             ? "Persoonlijke OpenAI API key ingesteld."
             : "Nog geen persoonlijke OpenAI API key ingesteld."}
         </p>
-      </div>
+      </SettingsSection>
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="openai-api-key">
-          Nieuwe OpenAI API key
-        </label>
-        <Input
-          id="openai-api-key"
-          type="password"
-          autoComplete="off"
-          placeholder={hasPersonalKey ? "Vervang bestaande key" : "sk-..."}
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">
-          De opgeslagen key wordt niet teruggetoond. Opslaan vervangt de
-          bestaande key direct.
-        </p>
-      </div>
+      <SettingsSection
+        title="Key instellen"
+        description="Opslaan vervangt de bestaande key direct."
+      >
+        <SettingsField label="Nieuwe OpenAI API key" htmlFor="openai-api-key">
+          <Input
+            id="openai-api-key"
+            type="password"
+            autoComplete="off"
+            placeholder={hasPersonalKey ? "Vervang bestaande key" : "sk-..."}
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+        </SettingsField>
 
-      <div className="flex flex-wrap gap-3">
-        <Button
-          onClick={saveKey}
-          disabled={isPending || apiKey.trim().length === 0}
-        >
-          {isPending ? "Opslaan..." : hasPersonalKey ? "Key bijwerken" : "Key opslaan"}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setApiKey("")}
-          disabled={isPending || apiKey.length === 0}
-        >
-          Veld leegmaken
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={removeKey}
-          disabled={isPending || !hasPersonalKey}
-        >
-          Key verwijderen
-        </Button>
-      </div>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            onClick={saveKey}
+            disabled={isPending || apiKey.trim().length === 0}
+          >
+            {isPending ? "Opslaan..." : hasPersonalKey ? "Key bijwerken" : "Key opslaan"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setApiKey("")}
+            disabled={isPending || apiKey.length === 0}
+          >
+            Veld leegmaken
+          </Button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Key verwijderen"
+        description="Verwijdert je persoonlijke key van je account."
+      >
+        <div>
+          <Button
+            variant="destructive"
+            onClick={removeKey}
+            disabled={isPending || !hasPersonalKey}
+          >
+            Key verwijderen
+          </Button>
+        </div>
+      </SettingsSection>
     </div>
   )
 }

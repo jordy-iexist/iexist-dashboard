@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 
 import {
@@ -349,7 +350,11 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
             <p className="text-sm text-muted-foreground">WordPress sites laden...</p>
           ) : sites.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Geen actieve WordPress sites. Voeg eerst sites toe in Instellingen.
+              Geen actieve WordPress sites. Voeg eerst sites toe in{" "}
+              <Link href="/dashboard/settings/wordpress" className="underline underline-offset-2">
+                Instellingen
+              </Link>
+              .
             </p>
           ) : (
             sites.map((site) => (
