@@ -1,14 +1,9 @@
 import Link from "next/link"
-import { notFound, redirect } from "next/navigation"
-import { unstable_noStore as noStore } from "next/cache"
+import { Pencil, Sheet } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { KlantProfielForm } from "@/components/klanten/KlantProfielForm"
-import {
-  getBackendApiUrl,
-  getBackendAuthorizationValue,
-} from "@/lib/backend-api"
-import { type CustomerWebsiteDetail } from "@/lib/customer-types"
+import { KlantHero } from "@/components/klanten/KlantHero"
+import { fetchCustomerDetail } from "@/lib/customer-api"
 
 export const metadata = {
   title: "Klant",
@@ -28,48 +23,54 @@ function StatCard({
   hint?: string
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
+    <div className="py-2 sm:px-6 sm:first:pl-0">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-2 text-3xl font-bold tracking-wide text-primary">{value}</p>
       {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
     </div>
   )
 }
 
+function ProfileField({
+  label,
+  className,
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="mt-1">{children}</dd>
+    </div>
+  )
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return null
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return new Intl.DateTimeFormat("nl-NL", { dateStyle: "medium" }).format(date)
+}
+
+function getCustomerStage(since: string | null): "Nieuw" | "Oud" | null {
+  if (!since) return null
+  const start = new Date(since)
+  if (Number.isNaN(start.getTime())) return null
+  const cutoff = new Date()
+  cutoff.setFullYear(cutoff.getFullYear() - 1)
+  return start > cutoff ? "Nieuw" : "Oud"
+}
+
 export default async function KlantDetailPage({ params }: KlantDetailPageProps) {
-  noStore()
-
   const { customerId } = await params
-  const authorization = await getBackendAuthorizationValue()
-  if (!authorization) {
-    redirect("/login")
-  }
-
-  let customer: CustomerWebsiteDetail | null = null
-  try {
-    const response = await fetch(
-      `${getBackendApiUrl()}/api/customers/${encodeURIComponent(customerId)}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: authorization,
-        },
-        cache: "no-store",
-      }
-    )
-
-    if (!response.ok) {
-      notFound()
-    }
-
-    customer = (await response.json().catch(() => null)) as CustomerWebsiteDetail | null
-  } catch {
-    notFound()
-  }
-
-  if (!customer?.id) {
-    notFound()
-  }
+  const customer = await fetchCustomerDetail(customerId)
 
   const target = customer.target_blogs_per_month
   const targetLabel = typeof target === "number" ? String(target) : "—"
@@ -78,38 +79,41 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
       ? `${customer.placed_this_month} / ${target}`
       : String(customer.placed_this_month)
 
+  const startedLabel = formatDate(customer.seo_customer_since)
+  const stage = getCustomerStage(customer.seo_customer_since)
+
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6">
-      <div className="space-y-2">
-        <Link
-          href="/dashboard/klanten"
-          className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+    <div className="mx-auto w-full max-w-5xl space-y-8">
+      <KlantHero eyebrow={customer.category_name} title={customer.name}>
+        <a
+          href={customer.base_url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-block text-lg text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
-          Terug naar klanten
-        </Link>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">{customer.name}</h1>
-          <Button asChild variant="outline" size="sm">
+          {customer.domain}
+        </a>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
             <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
+              <Sheet />
               Open spreadsheet
             </Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/klanten/${customer.id}/bewerken`}>
+              <Pencil />
+              Bewerken
+            </Link>
+          </Button>
         </div>
-        <p className="text-sm text-muted-foreground">
-          <a
-            href={customer.base_url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-foreground"
-          >
-            {customer.domain}
-          </a>
-        </p>
-      </div>
+      </KlantHero>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Plaatsing van blogs</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold tracking-wide text-primary">
+          Plaatsing van blogs
+        </h2>
+        <div className="grid gap-2 sm:grid-cols-3 sm:divide-x">
           <StatCard label="Blogs per maand (doel)" value={targetLabel} />
           <StatCard
             label="Pending blogs"
@@ -120,7 +124,55 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
         </div>
       </section>
 
-      <KlantProfielForm customer={customer} />
+      <section className="space-y-6 border-t pt-8">
+        <h2 className="text-lg font-bold tracking-wide text-primary">
+          Klantprofiel
+        </h2>
+        <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          <ProfileField label="Site">
+            <a
+              href={customer.base_url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline-offset-2 hover:underline"
+            >
+              {customer.base_url}
+            </a>
+          </ProfileField>
+          <ProfileField label="Traject gestart">
+            {startedLabel ? `${startedLabel}${stage ? ` · ${stage}` : ""}` : "—"}
+          </ProfileField>
+          <ProfileField label="Branche / categorie">
+            {customer.category_name ?? "—"}
+          </ProfileField>
+          <ProfileField label="Blogs per maand (doel)">
+            {customer.target_blogs_per_month ?? "—"}
+          </ProfileField>
+          <ProfileField label="Links per maand (doel)">
+            {customer.target_links_per_month ?? "—"}
+          </ProfileField>
+          <ProfileField label="Externe spreadsheet">
+            {customer.spreadsheet_url ? (
+              <a
+                href={customer.spreadsheet_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="break-all underline-offset-2 hover:underline"
+              >
+                {customer.spreadsheet_url}
+              </a>
+            ) : (
+              "—"
+            )}
+          </ProfileField>
+          <ProfileField
+            label="Afspraken met klant / SEO-doelstellingen"
+            className="sm:col-span-2"
+          >
+            <p className="whitespace-pre-wrap">{customer.seo_goals || "—"}</p>
+          </ProfileField>
+        </dl>
+      </section>
     </div>
   )
 }

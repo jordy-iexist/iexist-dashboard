@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, useTransition } from "react"
 
@@ -65,7 +66,7 @@ export function KlantProfielForm({
     setForm((current) => ({ ...current, [field]: value }))
   }
 
-  const submit = (body: Record<string, unknown>, successMessage: string) => {
+  const submit = (body: Record<string, unknown>) => {
     setFeedback({ type: null, message: "" })
     startTransition(async () => {
       try {
@@ -81,7 +82,7 @@ export function KlantProfielForm({
         if (!response.ok) {
           throw new Error(getErrorMessage(payload, "Kon klant niet bijwerken."))
         }
-        setFeedback({ type: "success", message: successMessage })
+        router.push(`/dashboard/klanten/${customer.id}`)
         router.refresh()
       } catch (error) {
         setFeedback({
@@ -118,19 +119,16 @@ export function KlantProfielForm({
       return
     }
 
-    submit(
-      {
-        name: form.name.trim(),
-        base_url: form.baseUrl.trim(),
-        seo_customer_since: form.seoCustomerSince.trim() || null,
-        seo_goals: form.seoGoals.trim() || null,
-        category_id: form.categoryId || null,
-        target_blogs_per_month: parsedTarget,
-        target_links_per_month: parsedLinksTarget,
-        spreadsheet_url: form.spreadsheetUrl.trim() || null,
-      },
-      "Klantprofiel is bijgewerkt."
-    )
+    submit({
+      name: form.name.trim(),
+      base_url: form.baseUrl.trim(),
+      seo_customer_since: form.seoCustomerSince.trim() || null,
+      seo_goals: form.seoGoals.trim() || null,
+      category_id: form.categoryId || null,
+      target_blogs_per_month: parsedTarget,
+      target_links_per_month: parsedLinksTarget,
+      spreadsheet_url: form.spreadsheetUrl.trim() || null,
+    })
   }
 
   const deleteCustomer = () => {
@@ -165,151 +163,152 @@ export function KlantProfielForm({
   }
 
   return (
-    <section className="space-y-4 rounded-lg border p-5">
-      <h2 className="text-sm font-semibold">Klantprofiel</h2>
+    <>
+      <section className="space-y-6">
 
-      {feedback.message && (
-        <div
-          className={`rounded-md border px-3 py-2 text-sm ${
-            feedback.type === "success"
-              ? "border-green-200 bg-green-50 text-green-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {feedback.message}
-        </div>
-      )}
+        {feedback.message && (
+          <div
+            className={`rounded-xl px-4 py-3 text-sm ${
+              feedback.type === "success"
+                ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-1">
-          <label className="text-xs font-medium">Naam</label>
-          <Input
-            value={form.name}
-            onChange={(event) => updateField("name", event.target.value)}
-            disabled={isPending}
-          />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Naam</label>
+            <Input
+              value={form.name}
+              onChange={(event) => updateField("name", event.target.value)}
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Site</label>
+            <Input
+              value={form.baseUrl}
+              onChange={(event) => updateField("baseUrl", event.target.value)}
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Traject gestart</label>
+            <Input
+              type="date"
+              value={form.seoCustomerSince}
+              onChange={(event) =>
+                updateField("seoCustomerSince", event.target.value)
+              }
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Branche / categorie</label>
+            <CategorySelect
+              value={form.categoryId}
+              onChange={(value) => updateField("categoryId", value)}
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              Aantal blogs per maand (doel)
+            </label>
+            <Input
+              type="number"
+              min={0}
+              placeholder="Bijv. 4"
+              value={form.targetBlogsPerMonth}
+              onChange={(event) =>
+                updateField("targetBlogsPerMonth", event.target.value)
+              }
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              Aantal links per maand (doel)
+            </label>
+            <Input
+              type="number"
+              min={0}
+              placeholder="Bijv. 2"
+              value={form.targetLinksPerMonth}
+              onChange={(event) =>
+                updateField("targetLinksPerMonth", event.target.value)
+              }
+              disabled={isPending}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              Externe spreadsheet (optioneel)
+            </label>
+            <Input
+              type="url"
+              placeholder="https://docs.google.com/..."
+              value={form.spreadsheetUrl}
+              onChange={(event) =>
+                updateField("spreadsheetUrl", event.target.value)
+              }
+              disabled={isPending}
+            />
+            <p className="text-xs text-muted-foreground">
+              De interne spreadsheet is altijd bereikbaar via de
+              Spreadsheet-knop in de klantenlijst.
+            </p>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-sm font-medium">
+              Afspraken met klant / SEO-doelstellingen
+            </label>
+            <textarea
+              className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Beschrijf de afspraken en SEO-doelstellingen voor deze klant"
+              value={form.seoGoals}
+              onChange={(event) => updateField("seoGoals", event.target.value)}
+              disabled={isPending}
+            />
+          </div>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">Site</label>
-          <Input
-            value={form.baseUrl}
-            onChange={(event) => updateField("baseUrl", event.target.value)}
-            disabled={isPending}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">Traject gestart</label>
-          <Input
-            type="date"
-            value={form.seoCustomerSince}
-            onChange={(event) =>
-              updateField("seoCustomerSince", event.target.value)
-            }
-            disabled={isPending}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">Branche / categorie</label>
-          <CategorySelect
-            value={form.categoryId}
-            onChange={(value) => updateField("categoryId", value)}
-            disabled={isPending}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">
-            Aantal blogs per maand (doel)
-          </label>
-          <Input
-            type="number"
-            min={0}
-            placeholder="Bijv. 4"
-            value={form.targetBlogsPerMonth}
-            onChange={(event) =>
-              updateField("targetBlogsPerMonth", event.target.value)
-            }
-            disabled={isPending}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">
-            Aantal links per maand (doel)
-          </label>
-          <Input
-            type="number"
-            min={0}
-            placeholder="Bijv. 2"
-            value={form.targetLinksPerMonth}
-            onChange={(event) =>
-              updateField("targetLinksPerMonth", event.target.value)
-            }
-            disabled={isPending}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium">
-            Externe spreadsheet (optioneel)
-          </label>
-          <Input
-            type="url"
-            placeholder="https://docs.google.com/..."
-            value={form.spreadsheetUrl}
-            onChange={(event) =>
-              updateField("spreadsheetUrl", event.target.value)
-            }
-            disabled={isPending}
-          />
-          <p className="text-xs text-muted-foreground">
-            De interne spreadsheet is altijd bereikbaar via de
-            Spreadsheet-knop in de klantenlijst.
-          </p>
-        </div>
-        <div className="space-y-1 md:col-span-2">
-          <label className="text-xs font-medium">
-            Afspraken met klant / SEO-doelstellingen
-          </label>
-          <textarea
-            className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="Beschrijf de afspraken en SEO-doelstellingen voor deze klant"
-            value={form.seoGoals}
-            onChange={(event) => updateField("seoGoals", event.target.value)}
-            disabled={isPending}
-          />
-        </div>
-      </div>
 
-      <div className="flex gap-2">
-        <Button onClick={saveProfile} disabled={isPending}>
-          Opslaan
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setForm(toFormState(customer))
-            setFeedback({ type: null, message: "" })
-          }}
-          disabled={isPending}
-        >
-          Herstellen
-        </Button>
-      </div>
+        <div className="flex gap-2">
+          <Button
+            className="rounded-full px-6"
+            onClick={saveProfile}
+            disabled={isPending}
+          >
+            Opslaan
+          </Button>
+          <Button variant="ghost" className="rounded-full" asChild>
+            <Link href={`/dashboard/klanten/${customer.id}`}>Annuleren</Link>
+          </Button>
+        </div>
 
-      <div className="space-y-2 border-t pt-4">
-        <h3 className="text-sm font-semibold text-destructive">Gevarenzone</h3>
-        <p className="text-xs text-muted-foreground">
+      </section>
+
+      <section className="space-y-3 border-t pt-8">
+        <h2 className="text-lg font-bold tracking-wide text-destructive">
+          Gevarenzone
+        </h2>
+        <p className="text-sm text-muted-foreground">
           Verwijdert deze klant, inclusief keywords, SERP-scans en meta runs,
           definitief. Blogs en landingspagina&apos;s blijven bestaan maar
           verliezen hun klantkoppeling.
         </p>
         <Button
-          size="sm"
           variant="destructive"
+          className="rounded-full"
           onClick={deleteCustomer}
           disabled={isPending}
         >
           Klant verwijderen
         </Button>
-      </div>
-    </section>
+      </section>
+    </>
   )
 }

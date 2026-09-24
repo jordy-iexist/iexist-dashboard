@@ -114,13 +114,17 @@ export function NieuweKlantForm() {
   }
 
   return (
-    <section className="space-y-4 rounded-lg border p-5">
+    <section className="space-y-6">
+      <h2 className="text-lg font-bold tracking-wide text-primary">
+        Klantprofiel
+      </h2>
+
       {feedback.message && (
         <div
-          className={`rounded-md border px-3 py-2 text-sm ${
+          className={`rounded-xl px-4 py-3 text-sm ${
             feedback.type === "success"
-              ? "border-green-200 bg-green-50 text-green-700"
-              : "border-red-200 bg-red-50 text-red-700"
+              ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+              : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
           }`}
         >
           {feedback.message}
@@ -129,7 +133,7 @@ export function NieuweKlantForm() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1">
-          <label className="text-xs font-medium">Naam</label>
+          <label className="text-sm font-medium">Naam</label>
           <Input
             placeholder="Naam (bijv. Klant A)"
             value={form.name}
@@ -138,7 +142,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">Site</label>
+          <label className="text-sm font-medium">Site</label>
           <Input
             placeholder="https://voorbeeld.nl"
             value={form.baseUrl}
@@ -147,7 +151,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">Traject gestart</label>
+          <label className="text-sm font-medium">Traject gestart</label>
           <Input
             type="date"
             value={form.seoCustomerSince}
@@ -158,7 +162,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">Branche / categorie</label>
+          <label className="text-sm font-medium">Branche / categorie</label>
           <CategorySelect
             value={form.categoryId}
             onChange={(value) => updateField("categoryId", value)}
@@ -166,7 +170,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">
+          <label className="text-sm font-medium">
             Aantal blogs per maand (doel)
           </label>
           <Input
@@ -181,7 +185,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">
+          <label className="text-sm font-medium">
             Aantal links per maand (doel)
           </label>
           <Input
@@ -196,7 +200,7 @@ export function NieuweKlantForm() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium">
+          <label className="text-sm font-medium">
             Externe spreadsheet (optioneel)
           </label>
           <Input
@@ -214,7 +218,7 @@ export function NieuweKlantForm() {
           </p>
         </div>
         <div className="space-y-1 md:col-span-2">
-          <label className="text-xs font-medium">
+          <label className="text-sm font-medium">
             Afspraken met klant / SEO-doelstellingen
           </label>
           <textarea
@@ -227,7 +231,7 @@ export function NieuweKlantForm() {
         </div>
       </div>
 
-      <Button onClick={create} disabled={!canSubmit}>
+      <Button className="rounded-full px-6" onClick={create} disabled={!canSubmit}>
         Klant toevoegen
       </Button>
     </section>

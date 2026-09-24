@@ -131,3 +131,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* iExist-websitestijl (Figma) */
+@utility hero-iexist {
+  position: relative;
+  overflow: hidden;
+  border-radius: 30px;
+  background-color: var(--card);
+}
