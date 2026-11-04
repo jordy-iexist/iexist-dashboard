@@ -51,7 +51,7 @@ class Settings(BaseSettings):
         validation_alias="STORAGE_SIGNING_SECRET",
     )
     cors_allowed_origins: str = Field(
-        default="http://localhost:3000",
+        default="http://localhost:3000,https://app.blogdrip.com",
         validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "CORS_ORIGINS"),
     )
     openai_api_key: str = Field(
