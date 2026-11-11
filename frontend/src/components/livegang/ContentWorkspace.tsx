@@ -235,7 +235,8 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
           </>
         }
         aside={
-          checklist && (
+          checklist &&
+          !scanning && (
             <div className="flex items-center gap-3">
               <PercentRing percent={checklist.percent} size={64} />
               <div className="text-sm">
@@ -275,7 +276,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
                   <Trash2 /> Verwijderen
                 </Button>
               )}
-              {scan && (
+              {scan && !scanning && (
                 <>
                   <Button size="sm" variant="outline" asChild>
                     <a href={`${API_BASE}/scans/${scan.id}/export?kind=checklist`}>
@@ -289,11 +290,13 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
                   </Button>
                 </>
               )}
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=3`} target="_blank">
-                  <Printer /> Printversie / PDF
-                </Link>
-              </Button>
+              {!scanning && (
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=3`} target="_blank">
+                    <Printer /> Printversie / PDF
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
           {latest && running && (
@@ -304,7 +307,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
           )}
         </PanelRow>
 
-        {scan && summary && (
+        {scan && summary && !scanning && (
           <div className="grid grid-cols-2 gap-y-3 sm:grid-cols-4">
             <MiniStat label="Pagina's gescand" value={summary.pages_fetched} />
             <MiniStat label="Met verbeterpunten" value={summary.pages_with_problems} />
@@ -320,7 +323,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
           </Button>
         </PanelRow>
 
-        {report?.warnings && report.warnings.length > 0 && (
+        {!scanning && report?.warnings && report.warnings.length > 0 && (
           <PanelRow tone="warning">
             <ul className="space-y-1 text-xs">
               {report.warnings.map((w, index) => (
@@ -332,7 +335,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
 
-        {checklist && (
+        {checklist && !scanning && (
           <PanelTabs
             tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !scan }))}
             active={tab}
@@ -341,7 +344,14 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
         )}
       </PhasePanel>
 
-      {checklist && (
+      {/* Tijdens een nieuwe scan horen de resultaten van de vorige scan niet in beeld. */}
+      {scanning && (
+        <p className="text-sm text-muted-foreground">
+          Nieuwe scan loopt — de resultaten verschijnen hier zodra de scan klaar is.
+        </p>
+      )}
+
+      {checklist && !scanning && (
         <section className="space-y-4">
           {tab === "checklist" && (
             <>

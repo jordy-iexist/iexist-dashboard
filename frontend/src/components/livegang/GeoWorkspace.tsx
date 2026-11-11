@@ -187,7 +187,8 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
           </>
         }
         aside={
-          checklist && (
+          checklist &&
+          !running && (
             <div className="flex items-center gap-3">
               <PercentRing percent={checklist.percent} size={64} />
               <div className="text-sm">
@@ -210,11 +211,6 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
                     ? `Gescand ${formatDateTime(latest.completed_at ?? latest.created_at)}`
                     : `Gestart ${formatDateTime(latest.created_at)}`}
                 </span>
-                {latest.status !== "completed" && completedScan && (
-                  <span className="text-xs text-muted-foreground">
-                    · resultaten van {formatDateTime(completedScan.completed_at)}
-                  </span>
-                )}
               </>
             ) : (
               <span className="text-muted-foreground">Nog niet gescand.</span>
@@ -230,18 +226,20 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
                   <Trash2 /> Verwijderen
                 </Button>
               )}
-              {completedScan && (
+              {completedScan && !running && (
                 <Button size="sm" variant="outline" asChild>
                   <a href={`${API_BASE}/scans/${completedScan.id}/export?kind=checklist`}>
                     <Download /> Checklist (CSV)
                   </a>
                 </Button>
               )}
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/dashboard/livegang/${customerId}/checklist/print`} target="_blank">
-                  <Printer /> Printversie / PDF
-                </Link>
-              </Button>
+              {!running && (
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/dashboard/livegang/${customerId}/checklist/print`} target="_blank">
+                    <Printer /> Printversie / PDF
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
           {latest && running && <ScanProgress scan={latest} steps={GEO_STEPS} bare />}
@@ -276,7 +274,7 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
           </div>
         </PanelRow>
 
-        {report?.warnings && report.warnings.length > 0 && (
+        {!running && report?.warnings && report.warnings.length > 0 && (
           <PanelRow tone="warning">
             <ul className="space-y-1 text-xs">
               {report.warnings.map((w) => (
@@ -288,7 +286,7 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
 
-        {checklist && (
+        {checklist && !running && (
           <PanelTabs
             tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !completedScan }))}
             active={tab}
@@ -297,7 +295,14 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
         )}
       </PhasePanel>
 
-      {checklist && (
+      {/* Tijdens een nieuwe scan horen de resultaten van de vorige scan niet in beeld. */}
+      {running && (
+        <p className="text-sm text-muted-foreground">
+          Nieuwe scan loopt — de resultaten verschijnen hier zodra de scan klaar is.
+        </p>
+      )}
+
+      {checklist && !running && (
         <section className="space-y-4">
           {tab === "checklist" && (
             <>

@@ -237,7 +237,7 @@ function PageDetailSheet({ scanId, page, onClose }: { scanId: string; page: Laun
                 <Field label="Redirectketen">
                   <ol className="space-y-0.5 text-xs">
                     {page.redirect_chain.map((hop, i) => (
-                      <li key={i}>{hop.status} · {hop.url}</li>
+                      <li key={i}>{hop.status} · <a href={hop.url} target="_blank" rel="noreferrer noopener" className="break-all hover:text-primary hover:underline">{hop.url}</a></li>
                     ))}
                   </ol>
                 </Field>
@@ -301,7 +301,7 @@ function PageDetailSheet({ scanId, page, onClose }: { scanId: string; page: Laun
                 <div className="sm:col-span-2">
                   <Field label="Kapotte links">
                     <ul className="space-y-0.5 text-xs">
-                      {page.broken_links.map((l) => <li key={l.url}>{l.status ?? "fout"} · {l.url}</li>)}
+                      {page.broken_links.map((l) => <li key={l.url}>{l.status ?? "fout"} · <a href={l.url} target="_blank" rel="noreferrer noopener" className="break-all hover:text-primary hover:underline">{l.url}</a></li>)}
                     </ul>
                   </Field>
                 </div>

@@ -234,7 +234,8 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
               <li key={issue.id} className="px-3 py-2">
                 <div className="flex items-start gap-3">
                   <input type="checkbox" className="mt-1.5" checked={selected.has(issue.id)} onChange={() => toggle(issue.id)} />
-                  <button type="button" onClick={() => setExpanded(open ? null : issue.id)} className="min-w-0 flex-1 text-left">
+                  <div className="min-w-0 flex-1">
+                  <button type="button" onClick={() => setExpanded(open ? null : issue.id)} className="w-full text-left">
                     <div className="flex flex-wrap items-center gap-2">
                       <SeverityBadge severity={issue.severity} />
                       <Pill>{CATEGORY_LABELS[issue.category] ?? issue.category}</Pill>
@@ -257,8 +258,21 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                       <span className="text-sm font-medium">{issue.title}</span>
                       <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
                     </div>
-                    {issue.url && <p className="truncate text-xs text-muted-foreground">{issue.url}</p>}
                   </button>
+                  {/* Buiten de uitklapknop: een link mag niet in een button staan. */}
+                  {issue.url && (
+                    <a
+                      href={issue.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      title={`${issue.url} openen in een nieuw tabblad`}
+                      className="inline-flex max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
+                    >
+                      <span className="truncate">{issue.url}</span>
+                      <ExternalLink className="size-3 shrink-0" />
+                    </a>
+                  )}
+                  </div>
                   {issue.external_url ? (
                     <a
                       href={issue.external_url}
