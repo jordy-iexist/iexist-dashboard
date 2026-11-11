@@ -15,7 +15,7 @@ export default async function LivegangKlantPage({ params }: LivegangKlantPagePro
   const customer = await fetchCustomerDetail(customerId)
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-8">
+    <div className="space-y-8">
       <KlantHero
         backHref="/dashboard/livegang"
         backLabel="Terug naar livegang checklist"

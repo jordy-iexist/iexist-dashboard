@@ -19,7 +19,7 @@ export default function Home() {
           <Button
             asChild
             size="lg"
-            className="py-2 flex-1 bg-brand-yellow text-black hover:bg-brand-yellow/70 focus-visible:ring-brand-blue/40"
+            className="py-2 flex-1"
           >
             <Link href="/login">Inloggen</Link>
           </Button>

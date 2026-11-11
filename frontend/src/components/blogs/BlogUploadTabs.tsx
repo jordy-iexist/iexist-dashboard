@@ -19,7 +19,7 @@ export function BlogUploadTabs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex w-fit gap-1 rounded-full bg-brand-yellow/10 p-1">
+      <div className="flex w-fit gap-1 rounded-full bg-neutral-100 p-1">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -27,7 +27,7 @@ export function BlogUploadTabs() {
             onClick={() => setActiveTab(id)}
             className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === id
-                ? "bg-brand-yellow text-brand-blue shadow-sm"
+                ? "bg-black text-white shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

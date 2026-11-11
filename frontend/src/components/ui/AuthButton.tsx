@@ -18,10 +18,7 @@ export function AuthButton({ user }: AuthButtonProps) {
   }
 
   return (
-    <Button
-      asChild
-      className="bg-[#FAB806] text-[#171d35] hover:bg-[#e5a605]"
-    >
+    <Button asChild>
       <Link href="/login">Inloggen</Link>
     </Button>
   )

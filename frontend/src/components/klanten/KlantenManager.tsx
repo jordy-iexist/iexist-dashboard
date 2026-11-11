@@ -224,7 +224,7 @@ export function KlantenManager() {
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
               aria-label="Filter op categorie"
-              className="h-9 rounded-full border border-brand-blue/60 bg-transparent dark:border-white/50 px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-9 rounded-full border border-neutral-300 bg-white text-black shadow-xs dark:border-white/20 dark:bg-neutral-900 dark:text-white px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="">Alle categorieën</option>
               <option value="none">Zonder categorie</option>

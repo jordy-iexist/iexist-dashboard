@@ -1,12 +1,12 @@
 import { Suspense } from 'react'
-import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { getCurrentUser } from '@/lib/auth'
 
 async function SidebarWithUser() {
   const user = await getCurrentUser()
   if (!user) return null
-  return <AppSidebar user={user} />
+  return <AppSidebar user={user} variant="inset" />
 }
 
 export default function ProtectedLayout({
@@ -15,18 +15,19 @@ export default function ProtectedLayout({
   children: React.ReactNode
 }) {
   return (
-    <SidebarProvider>
-      <Suspense fallback={<aside className="w-64 shrink-0 border-r" />}>
+    <SidebarProvider className="bg-sidebar">
+      <Suspense fallback={<aside className="w-64 shrink-0 bg-sidebar" />}>
         <SidebarWithUser />
       </Suspense>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+      <SidebarInset className="min-w-0">
+        {/* Mobile only: the sidebar is a sheet there, so it needs its own opener */}
+        <div className="flex h-12 items-center border-b px-4 md:hidden">
           <SidebarTrigger />
-        </header>
+        </div>
         <div className="flex-1 p-4 lg:p-6">
           {children}
         </div>
-      </main>
+      </SidebarInset>
     </SidebarProvider>
   )
 }

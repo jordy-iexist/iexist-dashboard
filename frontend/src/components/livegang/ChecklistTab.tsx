@@ -203,7 +203,7 @@ function ItemRow({
                   onClick={() => void save({ manual_status: option })}
                   className={cn(
                     "rounded-md border px-2.5 py-1 text-xs transition-colors",
-                    selected ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
+                    selected ? "border-primary bg-primary text-primary-foreground" : "bg-white hover:bg-muted"
                   )}
                 >
                   {option ? MANUAL_STATUS_LABELS[option] : item.mode === "manual" ? "Leeg" : "Automatisch"}
@@ -304,7 +304,7 @@ export function ChecklistTab({
             onClick={() => setFilter(f.key)}
             className={cn(
               "rounded-full border px-3 py-1 text-xs transition-colors",
-              filter === f.key ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-muted"
+              filter === f.key ? "border-primary bg-primary font-medium text-primary-foreground" : "bg-white text-muted-foreground hover:bg-muted"
             )}
           >
             {f.label} ({counts[f.key]})

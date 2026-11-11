@@ -17,7 +17,7 @@ import {
   Users,
 } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth'
-import { cn, getDisplayName } from '@/lib/utils'
+import { getDisplayName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 export const metadata: Metadata = {
@@ -30,25 +30,21 @@ const quickLinks = [
     title: 'CSV uploaden',
     url: '/dashboard/blogs/upload',
     icon: Upload,
-    color: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
   },
   {
     title: 'Nieuwe klant',
     url: '/dashboard/klanten/nieuw',
     icon: UserPlus,
-    color: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
   },
   {
     title: 'Keywords checken',
     url: '/dashboard/seo/tracker',
     icon: Search,
-    color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
   },
   {
     title: 'Instellingen',
     url: '/dashboard/settings',
     icon: Settings,
-    color: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
   },
 ]
 
@@ -58,42 +54,36 @@ const features = [
     description: "Genereer AI-blogs uit een CSV en publiceer ze direct naar WordPress.",
     url: '/dashboard/blogs',
     icon: FileText,
-    color: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
   },
   {
     title: "Landingspagina's",
     description: "Maak landingspagina's op schaal, gevoed door je eigen data.",
     url: '/dashboard/landing-pages',
     icon: LayoutTemplate,
-    color: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400',
   },
   {
     title: 'Klanten',
     description: 'Beheer klantwebsites, maandelijkse linkdoelen en spreadsheets.',
     url: '/dashboard/klanten',
     icon: Users,
-    color: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
   },
   {
     title: 'SEO Tracker',
     description: 'Volg keyword-posities in Google en zie wat er stijgt of daalt.',
     url: '/dashboard/seo/tracker',
     icon: TrendingUp,
-    color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
   },
   {
     title: 'Meta Generator',
     description: 'Laat AI pakkende meta titles en descriptions per pagina schrijven.',
     url: '/dashboard/seo/meta-generator',
     icon: Sparkles,
-    color: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
   },
   {
     title: 'Website Audit',
     description: 'Crawl een website en spoor technische SEO-problemen op.',
     url: '/dashboard/audit',
     icon: ScanLine,
-    color: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400',
   },
 ]
 
@@ -114,7 +104,7 @@ function HeroIllustration() {
   return (
     <div className="relative hidden h-56 w-72 shrink-0 md:block">
       {/* Grafiekkaart */}
-      <div className="absolute right-0 top-2 w-60 rounded-xl bg-white/10 p-4 ring-1 ring-white/15 backdrop-blur-sm">
+      <div className="absolute right-0 top-2 w-60 rounded-xl bg-neutral-900/90 p-4 shadow-xl ring-1 ring-white/10 backdrop-blur-sm">
         <div className="mb-3 flex items-center gap-2">
           <span className="size-2 rounded-full bg-[#fab806]" />
           <span className="h-2 w-20 rounded-full bg-white/30" />
@@ -144,9 +134,9 @@ function HeroIllustration() {
 
       {/* Zoekbalk */}
       <div className="absolute bottom-4 left-0 flex w-52 items-center gap-2 rounded-full bg-white px-4 py-2.5 shadow-lg">
-        <Search className="size-4 text-[#161D35]" />
+        <Search className="size-4 text-black" />
         <span className="h-2 w-24 rounded-full bg-slate-200" />
-        <span className="ml-auto rounded-full bg-[#fab806] px-2 py-0.5 text-[10px] font-bold text-[#161D35]">
+        <span className="ml-auto rounded-full bg-[#fab806] px-2 py-0.5 text-[10px] font-bold text-black">
           #1
         </span>
       </div>
@@ -170,9 +160,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#161D35] via-[#1e2850] to-[#2a3566] p-6 text-white shadow-lg sm:p-8">
+      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-black from-30% via-neutral-800 via-60% to-neutral-500 md:to-white p-6 text-white shadow-lg sm:p-8">
         <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-[#fab806]/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 left-1/3 size-56 rounded-full bg-sky-400/10 blur-3xl" />
 
         <div className="relative flex items-center justify-between gap-8">
           <div className="max-w-xl space-y-4">
@@ -184,7 +173,7 @@ export default async function DashboardPage() {
               website auditen — alles begint hier.
             </p>
             <div className="flex flex-wrap gap-3 pt-1">
-              <Button asChild>
+              <Button asChild variant="secondary" className="border-transparent">
                 <Link href="/dashboard/blogs/upload">
                   <Upload />
                   Nieuwe blogs uploaden
@@ -206,9 +195,9 @@ export default async function DashboardPage() {
             <Link
               key={item.url}
               href={item.url}
-              className="group flex items-center gap-3 rounded-xl border bg-card p-4 transition hover:border-[#fab806]/60 hover:shadow-sm"
+              className="group flex items-center gap-3 rounded-xl border bg-card p-4 transition hover:border-neutral-400 hover:shadow-sm"
             >
-              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-full', item.color)}>
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-black dark:bg-white/10 dark:text-white">
                 <item.icon className="size-5" />
               </span>
               <span className="text-sm font-medium">{item.title}</span>
@@ -228,7 +217,7 @@ export default async function DashboardPage() {
               href={feature.url}
               className="group flex flex-col gap-3 rounded-xl border bg-card p-5 transition hover:-translate-y-0.5 hover:shadow-md"
             >
-              <span className={cn('flex size-11 items-center justify-center rounded-xl', feature.color)}>
+              <span className="flex size-11 items-center justify-center rounded-xl bg-neutral-100 text-black dark:bg-white/10 dark:text-white">
                 <feature.icon className="size-5" />
               </span>
               <div className="space-y-1">
@@ -245,8 +234,8 @@ export default async function DashboardPage() {
       </section>
 
       {/* Tip */}
-      <div className="flex items-start gap-3 rounded-xl border border-[#fab806]/40 bg-[#fab806]/10 p-4 text-sm">
-        <Lightbulb className="mt-0.5 size-5 shrink-0 text-[#d99e00]" />
+      <div className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-100 p-4 dark:border-white/10 dark:bg-white/5 text-sm">
+        <Lightbulb className="mt-0.5 size-5 shrink-0 text-black dark:text-white" />
         <p>
           <span className="font-semibold">Tip:</span> stel eerst je blog- en AI-instellingen in via{' '}
           <Link href="/dashboard/settings" className="font-medium underline underline-offset-4">

@@ -59,14 +59,14 @@ export function CreatedDateFilter({
         value={selectedDay ?? ""}
         onChange={(event) => onChange(event.target.value)}
         aria-label="Filter op aanmaakdatum"
-        className="h-9 rounded-full border border-brand-blue/60 bg-transparent dark:border-white/50 px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="h-9 rounded-full border border-neutral-300 bg-white text-black shadow-xs dark:border-white/20 dark:bg-neutral-900 dark:text-white px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
       {selectedDay && (
         <button
           type="button"
           onClick={() => onChange("")}
           aria-label="Datumfilter wissen"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-brand-blue/60 bg-transparent dark:border-white/50 text-muted-foreground transition-colors hover:bg-muted"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-neutral-300 bg-white text-black shadow-xs dark:border-white/20 dark:bg-neutral-900 dark:text-white transition-colors hover:bg-neutral-100"
         >
           <X className="h-4 w-4" />
         </button>

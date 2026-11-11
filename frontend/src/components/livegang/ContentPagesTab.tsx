@@ -483,7 +483,7 @@ export function ContentPagesTab({
             }}
             className={cn(
               "rounded-full border px-3 py-1 text-xs transition-colors",
-              !itemFilter && filter === f.key ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-muted"
+              !itemFilter && filter === f.key ? "border-primary bg-primary font-medium text-primary-foreground" : "bg-white text-muted-foreground hover:bg-muted"
             )}
           >
             {f.label} ({counts[f.key]})

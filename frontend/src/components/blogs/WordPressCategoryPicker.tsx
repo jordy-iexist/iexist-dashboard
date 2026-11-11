@@ -157,7 +157,7 @@ export function WordPressCategoryPicker({
                   "rounded-full border px-2.5 py-0.5 text-xs transition-colors disabled:opacity-50",
                   selected
                     ? "border-primary bg-primary text-primary-foreground"
-                    : "hover:bg-accent"
+                    : "bg-white hover:bg-muted"
                 )}
               >
                 {depth > 0 ? "↳ " : ""}

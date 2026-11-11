@@ -73,7 +73,7 @@ export function InventoryTab({ scanId }: { scanId: string }) {
             }}
             className={cn(
               "rounded-full border px-3 py-1 text-xs transition-colors",
-              filter === f.value ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
+              filter === f.value ? "border-primary bg-primary text-primary-foreground" : "bg-white hover:bg-muted"
             )}
           >
             {f.label}
