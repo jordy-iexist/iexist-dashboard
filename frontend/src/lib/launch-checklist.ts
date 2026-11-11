@@ -4,6 +4,9 @@ export type ScanStatus =
   | "inventory"
   | "vitals"
   | "analyzing"
+  | "fetching"
+  | "linking"
+  | "checking"
   | "completed"
   | "failed"
   | "canceled"
@@ -14,6 +17,9 @@ export const ACTIVE_STATUSES: ScanStatus[] = [
   "inventory",
   "vitals",
   "analyzing",
+  "fetching",
+  "linking",
+  "checking",
 ]
 
 export type CwvRating = "good" | "needs_improvement" | "poor"
@@ -54,6 +60,7 @@ export type LaunchScan = {
   id: string
   customer_website_id: string
   phase: number
+  source_scan_id: string | null
   status: ScanStatus
   base_url: string
   discovery_source: string | null
@@ -88,6 +95,8 @@ export type AiChecks = {
 }
 
 export type AgentTrace = {
+  /** Fase 3: opgetelde tokens van alle AI-analyses van deze scan. */
+  analysis_usage?: { input_tokens: number; output_tokens: number; calls: number }
   model?: string
   steps?: { step: number; tool: string; arguments: Record<string, unknown>; output_preview: string }[]
   usage?: { input_tokens: number; output_tokens: number }
@@ -108,6 +117,10 @@ export type LaunchCustomer = {
   domain: string
   category_name: string | null
   latest_scan: LaunchScan | null
+  latest_geo_scan: LaunchScan | null
+  checklist_progress: ChecklistProgress | null
+  latest_content_scan: LaunchScan | null
+  content_progress: ChecklistProgress | null
 }
 
 export type CwvMetric = { value: number | null; rating: CwvRating | null }
@@ -166,6 +179,11 @@ export type LaunchScanPage = {
   cwv: CwvData | null
   cwv_status: CwvRating | null
   error: string | null
+  page_type: string | null
+  page_type_source: "rule" | "ai" | "manual" | null
+  click_depth: number | null
+  inlinks: number | null
+  schema_all: string[] | null
   issue_count: number
 }
 
@@ -220,6 +238,9 @@ export const STATUS_LABELS: Record<ScanStatus, string> = {
   inventory: "Site-inventaris",
   vitals: "Core Web Vitals meten",
   analyzing: "AI-analyse",
+  fetching: "Pagina's ophalen",
+  linking: "Paginatypes & linkgraaf",
+  checking: "Checklist controleren",
   completed: "Voltooid",
   failed: "Mislukt",
   canceled: "Geannuleerd",
@@ -237,6 +258,8 @@ export const CATEGORY_LABELS: Record<string, string> = {
   content: "Content",
   performance: "Performance",
   ai: "AI-vindbaarheid",
+  schema: "Schema.org",
+  entiteit: "Entiteit & vertrouwen",
 }
 
 export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
@@ -257,4 +280,370 @@ export function formatDateTime(value: string | null | undefined): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
   return new Intl.DateTimeFormat("nl-NL", { dateStyle: "medium", timeStyle: "short" }).format(date)
+}
+
+// --- fase 2: GEO/SEO-checklist ---------------------------------------------
+
+export type ChecklistProgress = { done: number; total: number; percent: number }
+
+export type AutoStatus = "ok" | "warning" | "error" | "nvt" | "unknown" | "info"
+export type ManualStatus = "open" | "afgerond" | "nvt"
+export type EffectiveStatus = "done" | "open" | "nvt"
+
+export type ChecklistAuto = {
+  status: AutoStatus
+  message: string
+  evidence: string[]
+  details: unknown
+}
+
+export type ChecklistItem = {
+  key: string
+  label: string
+  description: string | null
+  mode: "auto" | "manual" | "hybrid"
+  applies_to: "all" | "webshop"
+  priority: "hoog" | "normaal" | "laag"
+  auto: ChecklistAuto | null
+  manual_status: ManualStatus | null
+  note: string | null
+  updated_at: string | null
+  external_url: string | null
+  pushed_at: string | null
+  effective: EffectiveStatus
+  f1_issue_types: string[]
+}
+
+export type ChecklistSection = {
+  key: string
+  label: string
+  items: ChecklistItem[]
+  done: number
+  total: number
+}
+
+export type Checklist = ChecklistProgress & {
+  customer_id: string
+  customer_name: string
+  base_url: string
+  scan: LaunchScan | null
+  source_scan_id: string | null
+  is_webshop: boolean
+  webshop_detected: boolean | null
+  webshop_override: boolean | null
+  webshop_reasons: string[]
+  page_types: Record<string, number>
+  generated_at: string | null
+  sections: ChecklistSection[]
+}
+
+// --- Fase 3: content & onpage ------------------------------------------------
+
+/** Welke checklist: fase 2 (GEO/SEO) of fase 3 (content & onpage). */
+export type ChecklistPath = "checklist" | "content-checklist"
+
+export type ContentSummary = {
+  pages_fetched: number
+  pages_with_problems: number
+  pages_analysed: number
+  suggestions_open: number
+}
+
+export type ContentChecklist = ChecklistProgress & {
+  customer_id: string
+  customer_name: string
+  base_url: string
+  scan: LaunchScan | null
+  source_scan_id: string | null
+  page_types: Record<string, number>
+  generated_at: string | null
+  gap_analyzed_at: string | null
+  summary: ContentSummary | null
+  max_pages_per_analysis: number
+  sections: ChecklistSection[]
+}
+
+export type AnalysisStatus = "none" | "queued" | "running" | "done" | "failed"
+export type SuggestionStatus = "open" | "overgenomen" | "afgewezen"
+
+export type ContentCheck = { status: AutoStatus; message: string; details?: unknown }
+
+export type ContentSuggestion = {
+  id: string
+  scan_id: string
+  content_page_id: string | null
+  page_url: string | null
+  item_key: string
+  item_label: string
+  agent: string
+  title: string | null
+  current_value: string | null
+  proposed_value: string
+  rationale: string | null
+  details: { ref?: string; length?: number; pixels?: number; trimmed_from?: string } | null
+  status: SuggestionStatus
+  created_at: string
+  updated_at: string
+}
+
+export type ContentPage = {
+  id: string
+  url: string
+  path: string
+  page_type: string | null
+  title: string | null
+  meta_description: string | null
+  word_count: number | null
+  problem_count: number
+  checks: Record<string, ContentCheck>
+  analysis_status: AnalysisStatus
+  analysis_error: string | null
+  focus_keyword: string | null
+  intent: string | null
+  keyword_source: string | null
+  analyzed_at: string | null
+  suggestions_open: number
+  suggestions_total: number
+  /** Checklistpunten waarvoor deze pagina open AI-voorstellen heeft. */
+  suggestion_items: string[]
+}
+
+export type ContentPageDetail = ContentPage & {
+  headings: { level: number; text: string }[] | null
+  first_paragraph: string | null
+  readability: string | null
+  images_total: number
+  links_total: number
+  suggestions: ContentSuggestion[]
+}
+
+export const ANALYSIS_STATUS_LABELS: Record<AnalysisStatus, string> = {
+  none: "Niet geanalyseerd",
+  queued: "In wachtrij",
+  running: "Bezig…",
+  done: "Geanalyseerd",
+  failed: "Mislukt",
+}
+
+export const SUGGESTION_STATUS_LABELS: Record<SuggestionStatus, string> = {
+  open: "Open",
+  overgenomen: "Overgenomen",
+  afgewezen: "Afgewezen",
+}
+
+export const AGENT_LABELS: Record<string, string> = {
+  content_meta: "Meta",
+  content_text: "Tekst & structuur",
+  content_trust: "Vertrouwen & conversie",
+  content_links: "Links & afbeeldingen",
+  content_gap: "Contentgap",
+}
+
+export const INTENTS = ["informatief", "commercieel", "transactioneel", "navigatie", "lokaal"] as const
+
+export const KEYWORD_SOURCE_LABELS: Record<string, string> = {
+  ai: "AI",
+  manual: "Handmatig",
+  ahrefs: "Ahrefs",
+}
+
+/** Focuszoekwoord handmatig vastleggen; leeg = weer door de AI laten bepalen. */
+export function updatePageKeyword(scanId: string, pageId: string, focus_keyword: string, intent: string | null) {
+  return apiFetch<ContentPageDetail>(`/scans/${scanId}/content-pages/${pageId}/keyword`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ focus_keyword, intent }),
+  })
+}
+
+export function updateSuggestionStatus(id: string, status: SuggestionStatus) {
+  return apiFetch<ContentSuggestion>(`/suggestions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  })
+}
+
+export const PAGE_TYPE_LABELS: Record<string, string> = {
+  home: "Homepage",
+  dienst: "Dienstpagina",
+  product: "Productpagina",
+  categorie: "Categoriepagina",
+  blog: "Blog / artikel",
+  vacature: "Vacature",
+  over_ons: "Over ons / team",
+  contact: "Contact",
+  overzicht: "Overzichtspagina",
+  archief: "Archief",
+  juridisch: "Juridisch",
+  overig: "Overig",
+}
+
+/** Verwachte schema-types per paginatype (zelfde logica als de backend-checks). */
+export const EXPECTED_SCHEMA: Record<string, string[]> = {
+  home: ["Organization", "WebSite"],
+  dienst: ["Service", "BreadcrumbList"],
+  product: ["Product", "Brand", "BreadcrumbList"],
+  categorie: ["ItemList", "BreadcrumbList"],
+  blog: ["BlogPosting|Article", "Person", "BreadcrumbList"],
+  vacature: ["JobPosting", "BreadcrumbList"],
+  over_ons: ["Person", "BreadcrumbList"],
+  contact: ["BreadcrumbList"],
+}
+
+export const AUTO_STATUS_LABELS: Record<AutoStatus, string> = {
+  ok: "In orde",
+  warning: "Aandacht",
+  error: "Probleem",
+  nvt: "N.v.t.",
+  unknown: "Onbekend",
+  info: "Handmatig",
+}
+
+export const MANUAL_STATUS_LABELS: Record<ManualStatus, string> = {
+  open: "Open",
+  afgerond: "Afgerond",
+  nvt: "N.v.t.",
+}
+
+export const MODE_LABELS: Record<ChecklistItem["mode"], string> = {
+  auto: "Automatisch",
+  manual: "Handmatig",
+  hybrid: "Hint + handmatig",
+}
+
+// --- Monday ---------------------------------------------------------------
+
+export type MondaySettings = {
+  token_configured: boolean
+  folder_name: string
+  board_id: string | null
+  board_url: string | null
+  board_name: string | null
+  board_error: string | null
+}
+
+type MondayPushResponse = {
+  board_url: string | null
+  pushed: number
+  skipped: number
+  failed: number
+  outcomes: { ref: string; status: "pushed" | "skipped" | "failed"; message: string | null; external_url: string | null }[]
+}
+
+export type MondayPushSummary = {
+  pushed: number
+  skipped: number
+  failed: number
+  /** Unieke meldingen van mislukte punten en waarschuwingen. */
+  messages: string[]
+  board_url: string | null
+}
+
+export type MondayPushTarget =
+  | { kind: "issues" }
+  | { kind: "checklist"; customerId: string; path?: ChecklistPath }
+
+/** De backend accepteert maximaal dit aantal punten per request. */
+const MONDAY_BATCH_SIZE = 25
+/** Afgevuurd na elke wijziging aan de Monday-koppeling (bord aangemaakt, punten doorgezet). */
+export const MONDAY_CHANGED_EVENT = "livegang:monday-changed"
+
+function notifyMondayChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(MONDAY_CHANGED_EVENT))
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" }
+
+export function fetchMondaySettings(customerId: string) {
+  return apiFetch<MondaySettings>(`/customers/${customerId}/monday`)
+}
+
+export async function createMondayBoard(customerId: string) {
+  const result = await apiFetch<MondaySettings>(`/customers/${customerId}/monday/board`, { method: "POST", headers: JSON_HEADERS, body: "{}" })
+  notifyMondayChanged()
+  return result
+}
+
+/** Koppel een bestaand bord (id of URL); `null` ontkoppelt. */
+export async function linkMondayBoard(customerId: string, board: string | null) {
+  const result = await apiFetch<MondaySettings>(`/customers/${customerId}/monday`, {
+    method: "PATCH",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ board }),
+  })
+  notifyMondayChanged()
+  return result
+}
+
+/**
+ * Ruimt koppelingen op naar items die in Monday verwijderd zijn, zodat die
+ * punten weer als niet-doorgezet verschijnen. Geeft het aantal opgeruimde
+ * koppelingen terug; een fout hier mag de pagina niet blokkeren.
+ */
+export async function syncMondayLinks(customerId: string): Promise<number> {
+  try {
+    const result = await apiFetch<{ cleared: number }>(`/customers/${customerId}/monday/sync`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: "{}",
+    })
+    return result.cleared
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Zet punten in batches door naar Monday. Stopt bij de eerste batch die als
+ * geheel mislukt; wat al doorgezet is blijft staan en staat in de samenvatting.
+ */
+export async function pushToMonday(
+  target: MondayPushTarget,
+  refs: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<MondayPushSummary> {
+  const summary: MondayPushSummary = { pushed: 0, skipped: 0, failed: 0, messages: [], board_url: null }
+  const messages = new Set<string>()
+  const path =
+    target.kind === "issues"
+      ? "/issues/push-monday"
+      : `/customers/${target.customerId}/${target.path ?? "checklist"}/push-monday`
+  const bodyKey = target.kind === "issues" ? "issue_ids" : "item_keys"
+  try {
+    for (let start = 0; start < refs.length; start += MONDAY_BATCH_SIZE) {
+      const batch = refs.slice(start, start + MONDAY_BATCH_SIZE)
+      onProgress?.(start, refs.length)
+      let response: MondayPushResponse
+      try {
+        response = await apiFetch<MondayPushResponse>(path, {
+          method: "POST",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ [bodyKey]: batch }),
+        })
+      } catch (err) {
+        summary.failed += refs.length - start
+        messages.add((err as Error).message)
+        break
+      }
+      summary.pushed += response.pushed
+      summary.skipped += response.skipped
+      summary.failed += response.failed
+      summary.board_url = response.board_url ?? summary.board_url
+      for (const outcome of response.outcomes) {
+        if (outcome.message && (outcome.status === "failed" || outcome.status === "pushed")) messages.add(outcome.message)
+      }
+    }
+  } finally {
+    summary.messages = [...messages]
+    notifyMondayChanged()
+  }
+  return summary
+}
+
+export function describeMondayPush(summary: MondayPushSummary): string {
+  const parts = [`${summary.pushed} doorgezet`]
+  if (summary.skipped) parts.push(`${summary.skipped} al doorgezet`)
+  if (summary.failed) parts.push(`${summary.failed} mislukt`)
+  return `Monday: ${parts.join(" · ")}.`
 }

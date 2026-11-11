@@ -5,7 +5,7 @@ import { ChevronRight, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Input } from "@/components/ui/input"
-import { Pill, ScanStatusBadge } from "@/components/livegang/shared"
+import { isActive, Pill, ScanStatusBadge } from "@/components/livegang/shared"
 import { apiFetch, formatDateTime, type LaunchCustomer } from "@/lib/launch-checklist"
 
 export function LivegangOverview() {
@@ -55,6 +55,10 @@ export function LivegangOverview() {
           {filtered.map((customer) => {
             const scan = customer.latest_scan
             const issues = scan?.summary_stats?.issues
+            const geoScan = customer.latest_geo_scan
+            const progress = customer.checklist_progress
+            const contentScan = customer.latest_content_scan
+            const contentProgress = customer.content_progress
             return (
               <li key={customer.id}>
                 <Link
@@ -68,13 +72,41 @@ export function LivegangOverview() {
                   <div className="hidden text-right text-xs text-muted-foreground sm:block">
                     {scan ? `Laatste scan: ${formatDateTime(scan.created_at)}` : "Nog niet gescand"}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Pill tone="blue">Fase 1</Pill>
-                    {scan ? <ScanStatusBadge status={scan.status} /> : <Pill>Niet gestart</Pill>}
-                    {issues && issues.total > 0 && (
-                      <Pill tone={(issues.by_severity.hoog ?? 0) > 0 ? "red" : "amber"}>
-                        {issues.total} actiepunten
-                      </Pill>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {contentScan && isActive(contentScan.status) ? (
+                      <>
+                        <Pill tone="blue">Fase 3</Pill>
+                        <ScanStatusBadge status={contentScan.status} />
+                      </>
+                    ) : contentProgress ? (
+                      <>
+                        <Pill tone="blue">Fase 3</Pill>
+                        <Pill tone={contentProgress.percent >= 80 ? "green" : contentProgress.percent >= 50 ? "amber" : "red"}>
+                          {contentProgress.percent}% checklist
+                        </Pill>
+                      </>
+                    ) : geoScan && isActive(geoScan.status) ? (
+                      <>
+                        <Pill tone="blue">Fase 2</Pill>
+                        <ScanStatusBadge status={geoScan.status} />
+                      </>
+                    ) : progress ? (
+                      <>
+                        <Pill tone="blue">Fase 2</Pill>
+                        <Pill tone={progress.percent >= 80 ? "green" : progress.percent >= 50 ? "amber" : "red"}>
+                          {progress.percent}% checklist
+                        </Pill>
+                      </>
+                    ) : (
+                      <>
+                        <Pill tone="blue">Fase 1</Pill>
+                        {scan ? <ScanStatusBadge status={scan.status} /> : <Pill>Niet gestart</Pill>}
+                        {issues && issues.total > 0 && (
+                          <Pill tone={(issues.by_severity.hoog ?? 0) > 0 ? "red" : "amber"}>
+                            {issues.total} actiepunten
+                          </Pill>
+                        )}
+                      </>
                     )}
                   </div>
                   <ChevronRight className="size-4 text-muted-foreground" />

@@ -18,6 +18,10 @@ from app.db.session import SessionLocal
 from app.features.launch_checklist.services.ai_checks import run_ai_checks
 from app.features.launch_checklist.services.discovery import discover_from_sitemaps, url_key
 from app.features.launch_checklist.services.inventory import PageRecord, run_inventory
+from app.features.launch_checklist.services.issue_state import (
+    previous_issue_state,
+    with_carried_state,
+)
 from app.features.launch_checklist.services.issues import generate_issues
 from app.features.launch_checklist.services.pagespeed import measure_vitals
 from app.features.launch_checklist.services.stats import build_summary_stats
@@ -205,10 +209,12 @@ def run_launch_scan_task(self, scan_id: str) -> None:
         with SessionLocal() as db:
             pages = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == scan_id).all()
             issues = generate_issues(pages, ai_checks)
+            carried = previous_issue_state(db, db.get(LaunchScan, scan_id))
             now = _now()
             db.add_all([
-                LaunchScanIssue(id=str(uuid.uuid4()), scan_id=scan_id, status="open",
-                                created_at=now, updated_at=now, **issue)
+                LaunchScanIssue(id=str(uuid.uuid4()), scan_id=scan_id,
+                                created_at=now, updated_at=now,
+                                **with_carried_state(issue, carried))
                 for issue in issues
             ])
             stats = build_summary_stats(pages, issues)

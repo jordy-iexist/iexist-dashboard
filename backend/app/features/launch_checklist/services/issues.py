@@ -446,3 +446,139 @@ def generate_issues(pages: list[LaunchScanPage], ai_checks: dict[str, Any] | Non
     for rule in RULES:
         issues.extend(rule(pages, ctx))
     return issues
+
+
+# --- fase 2: GEO/SEO-checklist ---------------------------------------------
+from app.features.launch_checklist.services.geo_checklist import (  # noqa: E402
+    ITEMS as _GEO_ITEMS,
+    SECTION_ISSUE_CATEGORY as _GEO_CATEGORY,
+)
+
+for _item in _GEO_ITEMS.values():
+    ISSUE_TYPES[f"geo_{_item.key}"] = {
+        "label": _item.label,
+        "category": _GEO_CATEGORY.get(_item.section, "techniek"),
+    }
+
+
+def generate_geo_issues(checklist: dict[str, dict[str, Any]], manual_states: dict[str, str | None]) -> list[Issue]:
+    """Eén actiepunt per niet-ok auto-checklistpunt.
+
+    Punten die fase 1 al als pagina-issues oplevert (f1_issue_types) en punten
+    die handmatig afgerond / n.v.t. zijn, slaan we over.
+    """
+    issues: list[Issue] = []
+    for key, result in checklist.items():
+        item = _GEO_ITEMS.get(key)
+        if item is None or item.mode == "manual" or item.f1_issue_types:
+            continue
+        if manual_states.get(key) in {"afgerond", "nvt"}:
+            continue
+        status = result.get("status")
+        if status not in {"error", "warning"}:
+            continue
+        severity = "laag" if item.priority == "laag" else ("hoog" if status == "error" else "middel")
+        issues.append({
+            "issue_type": f"geo_{key}",
+            "category": _GEO_CATEGORY.get(item.section, "techniek"),
+            "severity": severity,
+            "page_id": None,
+            "url": None,
+            "title": f"{item.label}: {result.get('message', '')}"[:500],
+            "description": result.get("message") or "",
+            "recommendation": item.description or None,
+            "details": {"evidence": result.get("evidence") or [], **({"data": result.get("details")} if result.get("details") else {})},
+        })
+    return issues
+
+
+# --- fase 3: content & onpage ---------------------------------------------
+from app.features.launch_checklist.services.content_checklist import (  # noqa: E402
+    ITEMS as _CONTENT_ITEMS,
+    SECTION_ISSUE_CATEGORY as _CONTENT_CATEGORY,
+)
+
+for _item in _CONTENT_ITEMS.values():
+    ISSUE_TYPES[_item.key] = {
+        "label": _item.label,
+        "category": _CONTENT_CATEGORY.get(_item.section, "content"),
+    }
+
+_CONTENT_RECOMMENDATIONS: dict[str, str] = {
+    "c3_meta_fixed": "Werk de resterende titel- en meta-problemen uit fase 1 bij en draai de fase 3-scan opnieuw.",
+    "c3_redirects_404": "Pas de links aan zodat ze direct naar de juiste, bestaande pagina wijzen.",
+    "c3_keywords": "Bepaal het focuszoekwoord en de zoekintentie en herschrijf de tekst daarop; houd zinnen kort.",
+    "c3_headings": "Gebruik één H1 en logische tussenkoppen; begin elke sectie met 2-3 zinnen uitleg.",
+    "c3_scannable": "Voeg opsommingen, tabellen of een blok met kernpunten toe.",
+    "c3_answer_first": "Geef in de eerste alinea direct antwoord op de vraag van de bezoeker.",
+    "c3_faq": "Voeg een FAQ toe met echte vragen van klanten (verifieer de vragen bij de klant).",
+    "c3_eeat": "Voeg eigen foto's, projecten/cases en reviews toe die ervaring en expertise aantonen.",
+    "c3_conversion": "Zorg voor een duidelijke call-to-action boven de vouw en na elke hoofdsectie.",
+    "c3_meta_title": "Schrijf een unieke meta titel van maximaal 60 tekens / 580 pixels met het zoekwoord vooraan.",
+    "c3_meta_description": "Schrijf een unieke meta description van maximaal 160 tekens / 920 pixels met een reden om te klikken.",
+    "c3_internal_links": "Link vanuit de lopende tekst naar relevante dienst- en blogpagina's met beschrijvende linktekst.",
+    "c3_images": "Geef elke inhoudsafbeelding een beschrijvende alt-tekst en bestandsnaam.",
+    "c3_local": "Noem plaats, regio en werkgebied in titel, H1, eerste alinea en lopende tekst.",
+    "c3_landing_pages": "Maak landingspagina's voor de ontbrekende combinaties van dienst en locatie.",
+    "c3_blogs": "Plan blogs in op de voorgestelde onderwerpen.",
+    "c3_other_content": "Voeg de ontbrekende pagina's toe (FAQ, cases, over ons).",
+}
+
+
+def content_issue(
+    key: str, check: dict[str, Any], *, page_id: str | None, url: str | None, path: str | None,
+    ai: bool = False,
+) -> Issue:
+    """Actiepunt voor één fase-3 checklistpunt (per pagina, of sitebreed zonder url)."""
+    item = _CONTENT_ITEMS[key]
+    status = check.get("status")
+    severity = "hoog" if status == "error" else ("middel" if item.priority != "laag" else "laag")
+    message = check.get("message") or item.label
+    title = f"{message} – {path}" if path else f"{item.label}: {message}"
+    details: dict[str, Any] = {"evidence": check.get("evidence") or []}
+    if check.get("details"):
+        details["data"] = check["details"]
+    if ai:
+        details["source"] = "ai"
+    return {
+        "issue_type": key,
+        "category": _CONTENT_CATEGORY.get(item.section, "content"),
+        "severity": severity,
+        "page_id": page_id,
+        "url": url,
+        "title": title[:500],
+        "description": message,
+        "recommendation": _CONTENT_RECOMMENDATIONS.get(key) or item.description or None,
+        "details": details,
+    }
+
+
+def generate_content_issues(
+    pages: list[Any],
+    page_checks: dict[str, dict[str, dict[str, Any]]],
+    items: dict[str, dict[str, Any]],
+    manual_states: dict[str, str | None],
+) -> list[Issue]:
+    """Actiepunten van de fase-3 regelcontrole.
+
+    Per pagina één actiepunt per checklistpunt met een probleem; sitebrede
+    punten (hercontrole fase 1, ontbrekende content) één actiepunt in totaal.
+    Punten die handmatig afgerond / n.v.t. zijn, slaan we over.
+    """
+    skip = {k for k, v in manual_states.items() if v in {"afgerond", "nvt"}}
+    issues: list[Issue] = []
+    for page in pages:
+        for key, check in (page_checks.get(page.id) or {}).items():
+            if key in skip or key not in _CONTENT_ITEMS:
+                continue
+            if check.get("status") not in {"error", "warning"}:
+                continue
+            issues.append(content_issue(
+                key, check, page_id=page.source_page_id, url=page.url, path=page.path))
+    page_level = {k for checks in page_checks.values() for k in checks}
+    for key, result in items.items():
+        if key in skip or key in page_level or key not in _CONTENT_ITEMS:
+            continue
+        if result.get("status") in {"error", "warning"}:
+            issues.append(content_issue(key, result, page_id=None, url=None, path=None))
+    return issues

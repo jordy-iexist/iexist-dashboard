@@ -310,6 +310,12 @@ class CustomerWebsite(Base):
         Integer, nullable=True
     )
     spreadsheet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    launch_is_webshop: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    monday_board_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monday_board_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monday_group_fase1_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monday_group_fase2_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monday_group_fase3_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
@@ -867,6 +873,13 @@ class LaunchScan(Base):
     vitals_measured: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    source_scan_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("launch_scans.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    checklist: Mapped[Any] = mapped_column(JSON, nullable=True)
     ai_checks: Mapped[Any] = mapped_column(JSON, nullable=True)
     summary_stats: Mapped[Any] = mapped_column(JSON, nullable=True)
     ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -933,6 +946,93 @@ class LaunchScanPage(Base):
     cwv: Mapped[Any] = mapped_column(JSON, nullable=True)
     cwv_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Verrijking door fase 2 (GEO/SEO-checklist)
+    page_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    page_type_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    jsonld: Mapped[Any] = mapped_column(JSON, nullable=True)
+    click_depth: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    inlinks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    outlinks: Mapped[Any] = mapped_column(JSON, nullable=True)
+    signals: Mapped[Any] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchChecklistState(Base):
+    """Handmatige status per checklistpunt per klant (blijft over scans heen)."""
+
+    __tablename__ = "launch_checklist_states"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "item_key", name="uq_launch_checklist_state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_key: Mapped[str] = mapped_column(Text, nullable=False)
+    manual_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    external_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_item_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchPageTypeOverride(Base):
+    """Handmatige correctie van het paginatype, per klant en pad."""
+
+    __tablename__ = "launch_page_type_overrides"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "path", name="uq_launch_page_type_override"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    page_type: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchMondayTopic(Base):
+    """Monday-hoofditem per klant en onderwerp (issue_type).
+
+    Fase-1 actiepunten per pagina worden subitems van dit hoofditem, zodat het
+    bord op onderwerp gegroepeerd is. Blijft over scans heen bestaan.
+    """
+
+    __tablename__ = "launch_monday_topics"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "issue_type", name="uq_launch_monday_topic"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    issue_type: Mapped[str] = mapped_column(Text, nullable=False)
+    item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    item_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -971,6 +1071,102 @@ class LaunchScanIssue(Base):
     pushed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchContentPage(Base):
+    """Pagina-inhoud van een fase-3 scan (eigen rijen, los van fase 1/2)."""
+
+    __tablename__ = "launch_content_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scan_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("launch_scans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_page_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("launch_scan_pages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    page_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    headings: Mapped[Any] = mapped_column(JSON, nullable=True)
+    body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    first_paragraph: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    images: Mapped[Any] = mapped_column(JSON, nullable=True)
+    links: Mapped[Any] = mapped_column(JSON, nullable=True)
+    signals: Mapped[Any] = mapped_column(JSON, nullable=True)
+    checks: Mapped[Any] = mapped_column(JSON, nullable=True)
+    problem_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    # none | queued | running | done | failed
+    analysis_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'none'")
+    )
+    analysis_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    focus_keyword: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    intent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 'ai' nu; later ook 'ahrefs'.
+    keyword_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    analyzed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchContentSuggestion(Base):
+    """Concreet verbetervoorstel van een fase-3 agent.
+
+    `content_page_id` leeg = voorstel op siteniveau (contentgap).
+    """
+
+    __tablename__ = "launch_content_suggestions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scan_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("launch_scans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    content_page_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("launch_content_pages.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    item_key: Mapped[str] = mapped_column(Text, nullable=False)
+    agent: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proposed_value: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # open | overgenomen | afgewezen
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'")
+    )
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

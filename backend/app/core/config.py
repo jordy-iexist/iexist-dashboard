@@ -204,6 +204,45 @@ class Settings(BaseSettings):
         validation_alias="LAUNCH_SCAN_PSI_CONCURRENCY",
     )
 
+    # Livegang fase 3 (content & onpage): AI-analyse per geselecteerde pagina.
+    launch_content_max_pages_per_analysis: int = Field(
+        default=25,
+        ge=1,
+        le=200,
+        validation_alias="LAUNCH_CONTENT_MAX_PAGES_PER_ANALYSIS",
+    )
+    launch_content_ai_concurrency: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        validation_alias="LAUNCH_CONTENT_AI_CONCURRENCY",
+    )
+    # Maximaal aantal afbeeldingen per pagina dat het model bekijkt (alt-teksten).
+    launch_content_max_images_per_page: int = Field(
+        default=6,
+        ge=0,
+        le=20,
+        validation_alias="LAUNCH_CONTENT_MAX_IMAGES_PER_PAGE",
+    )
+
+    # Monday.com: actiepunten en checklistpunten uit de livegang doorzetten.
+    monday_api_token: str = Field(default="", validation_alias="MONDAY_API_TOKEN")
+    monday_api_version: str = Field(
+        default="2026-10", validation_alias="MONDAY_API_VERSION"
+    )
+    monday_folder_name: str = Field(
+        default="Website checklist scan", validation_alias="MONDAY_FOLDER_NAME"
+    )
+    # Optioneel: vaste map-id, dan wordt er niet op naam gezocht.
+    monday_folder_id: str = Field(default="", validation_alias="MONDAY_FOLDER_ID")
+    monday_request_timeout_seconds: float = Field(
+        default=20.0, validation_alias="MONDAY_REQUEST_TIMEOUT_SECONDS"
+    )
+    # Optioneel: basis-URL van het dashboard, voor een link terug in Monday.
+    dashboard_public_url: str = Field(
+        default="", validation_alias="DASHBOARD_PUBLIC_URL"
+    )
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

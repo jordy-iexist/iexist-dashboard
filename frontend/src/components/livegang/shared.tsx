@@ -1,11 +1,15 @@
-import { Check, Lock } from "lucide-react"
+import { Check, Loader2, Lock } from "lucide-react"
 
 import {
+  ACTIVE_STATUSES,
+  AUTO_STATUS_LABELS,
   CWV_LABELS,
   SEVERITY_LABELS,
   STATUS_LABELS,
+  type AutoStatus,
   type CwvRating,
   type IssueSeverity,
+  type LaunchScanDetail,
   type ScanStatus,
 } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
@@ -81,42 +85,95 @@ export function StatTile({
 
 export const PHASES = [
   { number: 1, title: "Nulmeting & AI scan", available: true },
-  { number: 2, title: "Fase 2", available: false },
-  { number: 3, title: "Fase 3", available: false },
+  { number: 2, title: "GEO/SEO-checklist", available: true },
+  { number: 3, title: "Content & onpage", available: true },
   { number: 4, title: "Fase 4", available: false },
 ]
 
-export function PhaseStepper({ completed }: { completed: boolean }) {
+export function PhaseStepper({
+  active,
+  completed,
+  locked = {},
+  onSelect,
+}: {
+  active: number
+  completed: Record<number, boolean>
+  locked?: Record<number, string | undefined>
+  onSelect?: (phase: number) => void
+}) {
   return (
     <ol className="grid gap-2 sm:grid-cols-4">
       {PHASES.map((phase) => {
-        const active = phase.number === 1
+        const isActive = phase.number === active
+        const isDone = completed[phase.number] ?? false
+        const lockReason = phase.available ? locked[phase.number] : "Binnenkort"
+        const clickable = phase.available && !lockReason && !!onSelect
         return (
-          <li
-            key={phase.number}
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3",
-              active ? "border-primary/60 bg-primary/5" : "opacity-60"
-            )}
-          >
-            <span
+          <li key={phase.number}>
+            <button
+              type="button"
+              disabled={!clickable}
+              onClick={() => onSelect?.(phase.number)}
+              title={lockReason}
               className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-bold",
-                active && completed && "bg-green-600 text-white",
-                active && !completed && "bg-primary text-primary-foreground",
-                !active && "bg-muted text-muted-foreground"
+                "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+                isActive ? "border-primary/60 bg-primary/5" : clickable ? "hover:bg-muted/50" : "opacity-60",
+                !clickable && "cursor-default"
               )}
             >
-              {active && completed ? <Check className="size-4" /> : phase.available ? phase.number : <Lock className="size-3.5" />}
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">Fase {phase.number}</p>
-              <p className="truncate text-sm font-medium">{phase.available ? phase.title : "Binnenkort"}</p>
-            </div>
+              <span
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-bold",
+                  isDone && "bg-green-600 text-white",
+                  !isDone && isActive && "bg-primary text-primary-foreground",
+                  !isDone && !isActive && "bg-muted text-muted-foreground"
+                )}
+              >
+                {isDone ? <Check className="size-4" /> : lockReason ? <Lock className="size-3.5" /> : phase.number}
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Fase {phase.number}</p>
+                <p className="truncate text-sm font-medium">{phase.available ? phase.title : "Binnenkort"}</p>
+              </div>
+            </button>
           </li>
         )
       })}
     </ol>
+  )
+}
+
+export function AutoStatusBadge({ status }: { status: AutoStatus | null | undefined }) {
+  if (!status) return <Pill>Niet gescand</Pill>
+  const tone: Tone =
+    status === "ok" ? "green" : status === "warning" ? "amber" : status === "error" ? "red" : status === "info" ? "blue" : "muted"
+  return <Pill tone={tone}>{AUTO_STATUS_LABELS[status]}</Pill>
+}
+
+export function PercentRing({ percent, size = 56 }: { percent: number; size?: number }) {
+  const stroke = 6
+  const r = (size - stroke) / 2
+  const c = 2 * Math.PI * r
+  const tone = percent >= 80 ? "text-green-600" : percent >= 50 ? "text-amber-500" : "text-red-500"
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img" aria-label={`${percent}% afgerond`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-muted" />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - percent / 100)}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        className={cn("stroke-current transition-all", tone)}
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="fill-foreground text-xs font-bold">
+        {percent}%
+      </text>
+    </svg>
   )
 }
 
@@ -128,3 +185,61 @@ export function ProgressBar({ value, max }: { value: number; max: number }) {
     </div>
   )
 }
+
+export const PHASE1_STEPS: ScanStatus[] = ["discovering", "inventory", "vitals", "analyzing"]
+export const GEO_STEPS: ScanStatus[] = ["fetching", "linking", "checking", "analyzing"]
+/** Fase 3: de scan zelf (zonder AI); de AI-analyse start de gebruiker daarna per selectie. */
+export const CONTENT_STEPS: ScanStatus[] = ["fetching", "linking", "checking"]
+
+export function isActive(status: ScanStatus) {
+  return ACTIVE_STATUSES.includes(status)
+}
+
+export function ScanProgress({ scan, steps = PHASE1_STEPS }: { scan: LaunchScanDetail; steps?: ScanStatus[] }) {
+  const currentIndex = steps.indexOf(scan.status)
+  let value = 0
+  let max = 0
+  let detail = ""
+  if (scan.status === "inventory") {
+    value = scan.inventoried_urls
+    max = scan.total_urls
+    detail = max ? `${value} / ${max} URL's` : `${value} URL's gecrawld`
+  } else if (scan.status === "fetching") {
+    value = scan.inventoried_urls
+    max = scan.total_urls
+    detail = `${value} / ${max} pagina's opgehaald`
+  } else if (scan.status === "analyzing" && scan.phase === 3) {
+    value = scan.vitals_measured
+    max = scan.vitals_total
+    detail = `${value} / ${max} pagina's geanalyseerd`
+  } else if (scan.status === "vitals") {
+    value = scan.vitals_measured
+    max = scan.vitals_total
+    detail = `${value} / ${max} pagina's gemeten`
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        {STATUS_LABELS[scan.status]}
+        {detail && <span className="font-normal text-muted-foreground">· {detail}</span>}
+      </div>
+      <ProgressBar value={value} max={max} />
+      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {steps.map((step, index) => (
+          <li
+            key={step}
+            className={cn(
+              index < currentIndex && "text-green-700 dark:text-green-400",
+              index === currentIndex && "font-semibold text-foreground"
+            )}
+          >
+            {index + 1}. {STATUS_LABELS[step]}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+

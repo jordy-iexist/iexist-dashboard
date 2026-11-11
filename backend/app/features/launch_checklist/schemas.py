@@ -5,10 +5,12 @@ from pydantic import BaseModel, Field
 
 ScanStatus = Literal[
     "pending", "discovering", "inventory", "vitals", "analyzing",
+    "fetching", "linking", "checking",
     "completed", "failed", "canceled",
 ]
 IssueStatus = Literal["open", "doorgezet", "opgelost", "genegeerd"]
-ACTIVE_STATUSES = {"pending", "discovering", "inventory", "vitals", "analyzing"}
+ACTIVE_STATUSES = {"pending", "discovering", "inventory", "vitals", "analyzing", "fetching", "linking", "checking"}
+ManualStatus = Literal["open", "afgerond", "nvt"]
 
 
 class LaunchScanCreateRequest(BaseModel):
@@ -21,6 +23,7 @@ class LaunchScanItem(BaseModel):
     id: str
     customer_website_id: str
     phase: int
+    source_scan_id: str | None = None
     status: ScanStatus
     base_url: str
     discovery_source: str | None = None
@@ -58,6 +61,10 @@ class LaunchCustomerItem(BaseModel):
     domain: str
     category_name: str | None = None
     latest_scan: LaunchScanItem | None = None
+    latest_geo_scan: LaunchScanItem | None = None
+    checklist_progress: "ChecklistProgress | None" = None
+    latest_content_scan: LaunchScanItem | None = None
+    content_progress: "ChecklistProgress | None" = None
 
 
 class LaunchCustomerListResponse(BaseModel):
@@ -100,6 +107,11 @@ class LaunchScanPageItem(BaseModel):
     cwv: Any = None
     cwv_status: str | None = None
     error: str | None = None
+    page_type: str | None = None
+    page_type_source: str | None = None
+    click_depth: int | None = None
+    inlinks: int | None = None
+    schema_all: list[str] | None = None
     issue_count: int = 0
 
 
@@ -152,3 +164,214 @@ class IssueStatusUpdate(BaseModel):
 class IssueBulkStatusUpdate(BaseModel):
     issue_ids: list[str] = Field(..., min_length=1, max_length=2000)
     status: IssueStatus
+
+
+# --- fase 2: GEO/SEO-checklist ---------------------------------------------
+
+class ChecklistProgress(BaseModel):
+    done: int
+    total: int
+    percent: int
+
+
+class ChecklistItemOut(BaseModel):
+    key: str
+    label: str
+    description: str | None = None
+    mode: str
+    applies_to: str
+    priority: str
+    auto: Any = None
+    manual_status: ManualStatus | None = None
+    note: str | None = None
+    updated_at: datetime | None = None
+    external_url: str | None = None
+    pushed_at: datetime | None = None
+    effective: Literal["done", "open", "nvt"]
+    f1_issue_types: list[str] = []
+
+
+class ChecklistSectionOut(BaseModel):
+    key: str
+    label: str
+    items: list[ChecklistItemOut]
+    done: int
+    total: int
+
+
+class ChecklistResponse(BaseModel):
+    customer_id: str
+    customer_name: str
+    base_url: str
+    scan: LaunchScanItem | None = None
+    source_scan_id: str | None = None
+    is_webshop: bool
+    webshop_detected: bool | None = None
+    webshop_override: bool | None = None
+    webshop_reasons: list[str] = []
+    page_types: dict[str, int] = {}
+    generated_at: str | None = None
+    sections: list[ChecklistSectionOut]
+    done: int
+    total: int
+    percent: int
+
+
+class ChecklistStateUpdate(BaseModel):
+    manual_status: ManualStatus | None = None
+    note: str | None = Field(default=None, max_length=5000)
+
+
+class WebshopUpdate(BaseModel):
+    is_webshop: bool | None = None
+
+
+class PageTypeUpdate(BaseModel):
+    page_type: str = Field(..., min_length=1, max_length=40)
+
+
+class GeoScanCreateRequest(BaseModel):
+    source_scan_id: str | None = None
+
+
+# --- Fase 3: content & onpage ------------------------------------------------
+
+SuggestionStatus = Literal["open", "overgenomen", "afgewezen"]
+
+
+class ContentChecklistResponse(BaseModel):
+    customer_id: str
+    customer_name: str
+    base_url: str
+    scan: LaunchScanItem | None = None
+    source_scan_id: str | None = None
+    page_types: dict[str, int] = {}
+    generated_at: str | None = None
+    gap_analyzed_at: str | None = None
+    summary: Any = None
+    max_pages_per_analysis: int
+    sections: list[ChecklistSectionOut]
+    done: int
+    total: int
+    percent: int
+
+
+class ContentSuggestionItem(BaseModel):
+    id: str
+    scan_id: str
+    content_page_id: str | None = None
+    page_url: str | None = None
+    item_key: str
+    item_label: str
+    agent: str
+    title: str | None = None
+    current_value: str | None = None
+    proposed_value: str
+    rationale: str | None = None
+    details: Any = None
+    status: SuggestionStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContentSuggestionListResponse(BaseModel):
+    items: list[ContentSuggestionItem]
+    total: int
+
+
+class ContentPageItem(BaseModel):
+    id: str
+    url: str
+    path: str
+    page_type: str | None = None
+    title: str | None = None
+    meta_description: str | None = None
+    word_count: int | None = None
+    problem_count: int
+    # item_key → {status, message, details}
+    checks: dict[str, Any] = {}
+    analysis_status: str
+    analysis_error: str | None = None
+    focus_keyword: str | None = None
+    intent: str | None = None
+    keyword_source: str | None = None
+    analyzed_at: datetime | None = None
+    suggestions_open: int = 0
+    suggestions_total: int = 0
+    # Checklistpunten waarvoor deze pagina open AI-voorstellen heeft.
+    suggestion_items: list[str] = []
+
+
+class ContentPageDetail(ContentPageItem):
+    headings: Any = None
+    first_paragraph: str | None = None
+    readability: str | None = None
+    images_total: int = 0
+    links_total: int = 0
+    suggestions: list[ContentSuggestionItem] = []
+
+
+class ContentPageListResponse(BaseModel):
+    items: list[ContentPageItem]
+    total: int
+    page_types: dict[str, int] = {}
+
+
+class ContentAnalysisRequest(BaseModel):
+    # Leeg mag als alleen de contentgap-analyse moet draaien.
+    page_ids: list[str] = Field(default_factory=list, max_length=200)
+    # Ook de contentgap-analyse (nieuwe content) opnieuw draaien.
+    run_gap: bool = True
+
+
+class ContentKeywordUpdate(BaseModel):
+    """Handmatig focuszoekwoord; leeg = weer door de AI laten bepalen."""
+    focus_keyword: str | None = Field(default=None, max_length=200)
+    intent: Literal["informatief", "commercieel", "transactioneel", "navigatie", "lokaal"] | None = None
+
+
+class SuggestionStatusUpdate(BaseModel):
+    status: SuggestionStatus
+
+
+# --- Monday ----------------------------------------------------------------
+
+class MondaySettingsResponse(BaseModel):
+    token_configured: bool
+    folder_name: str
+    board_id: str | None = None
+    board_url: str | None = None
+    board_name: str | None = None
+    # Melding als het gekoppelde bord niet (meer) bereikbaar is.
+    board_error: str | None = None
+
+
+class MondayBoardLink(BaseModel):
+    """Bestaand bord koppelen (id of bord-URL); None ontkoppelt."""
+    board: str | None = Field(default=None, max_length=500)
+
+
+class MondayPushIssuesRequest(BaseModel):
+    issue_ids: list[str] = Field(..., min_length=1, max_length=25)
+
+
+class MondayPushChecklistRequest(BaseModel):
+    item_keys: list[str] = Field(..., min_length=1, max_length=25)
+
+
+class MondayPushOutcome(BaseModel):
+    ref: str
+    status: Literal["pushed", "skipped", "failed"]
+    message: str | None = None
+    external_url: str | None = None
+
+
+class MondayPushResponse(BaseModel):
+    board_url: str | None = None
+    pushed: int
+    skipped: int
+    failed: int
+    outcomes: list[MondayPushOutcome]
+
+
+LaunchCustomerItem.model_rebuild()

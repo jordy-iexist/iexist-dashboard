@@ -1,26 +1,29 @@
 "use client"
 
 import { Download, Loader2, Play, Square, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AiChecksTab } from "@/components/livegang/AiChecksTab"
+import { ContentWorkspace } from "@/components/livegang/ContentWorkspace"
+import { GeoWorkspace } from "@/components/livegang/GeoWorkspace"
 import { InventoryTab } from "@/components/livegang/InventoryTab"
 import { IssuesTab } from "@/components/livegang/IssuesTab"
+import { MondayBoardSetting } from "@/components/livegang/MondayBoardSetting"
 import { OverviewTab } from "@/components/livegang/OverviewTab"
-import { PhaseStepper, ProgressBar, ScanStatusBadge } from "@/components/livegang/shared"
+import { isActive, PhaseStepper, ScanProgress, ScanStatusBadge } from "@/components/livegang/shared"
 import { VitalsTab } from "@/components/livegang/VitalsTab"
 import {
-  ACTIVE_STATUSES,
   API_BASE,
   apiFetch,
   formatDateTime,
   STATUS_LABELS,
   type LaunchScan,
   type LaunchScanDetail,
-  type ScanStatus,
 } from "@/lib/launch-checklist"
+import { usePolling } from "@/hooks/use-polling"
+import { readUrlChoice, readUrlParam, writeUrlParams } from "@/lib/url-state"
 import { cn } from "@/lib/utils"
 
 const TABS = [
@@ -32,71 +35,115 @@ const TABS = [
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
+const TAB_KEYS = TABS.map((t) => t.key)
 
-const STEPS: ScanStatus[] = ["discovering", "inventory", "vitals", "analyzing"]
-
-function isActive(status: ScanStatus) {
-  return ACTIVE_STATUSES.includes(status)
+async function fetchPhaseState(customerId: string) {
+  const query = `customer_website_id=${encodeURIComponent(customerId)}&limit=20`
+  const [p1, p2, p3] = await Promise.all([
+    apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=1`),
+    apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=2`),
+    apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=3`),
+  ])
+  const phase1 = p1.items.filter((s) => (s.phase ?? 1) === 1)
+  const phase2 = p2.items.filter((s) => s.phase === 2)
+  const phase3 = p3.items.filter((s) => s.phase === 3)
+  return {
+    done: {
+      1: phase1.some((s) => s.status === "completed"),
+      2: phase2.some((s) => s.status === "completed"),
+      // Tijdens een AI-analyse staat de (al voltooide) scan tijdelijk op 'analyzing'.
+      3: phase3.some((s) => s.status === "completed" || s.status === "analyzing"),
+    } as Record<number, boolean>,
+    hasGeoScans: phase2.length > 0,
+    hasContentScans: phase3.length > 0,
+  }
 }
 
-function ScanProgress({ scan }: { scan: LaunchScanDetail }) {
-  const currentIndex = STEPS.indexOf(scan.status)
-  let value = 0
-  let max = 0
-  let detail = ""
-  if (scan.status === "inventory") {
-    value = scan.inventoried_urls
-    max = scan.total_urls
-    detail = max ? `${value} / ${max} URL's` : `${value} URL's gecrawld`
-  } else if (scan.status === "vitals") {
-    value = scan.vitals_measured
-    max = scan.vitals_total
-    detail = `${value} / ${max} pagina's gemeten`
-  }
+export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
+  const [phase, setPhase] = useState<number | null>(null)
+  const [done, setDone] = useState<Record<number, boolean>>({})
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPhaseState(customerId)
+      .then((state) => {
+        if (cancelled) return
+        setDone(state.done)
+        // De fase uit de URL (?fase=) gaat voor, zodat een refresh op dezelfde fase
+        // blijft. Zonder keuze: fase 2 openen als die al eerder gestart is.
+        const fromUrl = readUrlParam("fase")
+        const fallback = state.done[2] && state.hasContentScans ? 3 : state.done[1] && state.hasGeoScans ? 2 : 1
+        const initial =
+          fromUrl === "1"
+            ? 1
+            : fromUrl === "2" && state.done[1]
+              ? 2
+              : fromUrl === "3" && state.done[2]
+                ? 3
+                : fallback
+        setPhase((current) => current ?? initial)
+      })
+      .catch(() => {
+        if (!cancelled) setPhase((current) => current ?? (readUrlParam("fase") === "2" ? 2 : 1))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [customerId])
+
+  const refreshPhases = useCallback(() => {
+    fetchPhaseState(customerId)
+      .then((state) => setDone(state.done))
+      .catch(() => {})
+  }, [customerId])
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Loader2 className="size-4 animate-spin text-primary" />
-        {STATUS_LABELS[scan.status]}
-        {detail && <span className="font-normal text-muted-foreground">· {detail}</span>}
-      </div>
-      <ProgressBar value={value} max={max} />
-      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {STEPS.map((step, index) => (
-          <li
-            key={step}
-            className={cn(
-              index < currentIndex && "text-green-700 dark:text-green-400",
-              index === currentIndex && "font-semibold text-foreground"
-            )}
-          >
-            {index + 1}. {STATUS_LABELS[step]}
-          </li>
-        ))}
-      </ol>
+    <div className="space-y-6">
+      <PhaseStepper
+        active={phase ?? 1}
+        completed={done}
+        locked={{
+          2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
+          3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
+        }}
+        onSelect={(next) => {
+          setPhase(next)
+          // Tabbladen verschillen per fase: het tabblad begint opnieuw.
+          writeUrlParams({ fase: String(next), tab: null })
+        }}
+      />
+      <MondayBoardSetting customerId={customerId} />
+      {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
+      {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
+      {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
     </div>
   )
 }
 
-export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
+function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onChange: () => void }) {
   const [scans, setScans] = useState<LaunchScan[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scan, setScan] = useState<LaunchScanDetail | null>(null)
-  const [tab, setTab] = useState<TabKey>("overview")
+  const [tab, setTabState] = useState<TabKey>(() => readUrlChoice("tab", TAB_KEYS, "overview"))
+  const setTab = (next: TabKey) => {
+    setTabState(next)
+    writeUrlParams({ fase: "1", tab: next })
+  }
   const [maxPages, setMaxPages] = useState(500)
   const [vitalsMax, setVitalsMax] = useState(100)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadScans = useCallback(async () => {
     const result = await apiFetch<{ items: LaunchScan[] }>(
-      `/scans?customer_website_id=${encodeURIComponent(customerId)}&limit=20`
+      `/scans?customer_website_id=${encodeURIComponent(customerId)}&phase=1&limit=20`
     )
-    setScans(result.items)
-    return result.items
-  }, [customerId])
+    // Client-side ook filteren: een oudere backend negeert ?phase=.
+    const items = result.items.filter((s) => (s.phase ?? 1) === 1)
+    setScans(items)
+    onChange()
+    return items
+  }, [customerId, onChange])
 
   useEffect(() => {
     loadScans()
@@ -110,35 +157,25 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
     return detail
   }, [])
 
-  // Detail laden + pollen zolang de scan loopt.
+  // Detail laden bij het wisselen van scan.
   useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current)
     if (!selectedId) {
       setScan(null)
       return
     }
-    let cancelled = false
-    loadScan(selectedId)
-      .then((detail) => {
-        if (cancelled || !isActive(detail.status)) return
-        pollRef.current = setInterval(async () => {
-          try {
-            const next = await loadScan(selectedId)
-            if (!isActive(next.status)) {
-              if (pollRef.current) clearInterval(pollRef.current)
-              void loadScans()
-            }
-          } catch {
-            // tijdelijke fout: volgende poll opnieuw
-          }
-        }, 3000)
-      })
-      .catch((err: Error) => setError(err.message))
-    return () => {
-      cancelled = true
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [selectedId, loadScan, loadScans])
+    loadScan(selectedId).catch((err: Error) => setError(err.message))
+  }, [selectedId, loadScan])
+
+  // Pollen zolang de geselecteerde scan loopt; daarna de scanlijst verversen.
+  usePolling(
+    async () => {
+      if (!selectedId) return
+      const next = await loadScan(selectedId)
+      if (!isActive(next.status)) await loadScans()
+    },
+    scan !== null && scan.id === selectedId && isActive(scan.status),
+    3000
+  )
 
   async function startScan() {
     setBusy(true)
@@ -192,8 +229,6 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
 
   return (
     <div className="space-y-6">
-      <PhaseStepper completed={scan?.status === "completed"} />
-
       <section className="space-y-4 rounded-lg border bg-card p-4 sm:p-6">
         <div>
           <h2 className="text-lg font-bold tracking-wide text-primary">Fase 1 · Nulmeting &amp; AI scan</h2>
@@ -298,12 +333,12 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
                     )}
                   >
                     {t.label}
-                    {t.key === "issues" && scan.summary_stats ? ` (${scan.summary_stats.issues.total})` : ""}
+                    {t.key === "issues" && scan.summary_stats?.issues ? ` (${scan.summary_stats.issues.total})` : ""}
                   </button>
                 ))}
               </div>
               {tab === "overview" && <OverviewTab scan={scan} />}
-              {tab === "issues" && <IssuesTab scanId={scan.id} />}
+              {tab === "issues" && <IssuesTab scanId={scan.id} customerId={customerId} />}
               {tab === "inventory" && <InventoryTab scanId={scan.id} />}
               {tab === "vitals" && <VitalsTab scanId={scan.id} measuring={scan.status === "vitals"} />}
               {tab === "ai" && <AiChecksTab checks={scan.ai_checks} />}

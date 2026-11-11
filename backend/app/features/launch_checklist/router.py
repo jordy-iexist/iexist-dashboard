@@ -1,4 +1,5 @@
-"""Livegang checklist — fase 1 (Nulmeting & AI scan) endpoints."""
+"""Livegang checklist — fase 1 (Nulmeting & AI scan), fase 2 (GEO/SEO-checklist)
+en fase 3 (Contentcreatie & Onpage optimalisatie)."""
 from __future__ import annotations
 
 import csv
@@ -18,12 +19,18 @@ from app.core.url_guard import UnsafeURLError, validate_external_url
 from app.db.models import (
     CustomerCategory,
     CustomerWebsite,
+    LaunchChecklistState,
+    LaunchContentPage,
+    LaunchContentSuggestion,
+    LaunchPageTypeOverride,
     LaunchScan,
     LaunchScanIssue,
     LaunchScanPage,
 )
 from app.db.session import get_db
 from app.features.launch_checklist.mappers import (
+    content_page_fields,
+    to_suggestion_item,
     to_issue_item,
     to_page_item,
     to_scan_detail,
@@ -31,6 +38,28 @@ from app.features.launch_checklist.mappers import (
 )
 from app.features.launch_checklist.schemas import (
     ACTIVE_STATUSES,
+    ChecklistItemOut,
+    ChecklistProgress,
+    ChecklistResponse,
+    ChecklistStateUpdate,
+    ContentAnalysisRequest,
+    ContentChecklistResponse,
+    ContentKeywordUpdate,
+    ContentPageDetail,
+    ContentPageItem,
+    ContentPageListResponse,
+    ContentSuggestionItem,
+    ContentSuggestionListResponse,
+    SuggestionStatusUpdate,
+    GeoScanCreateRequest,
+    MondayBoardLink,
+    MondayPushChecklistRequest,
+    MondayPushIssuesRequest,
+    MondayPushOutcome,
+    MondayPushResponse,
+    MondaySettingsResponse,
+    PageTypeUpdate,
+    WebshopUpdate,
     IssueBulkStatusUpdate,
     IssueGroup,
     IssueStatusUpdate,
@@ -43,7 +72,34 @@ from app.features.launch_checklist.schemas import (
     LaunchScanListResponse,
     LaunchScanPageListResponse,
 )
+from app.core.config import settings
+from app.features.launch_checklist.services import monday_push
+from app.features.launch_checklist.services.checklist_view import (
+    latest_completed_geo as _latest_completed_geo,
+    latest_content_scan as _latest_content_scan,
+    merged_checklist,
+    merged_content_checklist,
+    resolve_is_webshop as _is_webshop,
+)
+from app.features.launch_checklist.services.geo_checklist import (
+    ITEMS as CHECKLIST_ITEMS,
+    SECTION_LABELS,
+    merge_checklist,
+)
+from app.services.monday import client as monday_client
+from app.services.monday.client import MondayServiceError
+from app.features.launch_checklist.services.content_checklist import (
+    ITEMS as CONTENT_ITEMS,
+    merge_content_checklist,
+)
+from app.features.launch_checklist.services.content_rebuild import (
+    rebuild_content_checklist,
+    recover_stale_analysis,
+    reset_unfinished_analysis,
+)
+from app.features.launch_checklist.services.geo_rebuild import rebuild_checklist
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
+from app.features.launch_checklist.services.page_types import PAGE_TYPES
 
 router = APIRouter(prefix="/api/launch-checklist", tags=["launch-checklist"])
 
@@ -70,6 +126,27 @@ def _normalize_base_url(raw: str) -> str:
 
 # --- klanten ---------------------------------------------------------------
 
+def _latest_scans(db: Session, *, phase: int, completed_only: bool = False) -> dict[str, LaunchScan]:
+    """Laatste scan per klant voor een fase."""
+    base = db.query(LaunchScan).filter(LaunchScan.phase == phase)
+    if completed_only:
+        base = base.filter(LaunchScan.status == "completed")
+    latest: dict[str, LaunchScan] = {}
+    for row in base.order_by(LaunchScan.created_at.asc()).all():
+        latest[row.customer_website_id] = row
+    return latest
+
+
+def _states_for(db: Session, customer_id: str | None = None) -> dict[str, dict[str, LaunchChecklistState]]:
+    query = db.query(LaunchChecklistState)
+    if customer_id:
+        query = query.filter(LaunchChecklistState.customer_website_id == customer_id)
+    out: dict[str, dict[str, LaunchChecklistState]] = {}
+    for state in query.all():
+        out.setdefault(state.customer_website_id, {})[state.item_key] = state
+    return out
+
+
 @router.get("/customers", response_model=LaunchCustomerListResponse)
 async def list_launch_customers(
     _user_id: str = Depends(require_user_id),
@@ -77,39 +154,39 @@ async def list_launch_customers(
 ):
     customers = db.query(CustomerWebsite).order_by(CustomerWebsite.name.asc()).all()
     categories = {c.id: c.name for c in db.query(CustomerCategory).all()}
+    latest = _latest_scans(db, phase=1)
+    latest_geo = _latest_scans(db, phase=2)
+    completed_geo = _latest_scans(db, phase=2, completed_only=True)
+    latest_content = _latest_scans(db, phase=3)
+    states = _states_for(db)
 
-    latest_sub = (
-        db.query(
-            LaunchScan.customer_website_id,
-            func.max(LaunchScan.created_at).label("max_created"),
-        )
-        .group_by(LaunchScan.customer_website_id)
-        .subquery()
-    )
-    latest_rows = (
-        db.query(LaunchScan)
-        .join(
-            latest_sub,
-            (LaunchScan.customer_website_id == latest_sub.c.customer_website_id)
-            & (LaunchScan.created_at == latest_sub.c.max_created),
-        )
-        .all()
-    )
-    latest = {row.customer_website_id: row for row in latest_rows}
-
-    return LaunchCustomerListResponse(
-        customers=[
-            LaunchCustomerItem(
-                id=c.id,
-                name=c.name,
-                base_url=c.base_url,
-                domain=c.domain,
-                category_name=categories.get(c.category_id) if c.category_id else None,
-                latest_scan=to_scan_item(latest[c.id]) if c.id in latest else None,
-            )
-            for c in customers
-        ]
-    )
+    items: list[LaunchCustomerItem] = []
+    for c in customers:
+        progress = None
+        geo = completed_geo.get(c.id)
+        if geo is not None or c.id in states:
+            payload = (geo.checklist if geo else None) or {}
+            merged = merge_checklist(payload.get("items"), states.get(c.id, {}), is_webshop=_is_webshop(c, payload))
+            progress = ChecklistProgress(done=merged["done"], total=merged["total"], percent=merged["percent"])
+        content_progress = None
+        content = latest_content.get(c.id)
+        if content is not None and isinstance(content.checklist, dict):
+            merged = merge_content_checklist(content.checklist.get("items"), states.get(c.id, {}))
+            content_progress = ChecklistProgress(
+                done=merged["done"], total=merged["total"], percent=merged["percent"])
+        items.append(LaunchCustomerItem(
+            id=c.id,
+            name=c.name,
+            base_url=c.base_url,
+            domain=c.domain,
+            category_name=categories.get(c.category_id) if c.category_id else None,
+            latest_scan=to_scan_item(latest[c.id]) if c.id in latest else None,
+            latest_geo_scan=to_scan_item(latest_geo[c.id]) if c.id in latest_geo else None,
+            checklist_progress=progress,
+            latest_content_scan=to_scan_item(content) if content is not None else None,
+            content_progress=content_progress,
+        ))
+    return LaunchCustomerListResponse(customers=items)
 
 
 # --- scans -----------------------------------------------------------------
@@ -174,6 +251,7 @@ async def start_launch_scan(
 @router.get("/scans", response_model=LaunchScanListResponse)
 async def list_launch_scans(
     customer_website_id: str | None = Query(default=None),
+    phase: int | None = Query(default=None, ge=1, le=4),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     _user_id: str = Depends(require_user_id),
@@ -182,6 +260,8 @@ async def list_launch_scans(
     query = db.query(LaunchScan)
     if customer_website_id:
         query = query.filter(LaunchScan.customer_website_id == customer_website_id)
+    if phase:
+        query = query.filter(LaunchScan.phase == phase)
     total = query.count()
     rows = query.order_by(LaunchScan.created_at.desc()).offset(offset).limit(limit).all()
     return LaunchScanListResponse(items=[to_scan_item(r) for r in rows], total=total)
@@ -193,7 +273,10 @@ async def get_launch_scan(
     _user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    return to_scan_detail(_get_scan(db, scan_id))
+    scan = _get_scan(db, scan_id)
+    # De UI pollt deze endpoint tijdens een analyse: hier herstellen we een vastgelopen analyse.
+    recover_stale_analysis(db, scan)
+    return to_scan_detail(scan)
 
 
 @router.post("/scans/{scan_id}/cancel")
@@ -207,7 +290,12 @@ async def cancel_launch_scan(
         raise HTTPException(
             status_code=400, detail=f"Scan kan niet worden geannuleerd (status: {scan.status})."
         )
-    scan.status = "canceled"
+    if scan.phase == 3 and scan.status == "analyzing":
+        # Alleen de AI-analyse stopt; de scan zelf en afgeronde pagina's blijven staan.
+        scan.status = "completed"
+        reset_unfinished_analysis(db, scan_id, ("queued",))
+    else:
+        scan.status = "canceled"
     scan.updated_at = _now()
     db.commit()
     return {"ok": True, "scan_id": scan_id}
@@ -240,6 +328,7 @@ _PAGE_FILTERS = {
     "multiple_h1": lambda q: q.filter(LaunchScanPage.h1_count > 1),
     "cwv_measured": lambda q: q.filter(LaunchScanPage.cwv_status.isnot(None)),
     "cwv_poor": lambda q: q.filter(LaunchScanPage.cwv_status == "poor"),
+    "classified": lambda q: q.filter(LaunchScanPage.page_type.isnot(None)),
 }
 
 
@@ -248,6 +337,7 @@ async def list_launch_scan_pages(
     scan_id: str,
     filter: str | None = Query(default=None),
     search: str | None = Query(default=None, max_length=200),
+    page_type: str | None = Query(default=None, max_length=40),
     sort: str = Query(default="path"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -261,12 +351,16 @@ async def list_launch_scan_pages(
     if search:
         like = f"%{search.strip()}%"
         query = query.filter((LaunchScanPage.url.ilike(like)) | (LaunchScanPage.title.ilike(like)))
+    if page_type:
+        query = query.filter(LaunchScanPage.page_type == page_type)
 
     sort_columns = {
         "path": LaunchScanPage.path.asc(),
         "status": LaunchScanPage.status_code.desc(),
         "response_time": LaunchScanPage.response_time_ms.desc().nullslast(),
         "words": LaunchScanPage.word_count.asc().nullslast(),
+        "depth": LaunchScanPage.click_depth.desc().nullsfirst(),
+        "inlinks": LaunchScanPage.inlinks.asc().nullsfirst(),
     }
     total = query.count()
     rows = query.order_by(sort_columns.get(sort, LaunchScanPage.path.asc())).offset(offset).limit(limit).all()
@@ -379,6 +473,735 @@ async def update_issue_status(
     return to_issue_item(issue)
 
 
+# --- fase 2: GEO/SEO-checklist ---------------------------------------------
+
+def _get_customer(db: Session, customer_id: str) -> CustomerWebsite:
+    customer = db.get(CustomerWebsite, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Klant niet gevonden.")
+    return customer
+
+
+def _build_checklist(
+    db: Session, customer: CustomerWebsite, geo: LaunchScan | None = None
+) -> ChecklistResponse:
+    """Checklist voor `geo`; zonder scan de laatste voltooide fase-2 scan."""
+    if geo is None:
+        geo = _latest_completed_geo(db, customer.id)
+    payload = (geo.checklist if geo else None) or {}
+    merged = merged_checklist(db, customer, geo)
+    is_webshop = merged["is_webshop"]
+    return ChecklistResponse(
+        customer_id=customer.id,
+        customer_name=customer.name,
+        base_url=customer.base_url,
+        scan=to_scan_item(geo) if geo else None,
+        source_scan_id=geo.source_scan_id if geo else None,
+        is_webshop=is_webshop,
+        webshop_detected=payload.get("webshop_detected") if geo else None,
+        webshop_override=customer.launch_is_webshop,
+        webshop_reasons=payload.get("webshop_reasons") or [],
+        page_types=payload.get("page_types") or {},
+        generated_at=payload.get("generated_at"),
+        sections=merged["sections"],
+        done=merged["done"],
+        total=merged["total"],
+        percent=merged["percent"],
+    )
+
+
+@router.post("/customers/{customer_id}/geo-scans", response_model=LaunchScanDetail)
+async def start_geo_scan(
+    customer_id: str,
+    payload: GeoScanCreateRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    from app.worker.tasks import run_geo_scan_task  # voorkom circulaire import
+
+    customer = _get_customer(db, customer_id)
+    query = db.query(LaunchScan).filter(
+        LaunchScan.customer_website_id == customer.id, LaunchScan.phase == 1,
+        LaunchScan.status == "completed",
+    )
+    if payload.source_scan_id:
+        query = query.filter(LaunchScan.id == payload.source_scan_id)
+    source = query.order_by(LaunchScan.created_at.desc()).first()
+    if source is None:
+        raise HTTPException(status_code=400, detail="Voer eerst een voltooide fase-1 scan (nulmeting) uit.")
+
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+
+    now = _now()
+    scan = LaunchScan(
+        id=str(uuid.uuid4()),
+        customer_website_id=customer.id,
+        phase=2,
+        source_scan_id=source.id,
+        status="pending",
+        base_url=source.base_url,
+        discovery_source=source.discovery_source,
+        total_urls=0,
+        inventoried_urls=0,
+        failed_urls=0,
+        max_pages=source.max_pages,
+        vitals_max_pages=0,
+        vitals_total=0,
+        vitals_measured=0,
+        created_by=user_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    run_geo_scan_task.delay(scan.id)
+    return to_scan_detail(scan)
+
+
+@router.get("/customers/{customer_id}/checklist", response_model=ChecklistResponse)
+async def get_checklist(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _build_checklist(db, _get_customer(db, customer_id))
+
+
+@router.patch("/customers/{customer_id}/checklist/{item_key}", response_model=ChecklistItemOut)
+async def update_checklist_item(
+    customer_id: str,
+    item_key: str,
+    payload: ChecklistStateUpdate,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    if item_key not in CHECKLIST_ITEMS:
+        raise HTTPException(status_code=404, detail="Onbekend checklistpunt.")
+    state = (
+        db.query(LaunchChecklistState)
+        .filter(LaunchChecklistState.customer_website_id == customer.id,
+                LaunchChecklistState.item_key == item_key)
+        .first()
+    )
+    if state is None:
+        state = LaunchChecklistState(id=str(uuid.uuid4()), customer_website_id=customer.id, item_key=item_key)
+        db.add(state)
+    fields = payload.model_fields_set
+    if "manual_status" in fields:
+        state.manual_status = payload.manual_status
+    if "note" in fields:
+        state.note = (payload.note or "").strip() or None
+    state.updated_by = user_id
+    state.updated_at = _now()
+    db.commit()
+
+    response = _build_checklist(db, customer)
+    for section in response.sections:
+        for item in section.items:
+            if item.key == item_key:
+                return item
+    raise HTTPException(status_code=500, detail="Checklistpunt niet gevonden na opslaan.")
+
+
+@router.patch("/customers/{customer_id}/webshop", response_model=ChecklistResponse)
+async def update_webshop(
+    customer_id: str,
+    payload: WebshopUpdate,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    customer.launch_is_webshop = payload.is_webshop
+    db.flush()
+    geo = _latest_completed_geo(db, customer.id)
+    if geo is not None:
+        rebuild_checklist(db, geo)
+    db.commit()
+    return _build_checklist(db, customer)
+
+
+# --- Monday ----------------------------------------------------------------
+# Gewone `def`: de Monday-calls zijn synchroon en horen in de threadpool,
+# niet op de event loop.
+
+_MONDAY_STATUS = {
+    "not_configured": 400,
+    "folder_not_found": 400,
+    "board_not_found": 409,
+    "unauthorized": 502,
+    "rate_limited": 503,
+    "timeout": 504,
+    "connection_error": 502,
+}
+
+
+def _monday_http_error(exc: MondayServiceError) -> HTTPException:
+    return HTTPException(status_code=_MONDAY_STATUS.get(exc.code, 502), detail=str(exc))
+
+
+def _monday_settings(customer: CustomerWebsite, *, check_board: bool) -> MondaySettingsResponse:
+    response = MondaySettingsResponse(
+        token_configured=monday_client.is_configured(),
+        folder_name=settings.monday_folder_name,
+        board_id=customer.monday_board_id,
+        board_url=customer.monday_board_url,
+    )
+    if check_board and response.token_configured and customer.monday_board_id:
+        try:
+            response.board_name = monday_client.get_board(customer.monday_board_id).name
+        except MondayServiceError as exc:
+            response.board_error = str(exc)
+    return response
+
+
+def _push_response(result: monday_push.PushResult) -> MondayPushResponse:
+    return MondayPushResponse(
+        board_url=result.board_url,
+        pushed=result.count("pushed"),
+        skipped=result.count("skipped"),
+        failed=result.count("failed"),
+        outcomes=[MondayPushOutcome(**vars(o)) for o in result.outcomes],
+    )
+
+
+@router.get("/customers/{customer_id}/monday", response_model=MondaySettingsResponse)
+def get_monday_settings(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _monday_settings(_get_customer(db, customer_id), check_board=True)
+
+
+@router.post("/customers/{customer_id}/monday/board", response_model=MondaySettingsResponse)
+def create_monday_board(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Maak het klantbord aan in de Monday-map (of bevestig het bestaande)."""
+    customer = _get_customer(db, customer_id)
+    try:
+        board = monday_push.ensure_customer_board(db, customer)
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    response = _monday_settings(customer, check_board=False)
+    response.board_name = board.name
+    return response
+
+
+@router.patch("/customers/{customer_id}/monday", response_model=MondaySettingsResponse)
+def link_monday_board(
+    customer_id: str,
+    payload: MondayBoardLink,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Koppel een bestaand bord (id of URL) of ontkoppel met `board: null`."""
+    customer = _get_customer(db, customer_id)
+    if not (payload.board or "").strip():
+        monday_push.unlink_board(db, customer)
+        return _monday_settings(customer, check_board=False)
+    board_id = monday_client.parse_board_id(payload.board or "")
+    if board_id is None:
+        raise HTTPException(status_code=400, detail="Vul een bord-id of een Monday-bord-URL in.")
+    try:
+        board = monday_client.get_board(board_id)
+        monday_push.link_board(db, customer, board)
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    response = _monday_settings(customer, check_board=False)
+    response.board_name = board.name
+    return response
+
+
+@router.post("/customers/{customer_id}/monday/sync")
+def sync_monday_links(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Ruim koppelingen op naar items die in Monday verwijderd zijn."""
+    customer = _get_customer(db, customer_id)
+    if not monday_client.is_configured() or not customer.monday_board_id:
+        return {"cleared": 0}
+    try:
+        return {"cleared": monday_push.sync_links(db, customer)}
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+
+
+@router.post("/issues/push-monday", response_model=MondayPushResponse)
+def push_issues_to_monday(
+    payload: MondayPushIssuesRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = monday_push.push_issues(db, payload.issue_ids, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    return _push_response(result)
+
+
+@router.post("/customers/{customer_id}/checklist/push-monday", response_model=MondayPushResponse)
+def push_checklist_to_monday(
+    customer_id: str,
+    payload: MondayPushChecklistRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    try:
+        result = monday_push.push_checklist_items(db, customer, payload.item_keys, user_id)
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    return _push_response(result)
+
+
+@router.patch("/scans/{scan_id}/pages/{page_id}/page-type")
+async def update_page_type(
+    scan_id: str,
+    page_id: str,
+    payload: PageTypeUpdate,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """scan_id mag de fase-1 scan of een fase-2 scan zijn."""
+    if payload.page_type not in PAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Onbekend paginatype.")
+    scan = _get_scan(db, scan_id)
+    source_id = scan.source_scan_id if scan.phase == 2 else scan.id
+    page = db.get(LaunchScanPage, page_id)
+    if page is None or page.scan_id != source_id:
+        raise HTTPException(status_code=404, detail="Pagina niet gevonden.")
+
+    override = (
+        db.query(LaunchPageTypeOverride)
+        .filter(LaunchPageTypeOverride.customer_website_id == scan.customer_website_id,
+                LaunchPageTypeOverride.path == page.path)
+        .first()
+    )
+    if override is None:
+        override = LaunchPageTypeOverride(id=str(uuid.uuid4()), customer_website_id=scan.customer_website_id,
+                                          path=page.path, page_type=payload.page_type)
+        db.add(override)
+    override.page_type = payload.page_type
+    override.updated_at = _now()
+    page.page_type = payload.page_type
+    page.page_type_source = "manual"
+    db.flush()
+
+    geo = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.source_scan_id == source_id, LaunchScan.phase == 2, LaunchScan.status == "completed")
+        .order_by(LaunchScan.created_at.desc())
+        .first()
+    )
+    if geo is not None:
+        rebuild_checklist(db, geo)
+    db.commit()
+    return {"ok": True, "page_id": page.id, "page_type": page.page_type}
+
+
+@router.get("/page-types")
+async def list_page_types(_user_id: str = Depends(require_user_id)):
+    return {"page_types": [{"key": k, "label": v} for k, v in PAGE_TYPES.items()]}
+
+
+# --- fase 3: content & onpage ----------------------------------------------
+
+def _build_content_checklist(
+    db: Session, customer: CustomerWebsite, scan: LaunchScan | None = None
+) -> ContentChecklistResponse:
+    """Fase-3 checklist voor `scan`; zonder scan de laatste fase-3 scan met resultaat."""
+    if scan is None:
+        scan = _latest_content_scan(db, customer.id)
+    payload = (scan.checklist if scan else None) or {}
+    merged = merged_content_checklist(db, customer.id, scan)
+    return ContentChecklistResponse(
+        customer_id=customer.id,
+        customer_name=customer.name,
+        base_url=customer.base_url,
+        scan=to_scan_item(scan) if scan else None,
+        source_scan_id=scan.source_scan_id if scan else None,
+        page_types=payload.get("page_types") or {},
+        generated_at=payload.get("generated_at"),
+        gap_analyzed_at=payload.get("gap_analyzed_at"),
+        summary=payload.get("summary"),
+        max_pages_per_analysis=settings.launch_content_max_pages_per_analysis,
+        sections=merged["sections"],
+        done=merged["done"],
+        total=merged["total"],
+        percent=merged["percent"],
+    )
+
+
+def _get_content_scan(db: Session, scan_id: str) -> LaunchScan:
+    scan = _get_scan(db, scan_id)
+    if scan.phase != 3:
+        raise HTTPException(status_code=400, detail="Dit is geen fase-3 scan.")
+    return scan
+
+
+def _suggestion_counts(db: Session, scan_id: str) -> dict[str | None, tuple[int, int]]:
+    """content_page_id → (open voorstellen, alle voorstellen)."""
+    rows = (
+        db.query(
+            LaunchContentSuggestion.content_page_id,
+            LaunchContentSuggestion.status,
+            func.count(LaunchContentSuggestion.id),
+        )
+        .filter(LaunchContentSuggestion.scan_id == scan_id)
+        .group_by(LaunchContentSuggestion.content_page_id, LaunchContentSuggestion.status)
+        .all()
+    )
+    out: dict[str | None, tuple[int, int]] = {}
+    for page_id, status, count in rows:
+        open_count, total = out.get(page_id, (0, 0))
+        out[page_id] = (open_count + (count if status == "open" else 0), total + count)
+    return out
+
+
+@router.post("/customers/{customer_id}/content-scans", response_model=LaunchScanDetail)
+async def start_content_scan(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    from app.worker.tasks import run_content_scan_task  # voorkom circulaire import
+
+    customer = _get_customer(db, customer_id)
+    geo = _latest_completed_geo(db, customer.id)
+    source = db.get(LaunchScan, geo.source_scan_id) if geo and geo.source_scan_id else None
+    if geo is None or source is None:
+        raise HTTPException(
+            status_code=400, detail="Voer eerst een voltooide fase-2 scan (GEO/SEO-checklist) uit.")
+
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+
+    now = _now()
+    scan = LaunchScan(
+        id=str(uuid.uuid4()),
+        customer_website_id=customer.id,
+        phase=3,
+        source_scan_id=source.id,
+        status="pending",
+        base_url=source.base_url,
+        discovery_source=source.discovery_source,
+        total_urls=0,
+        inventoried_urls=0,
+        failed_urls=0,
+        max_pages=source.max_pages,
+        vitals_max_pages=0,
+        vitals_total=0,
+        vitals_measured=0,
+        created_by=user_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    run_content_scan_task.delay(scan.id)
+    return to_scan_detail(scan)
+
+
+@router.get("/customers/{customer_id}/content-checklist", response_model=ContentChecklistResponse)
+async def get_content_checklist(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _build_content_checklist(db, _get_customer(db, customer_id))
+
+
+@router.patch("/customers/{customer_id}/content-checklist/{item_key}", response_model=ChecklistItemOut)
+async def update_content_checklist_item(
+    customer_id: str,
+    item_key: str,
+    payload: ChecklistStateUpdate,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    if item_key not in CONTENT_ITEMS:
+        raise HTTPException(status_code=404, detail="Onbekend checklistpunt.")
+    state = (
+        db.query(LaunchChecklistState)
+        .filter(LaunchChecklistState.customer_website_id == customer.id,
+                LaunchChecklistState.item_key == item_key)
+        .first()
+    )
+    if state is None:
+        state = LaunchChecklistState(id=str(uuid.uuid4()), customer_website_id=customer.id, item_key=item_key)
+        db.add(state)
+    fields = payload.model_fields_set
+    if "manual_status" in fields:
+        state.manual_status = payload.manual_status
+    if "note" in fields:
+        state.note = (payload.note or "").strip() or None
+    state.updated_by = user_id
+    state.updated_at = _now()
+    db.commit()
+
+    response = _build_content_checklist(db, customer)
+    for section in response.sections:
+        for item in section.items:
+            if item.key == item_key:
+                return item
+    raise HTTPException(status_code=500, detail="Checklistpunt niet gevonden na opslaan.")
+
+
+@router.post("/customers/{customer_id}/content-checklist/push-monday", response_model=MondayPushResponse)
+def push_content_checklist_to_monday(
+    customer_id: str,
+    payload: MondayPushChecklistRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    try:
+        result = monday_push.push_checklist_items(db, customer, payload.item_keys, user_id, phase=3)
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    return _push_response(result)
+
+
+_CONTENT_PAGE_FILTERS = {
+    "problems": lambda q: q.filter(LaunchContentPage.problem_count > 0),
+    "analysed": lambda q: q.filter(LaunchContentPage.analysis_status == "done"),
+    "not_analysed": lambda q: q.filter(LaunchContentPage.analysis_status.in_(("none", "failed"))),
+}
+
+
+@router.get("/scans/{scan_id}/content-pages", response_model=ContentPageListResponse)
+async def list_content_pages(
+    scan_id: str,
+    page_type: str | None = Query(default=None, max_length=40),
+    filter: str | None = Query(default=None, pattern="^(problems|analysed|not_analysed)$"),
+    search: str | None = Query(default=None, max_length=200),
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    scan = _get_content_scan(db, scan_id)
+    base = db.query(LaunchContentPage).filter(LaunchContentPage.scan_id == scan.id)
+    page_types = dict(Counter(
+        row[0] or "overig"
+        for row in db.query(LaunchContentPage.page_type).filter(LaunchContentPage.scan_id == scan.id)
+    ))
+    if page_type:
+        base = base.filter(func.coalesce(LaunchContentPage.page_type, "overig") == page_type)
+    if filter:
+        base = _CONTENT_PAGE_FILTERS[filter](base)
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        base = base.filter(LaunchContentPage.url.ilike(needle) | LaunchContentPage.title.ilike(needle))
+    rows = base.order_by(LaunchContentPage.problem_count.desc(), LaunchContentPage.path.asc()).all()
+    counts = _suggestion_counts(db, scan.id)
+    open_items: dict[str, set[str]] = {}
+    for page_id, key in (
+        db.query(LaunchContentSuggestion.content_page_id, LaunchContentSuggestion.item_key)
+        .filter(LaunchContentSuggestion.scan_id == scan.id, LaunchContentSuggestion.status == "open",
+                LaunchContentSuggestion.content_page_id.isnot(None))
+        .distinct()
+    ):
+        open_items.setdefault(page_id, set()).add(key)
+    items = []
+    for row in rows:
+        fields = content_page_fields(row, counts.get(row.id, (0, 0)))
+        fields["suggestion_items"] = sorted(open_items.get(row.id, ()))
+        # In de lijst alleen status + melding per punt; details staan in de pagina-detail.
+        fields["checks"] = {
+            key: {"status": check.get("status"), "message": check.get("message")}
+            for key, check in (row.checks or {}).items()
+        }
+        items.append(ContentPageItem(**fields))
+    return ContentPageListResponse(items=items, total=len(items), page_types=page_types)
+
+
+def _content_page_detail(db: Session, page: LaunchContentPage) -> ContentPageDetail:
+    suggestions = (
+        db.query(LaunchContentSuggestion)
+        .filter(LaunchContentSuggestion.content_page_id == page.id)
+        .order_by(LaunchContentSuggestion.item_key, LaunchContentSuggestion.created_at)
+        .all()
+    )
+    open_count = sum(1 for s in suggestions if s.status == "open")
+    return ContentPageDetail(
+        **content_page_fields(page, (open_count, len(suggestions))),
+        suggestion_items=sorted({s.item_key for s in suggestions if s.status == "open"}),
+        headings=page.headings,
+        first_paragraph=page.first_paragraph,
+        readability=(page.signals or {}).get("readability"),
+        images_total=len(page.images or []),
+        links_total=len(page.links or []),
+        suggestions=[to_suggestion_item(s, page.url) for s in suggestions],
+    )
+
+
+def _get_content_page(db: Session, scan_id: str, page_id: str) -> LaunchContentPage:
+    scan = _get_content_scan(db, scan_id)
+    page = db.get(LaunchContentPage, page_id)
+    if page is None or page.scan_id != scan.id:
+        raise HTTPException(status_code=404, detail="Pagina niet gevonden.")
+    return page
+
+
+@router.get("/scans/{scan_id}/content-pages/{page_id}", response_model=ContentPageDetail)
+async def get_content_page(
+    scan_id: str,
+    page_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _content_page_detail(db, _get_content_page(db, scan_id, page_id))
+
+
+@router.patch("/scans/{scan_id}/content-pages/{page_id}/keyword", response_model=ContentPageDetail)
+async def update_content_page_keyword(
+    scan_id: str,
+    page_id: str,
+    payload: ContentKeywordUpdate,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Focuszoekwoord handmatig vastleggen. De agents gebruiken het bij de volgende
+    analyse; bestaande voorstellen wijzigen niet. Leeg = weer door de AI laten bepalen."""
+    page = _get_content_page(db, scan_id, page_id)
+    keyword = " ".join((payload.focus_keyword or "").split())
+    if keyword:
+        page.focus_keyword = keyword
+        page.keyword_source = "manual"
+        if "intent" in payload.model_fields_set:
+            page.intent = payload.intent
+    else:
+        page.focus_keyword = None
+        page.intent = None
+        page.keyword_source = None
+    db.commit()
+    return _content_page_detail(db, page)
+
+
+@router.post("/scans/{scan_id}/content-analysis", response_model=LaunchScanDetail)
+async def start_content_analysis(
+    scan_id: str,
+    payload: ContentAnalysisRequest,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Start de AI-analyse voor de geselecteerde pagina's van een voltooide fase-3 scan."""
+    from app.worker.tasks import run_content_analysis_task  # voorkom circulaire import
+
+    scan = _get_content_scan(db, scan_id)
+    if scan.status != "completed":
+        raise HTTPException(status_code=409, detail=f"De scan is niet klaar voor analyse (status: {scan.status}).")
+    page_ids = list(dict.fromkeys(payload.page_ids))
+    if not page_ids and not payload.run_gap:
+        raise HTTPException(status_code=400, detail="Selecteer minstens één pagina.")
+    limit = settings.launch_content_max_pages_per_analysis
+    if len(page_ids) > limit:
+        raise HTTPException(status_code=400, detail=f"Selecteer maximaal {limit} pagina's per analyse.")
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == scan.customer_website_id,
+                LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+    pages = (
+        db.query(LaunchContentPage)
+        .filter(LaunchContentPage.scan_id == scan.id, LaunchContentPage.id.in_(page_ids))
+        .all()
+    )
+    if len(pages) != len(page_ids):
+        raise HTTPException(status_code=400, detail="Een of meer pagina's horen niet bij deze scan.")
+
+    for page in pages:
+        page.analysis_status = "queued"
+        page.analysis_error = None
+    scan.status = "analyzing"
+    scan.vitals_total = len(page_ids)
+    scan.vitals_measured = 0
+    scan.updated_at = _now()
+    db.commit()
+    db.refresh(scan)
+
+    run_content_analysis_task.delay(scan.id, page_ids, payload.run_gap)
+    return to_scan_detail(scan)
+
+
+@router.get("/scans/{scan_id}/suggestions", response_model=ContentSuggestionListResponse)
+async def list_content_suggestions(
+    scan_id: str,
+    scope: str = Query(default="new", pattern="^(pages|new|all)$"),
+    item_key: str | None = Query(default=None, max_length=60),
+    status: str | None = Query(default=None, pattern="^(open|overgenomen|afgewezen)$"),
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    scan = _get_content_scan(db, scan_id)
+    query = db.query(LaunchContentSuggestion).filter(LaunchContentSuggestion.scan_id == scan.id)
+    if scope == "new":
+        query = query.filter(LaunchContentSuggestion.content_page_id.is_(None))
+    elif scope == "pages":
+        query = query.filter(LaunchContentSuggestion.content_page_id.isnot(None))
+    if item_key:
+        query = query.filter(LaunchContentSuggestion.item_key == item_key)
+    if status:
+        query = query.filter(LaunchContentSuggestion.status == status)
+    rows = query.order_by(LaunchContentSuggestion.item_key, LaunchContentSuggestion.created_at).all()
+    urls = {
+        p.id: p.url
+        for p in db.query(LaunchContentPage.id, LaunchContentPage.url)
+        .filter(LaunchContentPage.scan_id == scan.id)
+    } if scope != "new" else {}
+    return ContentSuggestionListResponse(
+        items=[to_suggestion_item(r, urls.get(r.content_page_id)) for r in rows], total=len(rows))
+
+
+@router.patch("/suggestions/{suggestion_id}", response_model=ContentSuggestionItem)
+async def update_content_suggestion(
+    suggestion_id: str,
+    payload: SuggestionStatusUpdate,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    row = db.get(LaunchContentSuggestion, suggestion_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Voorstel niet gevonden.")
+    row.status = payload.status
+    row.updated_by = user_id
+    row.updated_at = _now()
+    db.flush()
+    scan = db.get(LaunchScan, row.scan_id)
+    # Afgehandelde voorstellen tellen niet meer mee in de checklist.
+    if scan is not None and scan.status == "completed":
+        rebuild_content_checklist(db, scan)
+    db.commit()
+    page = db.get(LaunchContentPage, row.content_page_id) if row.content_page_id else None
+    return to_suggestion_item(row, page.url if page else None)
+
+
 # --- export ---------------------------------------------------------------
 
 def _fmt(value: Any) -> str:
@@ -396,7 +1219,7 @@ def _fmt(value: Any) -> str:
 @router.get("/scans/{scan_id}/export")
 async def export_launch_scan(
     scan_id: str,
-    kind: str = Query(default="inventory", pattern="^(inventory|issues)$"),
+    kind: str = Query(default="inventory", pattern="^(inventory|issues|checklist|suggestions)$"),
     _user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
@@ -405,7 +1228,61 @@ async def export_launch_scan(
     buffer.write("﻿")  # BOM zodat Excel UTF-8 herkent
     writer = csv.writer(buffer, delimiter=";")
 
-    if kind == "issues":
+    if kind == "suggestions":
+        urls = {
+            p.id: p.url
+            for p in db.query(LaunchContentPage).filter(LaunchContentPage.scan_id == scan_id).all()
+        }
+        writer.writerow(["Pagina", "Checklistpunt", "Onderdeel", "Huidig", "Voorstel", "Toelichting",
+                         "Verwijzing", "Agent", "Status"])
+        rows = (
+            db.query(LaunchContentSuggestion)
+            .filter(LaunchContentSuggestion.scan_id == scan_id)
+            .order_by(LaunchContentSuggestion.content_page_id, LaunchContentSuggestion.item_key,
+                      LaunchContentSuggestion.created_at)
+            .all()
+        )
+        for row in rows:
+            item = CONTENT_ITEMS.get(row.item_key)
+            writer.writerow([
+                urls.get(row.content_page_id, "Nieuwe content"), item.label if item else row.item_key,
+                row.title or "", row.current_value or "", row.proposed_value, row.rationale or "",
+                (row.details or {}).get("ref", "") if isinstance(row.details, dict) else "",
+                row.agent, row.status,
+            ])
+    elif kind == "checklist" and scan.phase == 3:
+        customer = _get_customer(db, scan.customer_website_id)
+        checklist = _build_content_checklist(db, customer, scan if scan.checklist else None)
+        status_labels = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
+        writer.writerow(["Hoofditem", "Subitem", "Type", "Prioriteit", "Auto-status", "Melding",
+                         "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
+        for section in checklist.sections:
+            for item in section.items:
+                auto = item.auto or {}
+                writer.writerow([
+                    section.label, item.label, item.mode, item.priority,
+                    auto.get("status", ""), auto.get("message", ""), item.manual_status or "",
+                    item.note or "", status_labels.get(item.effective, item.effective),
+                    _fmt([str(e) for e in (auto.get("evidence") or [])[:10]]),
+                ])
+    elif kind == "checklist":
+        customer = _get_customer(db, scan.customer_website_id)
+        # De gevraagde fase-2 scan; bij een fase-1 scan de laatste checklist.
+        geo = scan if scan.phase == 2 and scan.status == "completed" else None
+        checklist = _build_checklist(db, customer, geo)
+        status_labels = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
+        writer.writerow(["Sectie", "Punt", "Type", "Prioriteit", "Auto-status", "Melding",
+                         "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
+        for section in checklist.sections:
+            for item in section.items:
+                auto = item.auto or {}
+                writer.writerow([
+                    SECTION_LABELS.get(section.key, section.key), item.label, item.mode, item.priority,
+                    auto.get("status", ""), auto.get("message", ""), item.manual_status or "",
+                    item.note or "", status_labels.get(item.effective, item.effective),
+                    _fmt([str(e) for e in (auto.get("evidence") or [])[:10]]),
+                ])
+    elif kind == "issues":
         writer.writerow(["Ernst", "Categorie", "Type", "Titel", "URL", "Beschrijving", "Aanbeveling", "Status"])
         rows = db.query(LaunchScanIssue).filter(LaunchScanIssue.scan_id == scan_id).all()
         rows.sort(key=lambda i: (_SEVERITY_ORDER.get(i.severity, 9), i.issue_type))
@@ -456,7 +1333,8 @@ async def export_launch_scan(
 
     customer = db.get(CustomerWebsite, scan.customer_website_id)
     slug = (customer.domain if customer else "scan").replace("/", "-")
-    filename = f"nulmeting-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv"
+    prefix = {2: "geo-seo-checklist", 3: "content-onpage"}.get(scan.phase, "nulmeting")
+    filename = f"{prefix}-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv; charset=utf-8",

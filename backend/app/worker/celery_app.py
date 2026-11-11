@@ -40,6 +40,9 @@ celery_app.conf.update(
         "app.worker.tasks.run_website_meta_optimization_task": {"queue": "blog_generation"},
         "app.worker.tasks.run_website_audit_task": {"queue": "audit"},
         "app.worker.tasks.run_launch_scan_task": {"queue": "audit"},
+        "app.worker.tasks.run_geo_scan_task": {"queue": "audit"},
+        "app.worker.tasks.run_content_scan_task": {"queue": "audit"},
+        "app.worker.tasks.run_content_analysis_task": {"queue": "audit"},
     },
 )
 

@@ -10,8 +10,8 @@ export default function LivegangPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Livegang checklist</h1>
         <p className="text-muted-foreground">
-          Kies een klant om de livegang-checklist te doorlopen. Fase 1 (Nulmeting &amp; AI scan) is beschikbaar;
-          fases 2 t/m 4 volgen.
+          Kies een klant om de livegang-checklist te doorlopen. Fase 1 (Nulmeting &amp; AI scan), fase 2
+          (GEO/SEO-checklist) en fase 3 (Contentcreatie &amp; onpage optimalisatie) zijn beschikbaar; fase 4 volgt.
         </p>
       </div>
       <LivegangOverview />

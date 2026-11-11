@@ -4,6 +4,10 @@ Een agent = instructies + een set tools. `run_agent` laat het model tools
 aanroepen tot het een eindantwoord geeft of `max_steps` bereikt is. Tools
 krijgen een `context` mee (bv. db-sessie + scan_id) en kunnen dus alleen bij
 de data die de aanroeper toestaat.
+
+Met `output_schema` geeft de agent zijn eindantwoord als JSON volgens dat
+schema (structured output); `AgentRunResult.parsed()` levert dan de dict.
+`input` mag ook een lijst content-onderdelen zijn (tekst + afbeeldingen).
 """
 from __future__ import annotations
 
@@ -30,6 +34,9 @@ class Agent:
     max_steps: int = 8
     max_output_tokens: int = 6000
     reasoning_effort: str | None = "low"
+    # JSON-schema voor het eindantwoord (strict: alle velden verplicht,
+    # additionalProperties false). None = vrije tekst.
+    output_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -40,6 +47,16 @@ class AgentRunResult:
     output_tokens: int = 0
     model: str = ""
     stopped_reason: str = "completed"
+
+    def parsed(self) -> dict[str, Any]:
+        """Eindantwoord als dict (voor agents met `output_schema`)."""
+        try:
+            data = json.loads(self.output or "")
+        except ValueError as exc:
+            raise ValueError(f"Agent gaf geen geldig JSON-antwoord ({self.stopped_reason}).") from exc
+        if not isinstance(data, dict):
+            raise ValueError("Agent gaf geen JSON-object terug.")
+        return data
 
     def to_trace(self) -> dict[str, Any]:
         return {
@@ -60,7 +77,17 @@ def _serialize(value: Any) -> str:
     return text
 
 
-def run_agent(agent: Agent, *, user_id: str, input: str, context: Any) -> AgentRunResult:
+def text_part(text: str) -> dict[str, Any]:
+    return {"type": "input_text", "text": text}
+
+
+def image_part(url: str, detail: str = "low") -> dict[str, Any]:
+    return {"type": "input_image", "image_url": url, "detail": detail}
+
+
+def run_agent(
+    agent: Agent, *, user_id: str, input: str | list[dict[str, Any]], context: Any
+) -> AgentRunResult:
     client = _build_openai_client(user_id)
     tools_by_name = {t.name: t for t in agent.tools}
     result = AgentRunResult(output="", model=agent.model)
@@ -80,6 +107,13 @@ def run_agent(agent: Agent, *, user_id: str, input: str, context: Any) -> AgentR
             payload["tool_choice"] = "none" if last_step else "auto"
         if agent.reasoning_effort and model_supports_reasoning(agent.model):
             payload["reasoning"] = {"effort": agent.reasoning_effort}
+        if agent.output_schema is not None:
+            payload["text"] = {"format": {
+                "type": "json_schema",
+                "name": f"{agent.name}_output",
+                "schema": agent.output_schema,
+                "strict": True,
+            }}
 
         response = client.responses.create(**payload)
         usage = getattr(response, "usage", None)

@@ -1,15 +1,17 @@
 "use client"
 
-import { ChevronDown, Send } from "lucide-react"
+import { ChevronDown, ExternalLink, Loader2, Send } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Pill, SeverityBadge } from "@/components/livegang/shared"
 import {
   apiFetch,
   CATEGORY_LABELS,
+  describeMondayPush,
   ISSUE_STATUS_LABELS,
+  pushToMonday,
+  syncMondayLinks,
   type IssueGroup,
   type IssueStatus,
   type LaunchScanIssue,
@@ -20,7 +22,7 @@ type IssuesResponse = { issues: LaunchScanIssue[]; total: number; groups: IssueG
 
 const STATUS_OPTIONS: IssueStatus[] = ["open", "doorgezet", "opgelost", "genegeerd"]
 
-export function IssuesTab({ scanId }: { scanId: string }) {
+export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: string }) {
   const [data, setData] = useState<IssuesResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [issueType, setIssueType] = useState<string | null>(null)
@@ -30,6 +32,8 @@ export function IssuesTab({ scanId }: { scanId: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pushing, setPushing] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; details: string[]; boardUrl: string | null } | null>(null)
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: "2000" })
@@ -38,8 +42,11 @@ export function IssuesTab({ scanId }: { scanId: string }) {
     if (severity) params.set("severity", severity)
     if (status) params.set("status", status)
     try {
-      setData(await apiFetch<IssuesResponse>(`/scans/${scanId}/issues?${params}`))
-      setSelected(new Set())
+      const next = await apiFetch<IssuesResponse>(`/scans/${scanId}/issues?${params}`)
+      setData(next)
+      // Selectie behouden voor punten die nog in de lijst staan.
+      const visible = new Set(next.issues.map((i) => i.id))
+      setSelected((prev) => new Set([...prev].filter((id) => visible.has(id))))
       setError(null)
     } catch (err) {
       setError((err as Error).message)
@@ -49,6 +56,19 @@ export function IssuesTab({ scanId }: { scanId: string }) {
   useEffect(() => {
     void load()
   }, [load])
+
+  // In Monday verwijderde items: koppeling opruimen en de lijst verversen.
+  useEffect(() => {
+    let cancelled = false
+    void syncMondayLinks(customerId).then((cleared) => {
+      if (!cancelled && cleared > 0) void load()
+    })
+    return () => {
+      cancelled = true
+    }
+    // Alleen bij openen van de lijst, niet bij elke filterwijziging.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, scanId])
 
   const visibleGroups = useMemo(
     () => (data?.groups ?? []).filter((g) => !category || g.category === category),
@@ -72,7 +92,28 @@ export function IssuesTab({ scanId }: { scanId: string }) {
     }
   }
 
+  async function pushIssues(ids: string[]) {
+    if (!ids.length) return
+    if (ids.length > 1 && !window.confirm(`${ids.length} actiepunten als items naar Monday doorzetten?`)) return
+    setBusy(true)
+    setNotice(null)
+    setError(null)
+    setPushing(`0 / ${ids.length}`)
+    try {
+      const summary = await pushToMonday({ kind: "issues" }, ids, (done, total) => setPushing(`${done} / ${total}`))
+      setNotice({ text: describeMondayPush(summary), details: summary.messages, boardUrl: summary.board_url })
+      await load()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setPushing(null)
+      setBusy(false)
+    }
+  }
+
   const issues = data?.issues ?? []
+  // Al doorgezette punten slaat de backend over; hier tellen we wat echt nieuw is.
+  const pushable = issues.filter((i) => selected.has(i.id) && !i.external_item_id).map((i) => i.id)
   const allSelected = issues.length > 0 && issues.every((i) => selected.has(i.id))
 
   function toggle(id: string) {
@@ -158,20 +199,30 @@ export function IssuesTab({ scanId }: { scanId: string }) {
                 Markeer {ISSUE_STATUS_LABELS[s].toLowerCase()}
               </Button>
             ))}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button size="sm" variant="secondary" disabled>
-                    <Send /> Doorzetten naar Monday
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Binnenkort: actiepunten als items in het Monday-board zetten.</TooltipContent>
-            </Tooltip>
+            <Button size="sm" variant="secondary" disabled={busy || pushable.length === 0} onClick={() => void pushIssues(pushable)}>
+              {pushing ? <Loader2 className="animate-spin" /> : <Send />}
+              {pushing ? `Doorzetten… ${pushing}` : `Doorzetten naar Monday${pushable.length ? ` (${pushable.length})` : ""}`}
+            </Button>
           </div>
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {notice && (
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            <p>
+              {notice.text}{" "}
+              {notice.boardUrl && (
+                <a href={notice.boardUrl} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">
+                  Open het bord
+                </a>
+              )}
+            </p>
+            {notice.details.map((detail) => (
+              <p key={detail} className="text-xs text-red-700">{detail}</p>
+            ))}
+          </div>
+        )}
+        {!data && !error && <p className="text-sm text-muted-foreground">Laden…</p>}
 
         <ul className="divide-y rounded-lg border bg-card">
           {issues.map((issue) => {
@@ -189,6 +240,28 @@ export function IssuesTab({ scanId }: { scanId: string }) {
                     </div>
                     {issue.url && <p className="truncate text-xs text-muted-foreground">{issue.url}</p>}
                   </button>
+                  {issue.external_url ? (
+                    <a
+                      href={issue.external_url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex h-7 items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      Monday <ExternalLink className="size-3" />
+                    </a>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      disabled={busy}
+                      title="Doorzetten naar Monday"
+                      aria-label="Doorzetten naar Monday"
+                      onClick={() => void pushIssues([issue.id])}
+                    >
+                      <Send />
+                    </Button>
+                  )}
                   <select
                     value={issue.status}
                     disabled={busy}

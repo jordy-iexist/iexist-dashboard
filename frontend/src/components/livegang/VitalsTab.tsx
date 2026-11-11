@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { CwvBadge } from "@/components/livegang/shared"
 import { apiFetch, type CwvRating, type LaunchScanPage } from "@/lib/launch-checklist"
+import { usePolling } from "@/hooks/use-polling"
 import { cn } from "@/lib/utils"
 
 const THRESHOLDS: Record<string, [number, number]> = {
@@ -43,19 +44,23 @@ export function VitalsTab({ scanId, measuring }: { scanId: string; measuring: bo
   const [pages, setPages] = useState<LaunchScanPage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const fetchPages = useCallback(
+    () => apiFetch<{ pages: LaunchScanPage[] }>(`/scans/${scanId}/pages?filter=cwv_measured&limit=500`),
+    [scanId]
+  )
+
   useEffect(() => {
     let cancelled = false
-    const load = () =>
-      apiFetch<{ pages: LaunchScanPage[] }>(`/scans/${scanId}/pages?filter=cwv_measured&limit=500`)
-        .then((r) => !cancelled && setPages(r.pages))
-        .catch((err: Error) => !cancelled && setError(err.message))
-    load()
-    const timer = measuring ? setInterval(load, 5000) : null
+    fetchPages()
+      .then((r) => !cancelled && setPages(r.pages))
+      .catch((err: Error) => !cancelled && setError(err.message))
     return () => {
       cancelled = true
-      if (timer) clearInterval(timer)
     }
-  }, [scanId, measuring])
+  }, [fetchPages])
+
+  // Tijdens het meten elke 5 s verversen.
+  usePolling(async () => setPages((await fetchPages()).pages), measuring, 5000)
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!pages) return <p className="text-sm text-muted-foreground">Laden…</p>
