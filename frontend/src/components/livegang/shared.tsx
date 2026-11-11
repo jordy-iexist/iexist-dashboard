@@ -53,7 +53,12 @@ export function HttpStatusBadge({ status, error }: { status: number | null; erro
   return <Pill tone={tone}>{status}</Pill>
 }
 
-export function StatTile({
+/** Compacte cijfergroep: één rand eromheen en lijnen tussen de cellen (gap-px op bg-border). */
+export function StatGrid({ className, children }: { className?: string; children: React.ReactNode }) {
+  return <div className={cn("grid gap-px overflow-hidden rounded-lg border bg-border", className)}>{children}</div>
+}
+
+export function CompactStat({
   label,
   value,
   hint,
@@ -65,11 +70,13 @@ export function StatTile({
   tone?: "good" | "warn" | "bad"
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
+    <div className="min-w-0 bg-card px-3 py-2">
+      <p className="truncate text-xs text-muted-foreground" title={label}>
+        {label}
+      </p>
       <p
         className={cn(
-          "mt-1 text-2xl font-bold tracking-wide",
+          "text-xl font-bold tracking-wide",
           tone === "good" && "text-green-700 dark:text-green-400",
           tone === "warn" && "text-amber-700 dark:text-amber-400",
           tone === "bad" && "text-red-700 dark:text-red-400",
@@ -78,16 +85,20 @@ export function StatTile({
       >
         {value}
       </p>
-      {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+      {hint && (
+        <p className="truncate text-[11px] text-muted-foreground" title={hint}>
+          {hint}
+        </p>
+      )}
     </div>
   )
 }
 
 export const PHASES = [
-  { number: 1, title: "Nulmeting & AI scan", available: true },
-  { number: 2, title: "GEO/SEO-checklist", available: true },
-  { number: 3, title: "Content & onpage", available: true },
-  { number: 4, title: "Fase 4", available: false },
+  { number: 1, title: "Nulmeting & AI scan", description: "Inventaris, Core Web Vitals en AI-vindbaarheid", available: true },
+  { number: 2, title: "GEO/SEO-checklist", description: "Schema, entiteit-signalen en AI-toegang", available: true },
+  { number: 3, title: "Content & onpage", description: "Meta, koppen en herschrijfvoorstellen", available: true },
+  { number: 4, title: "Volgende fase", description: "Komt binnenkort beschikbaar", available: false },
 ]
 
 export function PhaseStepper({
@@ -102,44 +113,70 @@ export function PhaseStepper({
   onSelect?: (phase: number) => void
 }) {
   return (
-    <ol className="grid gap-2 sm:grid-cols-4">
-      {PHASES.map((phase) => {
-        const isActive = phase.number === active
-        const isDone = completed[phase.number] ?? false
-        const lockReason = phase.available ? locked[phase.number] : "Binnenkort"
-        const clickable = phase.available && !lockReason && !!onSelect
-        return (
-          <li key={phase.number}>
-            <button
-              type="button"
-              disabled={!clickable}
-              onClick={() => onSelect?.(phase.number)}
-              title={lockReason}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-                isActive ? "border-primary/60 bg-primary/5" : clickable ? "hover:bg-muted/50" : "opacity-60",
-                !clickable && "cursor-default"
-              )}
-            >
-              <span
+    <nav aria-label="Fases">
+      <ol className="grid gap-1 p-2 sm:grid-cols-4">
+        {PHASES.map((phase, index) => {
+          const isActive = phase.number === active
+          const isDone = completed[phase.number] ?? false
+          const lockReason = phase.available ? locked[phase.number] : undefined
+          const clickable = phase.available && !lockReason && !!onSelect
+          const isLast = index === PHASES.length - 1
+          const status: { label: string; tone: Tone } = !phase.available
+            ? { label: "Binnenkort", tone: "muted" }
+            : isDone
+              ? { label: "Afgerond", tone: "green" }
+              : lockReason
+                ? { label: "Vergrendeld", tone: "muted" }
+                : isActive
+                  ? { label: "Bezig", tone: "blue" }
+                  : { label: "Open", tone: "muted" }
+          return (
+            <li key={phase.number} className="min-w-0">
+              <button
+                type="button"
+                disabled={!clickable}
+                onClick={() => onSelect?.(phase.number)}
+                title={lockReason}
+                aria-current={isActive ? "step" : undefined}
                 className={cn(
-                  "flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-bold",
-                  isDone && "bg-green-600 text-white",
-                  !isDone && isActive && "bg-primary text-primary-foreground",
-                  !isDone && !isActive && "bg-muted text-muted-foreground"
+                  "relative flex h-full w-full gap-3 rounded-md p-3 text-left transition-colors sm:flex-col sm:gap-3",
+                  isActive ? "bg-primary/5" : clickable ? "hover:bg-muted/60" : "cursor-default",
+                  !phase.available || lockReason ? "opacity-60" : undefined
                 )}
               >
-                {isDone ? <Check className="size-4" /> : lockReason ? <Lock className="size-3.5" /> : phase.number}
-              </span>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Fase {phase.number}</p>
-                <p className="truncate text-sm font-medium">{phase.available ? phase.title : "Binnenkort"}</p>
-              </div>
-            </button>
-          </li>
-        )
-      })}
-    </ol>
+                <span className="flex items-center sm:w-full">
+                  <span
+                    className={cn(
+                      "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-4 ring-card",
+                      isDone && "bg-green-600 text-white",
+                      !isDone && isActive && "bg-primary text-primary-foreground",
+                      !isDone && !isActive && "border bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {isDone ? <Check className="size-4" /> : lockReason || !phase.available ? <Lock className="size-3.5" /> : phase.number}
+                  </span>
+                  {!isLast && (
+                    <span
+                      aria-hidden
+                      className={cn("ml-3 hidden h-0.5 flex-1 rounded-full sm:block", isDone ? "bg-green-600/70" : "bg-border")}
+                    />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 space-y-1">
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Fase {phase.number}</span>
+                    <Pill tone={status.tone}>{status.label}</Pill>
+                  </span>
+                  <span className={cn("block text-sm leading-snug", isActive ? "font-semibold" : "font-medium")}>{phase.title}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{lockReason ?? phase.description}</span>
+                </span>
+                {isActive && <span aria-hidden className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary" />}
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }
 
@@ -195,7 +232,16 @@ export function isActive(status: ScanStatus) {
   return ACTIVE_STATUSES.includes(status)
 }
 
-export function ScanProgress({ scan, steps = PHASE1_STEPS }: { scan: LaunchScanDetail; steps?: ScanStatus[] }) {
+export function ScanProgress({
+  scan,
+  steps = PHASE1_STEPS,
+  bare = false,
+}: {
+  scan: LaunchScanDetail
+  steps?: ScanStatus[]
+  /** Zonder eigen kaartrand, voor gebruik binnen een PanelRow. */
+  bare?: boolean
+}) {
   const currentIndex = steps.indexOf(scan.status)
   let value = 0
   let max = 0
@@ -219,7 +265,7 @@ export function ScanProgress({ scan, steps = PHASE1_STEPS }: { scan: LaunchScanD
   }
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4">
+    <div className={cn("space-y-3", !bare && "rounded-lg border bg-card p-4")}>
       <div className="flex items-center gap-2 text-sm font-medium">
         <Loader2 className="size-4 animate-spin text-primary" />
         {STATUS_LABELS[scan.status]}
@@ -243,3 +289,81 @@ export function ScanProgress({ scan, steps = PHASE1_STEPS }: { scan: LaunchScanD
   )
 }
 
+/** Blok per fase (geen kaart): kop met titel/omschrijving, daaronder rijen (PanelRow) en eventueel tabs (PanelTabs). */
+export function PhasePanel({
+  title,
+  description,
+  aside,
+  children,
+}: {
+  title: React.ReactNode
+  description: React.ReactNode
+  aside?: React.ReactNode
+  children?: React.ReactNode
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="min-w-0 flex-1 space-y-1">
+          <h2 className="text-lg font-bold tracking-wide text-primary">{title}</h2>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        {aside}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+const ROW_TONES = {
+  default: "",
+  muted: "rounded-lg bg-muted/50 px-4 py-3",
+  warning: "rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-900/20 dark:text-amber-200",
+  error: "rounded-md border border-red-300 px-3 py-2 text-red-700 dark:text-red-300",
+} as const
+
+export function PanelRow({
+  tone = "default",
+  className,
+  children,
+}: {
+  tone?: keyof typeof ROW_TONES
+  className?: string
+  children: React.ReactNode
+}) {
+  return <div className={cn("text-sm", ROW_TONES[tone], className)}>{children}</div>
+}
+
+export function PanelTabs<K extends string>({
+  tabs,
+  active,
+  onSelect,
+}: {
+  tabs: { key: K; label: React.ReactNode; disabled?: boolean }[]
+  active: K
+  onSelect: (key: K) => void
+}) {
+  return (
+    <div role="tablist" className="flex gap-1 overflow-x-auto border-b">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          aria-selected={active === t.key}
+          disabled={t.disabled}
+          onClick={() => onSelect(t.key)}
+          className={cn(
+            "-mb-px whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors",
+            active === t.key
+              ? "border-primary font-medium text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+            t.disabled && "cursor-not-allowed opacity-50 hover:text-muted-foreground"
+          )}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}

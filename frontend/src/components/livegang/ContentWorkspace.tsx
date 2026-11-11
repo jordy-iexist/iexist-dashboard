@@ -13,11 +13,13 @@ import { IssuesTab } from "@/components/livegang/IssuesTab"
 import {
   CONTENT_STEPS,
   isActive,
+  PanelRow,
+  PanelTabs,
   PercentRing,
+  PhasePanel,
   Pill,
   ScanProgress,
   ScanStatusBadge,
-  StatTile,
 } from "@/components/livegang/shared"
 import {
   API_BASE,
@@ -32,7 +34,6 @@ import {
 } from "@/lib/launch-checklist"
 import { usePolling } from "@/hooks/use-polling"
 import { readUrlChoice, writeUrlParams } from "@/lib/url-state"
-import { cn } from "@/lib/utils"
 
 const TABS = [
   { key: "checklist", label: "Checklist" },
@@ -222,131 +223,126 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
   const usage = report?.agent_trace?.analysis_usage
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-4 rounded-lg border bg-card p-4 sm:p-6">
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1 space-y-1">
-            <h2 className="text-lg font-bold tracking-wide text-primary">Fase 3 · Contentcreatie &amp; onpage optimalisatie</h2>
-            <p className="text-sm text-muted-foreground">
-              Stap 1: de scan haalt alle pagina&apos;s opnieuw op en controleert meta titels en descriptions (tekens en
-              pixels), koppen, scanbaarheid, FAQ, afbeeldingen, interne links en of de bevindingen uit fase 1 zijn
-              verwerkt. Stap 2: jij kiest de pagina&apos;s waarvoor de AI-agents concrete herschrijfvoorstellen maken en
-              krijgt voorstellen voor nieuwe content.
-            </p>
-          </div>
-          {checklist && (
+    <div className="space-y-4">
+      <PhasePanel
+        title="Fase 3 · Contentcreatie & onpage optimalisatie"
+        description={
+          <>
+            Stap 1: de scan haalt alle pagina&apos;s opnieuw op en controleert meta titels en descriptions (tekens en
+            pixels), koppen, scanbaarheid, FAQ, afbeeldingen, interne links en of de bevindingen uit fase 1 zijn
+            verwerkt. Stap 2: jij kiest de pagina&apos;s waarvoor de AI-agents concrete herschrijfvoorstellen maken en
+            krijgt voorstellen voor nieuwe content.
+          </>
+        }
+        aside={
+          checklist && (
             <div className="flex items-center gap-3">
               <PercentRing percent={checklist.percent} size={64} />
               <div className="text-sm">
                 <p className="font-medium">
-                  {checklist.done} / {checklist.total} afgerond
+                  {checklist.done} / {checklist.total}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  {scan ? `Gescand ${formatDateTime(scan.completed_at ?? scan.created_at)}` : "Nog niet gescand"}
-                </p>
+                <p className="text-xs text-muted-foreground">punten afgerond</p>
               </div>
             </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-end gap-3">
-          <Button onClick={() => void startScan()} disabled={busy || running}>
-            {busy ? <Loader2 className="animate-spin" /> : <Play />}
-            {scanning ? "Scan loopt…" : scan ? "Opnieuw scannen" : "Start content-scan"}
-          </Button>
-          <div className="ml-auto flex flex-wrap gap-2">
-            {scan && (
+          )
+        }
+      >
+        <PanelRow className="space-y-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {latest ? (
               <>
-                <Button size="sm" variant="outline" asChild>
-                  <a href={`${API_BASE}/scans/${scan.id}/export?kind=checklist`}>
-                    <Download /> Checklist (CSV)
-                  </a>
-                </Button>
-                <Button size="sm" variant="outline" asChild>
-                  <a href={`${API_BASE}/scans/${scan.id}/export?kind=suggestions`}>
-                    <Download /> Voorstellen (CSV)
-                  </a>
-                </Button>
+                <ScanStatusBadge status={latest.status} />
+                <span className="text-muted-foreground">
+                  {analysing
+                    ? "AI-analyse van de geselecteerde pagina's"
+                    : latest.status === "completed"
+                      ? `Gescand ${formatDateTime(latest.completed_at ?? latest.created_at)}`
+                      : `Gestart ${formatDateTime(latest.created_at)}`}
+                </span>
               </>
+            ) : (
+              <span className="text-muted-foreground">Nog niet gescand.</span>
             )}
-            <Button size="sm" variant="outline" asChild>
-              <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=3`} target="_blank">
-                <Printer /> Printversie / PDF
-              </Link>
-            </Button>
-          </div>
-        </div>
-        {error && <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>}
-      </section>
-
-      {latest && (running || latest.status === "failed" || latest.status === "canceled") && (
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <ScanStatusBadge status={latest.status} />
-            <span className="text-sm text-muted-foreground">
-              {analysing ? "AI-analyse van de geselecteerde pagina's" : `Gestart ${formatDateTime(latest.created_at)}`}
-            </span>
-            <div className="ml-auto flex gap-2">
-              {running ? (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {latest && running && (
                 <Button size="sm" variant="ghost" onClick={() => void cancelScan()} disabled={busy}>
                   <Square /> {analysing ? "Analyse stoppen" : "Annuleren"}
                 </Button>
-              ) : (
+              )}
+              {latest && (latest.status === "failed" || latest.status === "canceled") && (
                 <Button size="sm" variant="ghost" onClick={() => void deleteScan()} disabled={busy}>
                   <Trash2 /> Verwijderen
                 </Button>
               )}
+              {scan && (
+                <>
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={`${API_BASE}/scans/${scan.id}/export?kind=checklist`}>
+                      <Download /> Checklist (CSV)
+                    </a>
+                  </Button>
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={`${API_BASE}/scans/${scan.id}/export?kind=suggestions`}>
+                      <Download /> Voorstellen (CSV)
+                    </a>
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=3`} target="_blank">
+                  <Printer /> Printversie / PDF
+                </Link>
+              </Button>
             </div>
           </div>
-          {running && <ScanProgress scan={latest} steps={analysing ? ANALYSIS_STEPS : CONTENT_STEPS} />}
-          {latest.status === "failed" && (
-            <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">
-              Scan mislukt: {latest.error_message ?? "onbekende fout"}
-            </p>
+          {latest && running && (
+            <ScanProgress scan={latest} steps={analysing ? ANALYSIS_STEPS : CONTENT_STEPS} bare />
           )}
-        </section>
-      )}
+          {latest?.status === "failed" && (
+            <p className="text-red-700 dark:text-red-400">Scan mislukt: {latest.error_message ?? "onbekende fout"}</p>
+          )}
+        </PanelRow>
 
-      {scan && summary && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile label="Pagina's gescand" value={summary.pages_fetched} />
-          <StatTile label="Met verbeterpunten" value={summary.pages_with_problems} />
-          <StatTile label="Door AI geanalyseerd" value={summary.pages_analysed} />
-          <StatTile label="Open AI-voorstellen" value={summary.suggestions_open} />
-        </div>
-      )}
+        {scan && summary && (
+          <div className="grid grid-cols-2 gap-y-3 sm:grid-cols-4">
+            <MiniStat label="Pagina's gescand" value={summary.pages_fetched} />
+            <MiniStat label="Met verbeterpunten" value={summary.pages_with_problems} />
+            <MiniStat label="Door AI geanalyseerd" value={summary.pages_analysed} />
+            <MiniStat label="Open AI-voorstellen" value={summary.suggestions_open} />
+          </div>
+        )}
 
-      {report?.warnings && report.warnings.length > 0 && (
-        <ul className="space-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
-          {report.warnings.map((w, index) => (
-            <li key={`${index}-${w}`}>{w}</li>
-          ))}
-        </ul>
-      )}
+        <PanelRow tone="muted">
+          <Button onClick={() => void startScan()} disabled={busy || running}>
+            {busy ? <Loader2 className="animate-spin" /> : <Play />}
+            {scanning ? "Scan loopt…" : scan ? "Opnieuw scannen" : "Start content-scan"}
+          </Button>
+        </PanelRow>
+
+        {report?.warnings && report.warnings.length > 0 && (
+          <PanelRow tone="warning">
+            <ul className="space-y-1 text-xs">
+              {report.warnings.map((w, index) => (
+                <li key={`${index}-${w}`}>{w}</li>
+              ))}
+            </ul>
+          </PanelRow>
+        )}
+
+        {error && <PanelRow tone="error">{error}</PanelRow>}
+
+        {checklist && (
+          <PanelTabs
+            tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !scan }))}
+            active={tab}
+            onSelect={setTab}
+          />
+        )}
+      </PhasePanel>
 
       {checklist && (
         <section className="space-y-4">
-          <div className="flex gap-1 overflow-x-auto border-b">
-            {TABS.map((t) => {
-              const disabled = t.key !== "checklist" && !scan
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setTab(t.key)}
-                  className={cn(
-                    "whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors",
-                    tab === t.key ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-                    disabled && "cursor-not-allowed opacity-50 hover:text-muted-foreground"
-                  )}
-                >
-                  {t.label}
-                </button>
-              )
-            })}
-          </div>
-
           {tab === "checklist" && (
             <>
               {!scan && (
@@ -414,6 +410,16 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
           )}
         </section>
       )}
+    </div>
+  )
+}
+
+/** Cijfer in een rij; scheidingslijn links, behalve aan het begin van een rij (2 kolommen mobiel, 4 vanaf sm). */
+function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="border-l px-4 py-1 max-sm:odd:border-l-0 max-sm:odd:pl-0 sm:first:border-l-0 sm:first:pl-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-xl font-bold tracking-wide text-primary">{value}</p>
     </div>
   )
 }

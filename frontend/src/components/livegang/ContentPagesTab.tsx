@@ -1,7 +1,7 @@
 "use client"
 
 import { ChevronDown, ExternalLink, Loader2, Pencil, Sparkles, X } from "lucide-react"
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,6 +16,7 @@ import {
   PAGE_TYPE_LABELS,
   updatePageKeyword,
   type AnalysisStatus,
+  type AutoStatus,
   type ContentPage,
   type ContentPageDetail,
 } from "@/lib/launch-checklist"
@@ -43,6 +44,15 @@ function hasItem(page: ContentPage, key: string) {
   return status === "error" || status === "warning" || page.suggestion_items.includes(key)
 }
 
+const STATUS_STRIPE: Record<AutoStatus, string> = {
+  error: "border-l-red-500",
+  warning: "border-l-amber-500",
+  ok: "border-l-green-500",
+  info: "border-l-blue-500",
+  nvt: "border-l-muted-foreground/30",
+  unknown: "border-l-muted-foreground/30",
+}
+
 function AnalysisBadge({ status }: { status: AnalysisStatus }) {
   if (status === "none") return <span className="text-xs text-muted-foreground">—</span>
   const tone = status === "done" ? "green" : status === "failed" ? "red" : "blue"
@@ -51,6 +61,23 @@ function AnalysisBadge({ status }: { status: AnalysisStatus }) {
       {status === "running" && <Loader2 className="mr-1 inline size-3 animate-spin" />}
       {ANALYSIS_STATUS_LABELS[status]}
     </Pill>
+  )
+}
+
+/** Compacte AI-status + open voorstellen voor de paginalijst. */
+function PageAiStatus({ page }: { page: ContentPage }) {
+  if (page.analysis_status === "running" || page.analysis_status === "queued")
+    return <Loader2 className="size-3 shrink-0 animate-spin text-blue-600" aria-label="Analyse loopt" />
+  if (page.analysis_status === "failed") return <span className="shrink-0 text-red-700">mislukt</span>
+  if (page.analysis_status !== "done") return null
+  return (
+    <span className="shrink-0">
+      {page.suggestions_open > 0 ? (
+        <span className="font-medium text-blue-700 dark:text-blue-400">{page.suggestions_open} open</span>
+      ) : (
+        <span className="text-green-700 dark:text-green-400">✓ klaar</span>
+      )}
+    </span>
   )
 }
 
@@ -172,7 +199,7 @@ function KeywordEditor({
   )
 }
 
-/** Uitgeklapte pagina: bevindingen van de regelcontrole + AI-voorstellen per checklistpunt. */
+/** Paneelinhoud van een pagina: bevindingen van de regelcontrole + AI-voorstellen per checklistpunt. */
 function PageDetail({
   scanId,
   page,
@@ -189,7 +216,6 @@ function PageDetail({
 }) {
   const [detail, setDetail] = useState<ContentPageDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set())
   const [showFine, setShowFine] = useState(false)
 
   // Opnieuw laden zodra de analyse van deze pagina klaar is.
@@ -207,8 +233,8 @@ function PageDetail({
     }
   }, [scanId, page.id, page.analysis_status, page.analyzed_at])
 
-  if (error) return <p className="text-sm text-red-700">{error}</p>
-  if (!detail) return <p className="text-sm text-muted-foreground">Pagina laden…</p>
+  if (error) return <p className="px-5 py-4 text-sm text-red-700">{error}</p>
+  if (!detail) return <p className="px-5 py-4 text-sm text-muted-foreground">Pagina laden…</p>
 
   // Volgorde van de checklist aanhouden; punten die n.v.t. zijn weglaten.
   const keys = Object.keys(itemLabels).filter(
@@ -221,122 +247,115 @@ function PageDetail({
   const todo = keys.filter(needsWork)
   const fine = keys.filter((key) => !needsWork(key))
 
-  function toggle(key: string) {
-    setOpenKeys((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
   function renderItem(key: string) {
     const check = detail!.checks[key]
     const suggestions = detail!.suggestions.filter((s) => s.item_key === key)
     const openCount = suggestions.filter((s) => s.status === "open").length
-    const isOpen = openKeys.has(key) || key === focusKey
     return (
       <li key={key}>
-        <button
-          type="button"
-          onClick={() => toggle(key)}
-          aria-expanded={isOpen}
-          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/40"
-        >
-          <span className="w-24 shrink-0">
+        {/* Kopbalk per actiepunt; de streep links volgt de status. */}
+        <div className={cn("flex items-start gap-3 border-y border-l-4 bg-muted/50 px-5 py-2.5", STATUS_STRIPE[check.status])}>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{itemLabels[key]}</p>
+            {check.message && <p className="text-xs text-muted-foreground">{check.message}</p>}
+          </div>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {suggestions.length > 0 && (
+              <Pill tone={openCount ? "blue" : "green"}>
+                {openCount ? `${openCount} ${openCount === 1 ? "voorstel" : "voorstellen"}` : "Afgehandeld"}
+              </Pill>
+            )}
             <AutoStatusBadge status={check.status} />
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{itemLabels[key]}</span>
-            <span className={cn("block text-xs text-muted-foreground", !isOpen && "truncate")}>{check.message}</span>
-          </span>
-          {suggestions.length > 0 && (
-            <Pill tone={openCount ? "blue" : "green"}>
-              {openCount ? `${openCount} ${openCount === 1 ? "voorstel" : "voorstellen"}` : "Afgehandeld"}
-            </Pill>
-          )}
-          <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
-        </button>
-        {isOpen &&
-          (suggestions.length > 0 ? (
-            <ul className="divide-y border-t bg-background/60 pl-6">
-              {suggestions.map((s) => (
-                <SuggestionRow
-                  key={s.id}
-                  suggestion={s}
-                  defaultOpen={suggestions.length === 1}
-                  onChanged={(next) => {
-                    setDetail((current) =>
-                      current
-                        ? { ...current, suggestions: current.suggestions.map((x) => (x.id === next.id ? next : x)) }
-                        : current
-                    )
-                    onChanged()
-                  }}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="border-t px-3 py-2 pl-9 text-xs text-muted-foreground">
+        </div>
+        {suggestions.length > 0 ? (
+          <ul className="divide-y divide-dashed px-5 pb-2">
+            {suggestions.map((s) => (
+              <SuggestionRow
+                key={s.id}
+                flat
+                suggestion={s}
+                onChanged={(next) => {
+                  setDetail((current) =>
+                    current
+                      ? { ...current, suggestions: current.suggestions.map((x) => (x.id === next.id ? next : x)) }
+                      : current
+                  )
+                  onChanged()
+                }}
+              />
+            ))}
+          </ul>
+        ) : (
+          needsWork(key) && (
+            <p className="px-5 py-3 text-xs text-muted-foreground">
               {detail!.analysis_status === "done"
                 ? "Geen AI-voorstellen voor dit punt."
                 : "Nog geen AI-voorstellen: selecteer deze pagina en start de analyse."}
             </p>
-          ))}
+          )
+        )}
       </li>
     )
   }
 
   return (
-    <div className="space-y-3">
-      <dl className="grid gap-x-6 gap-y-1 rounded-md border bg-card px-3 py-2 text-sm sm:grid-cols-[auto_1fr]">
-        <dt className="text-muted-foreground">Meta titel</dt>
-        <dd className="min-w-0 break-words">{detail.title || "—"}</dd>
-        <dt className="text-muted-foreground">Meta description</dt>
-        <dd className="min-w-0 break-words">{detail.meta_description || "—"}</dd>
-        <dt className="text-muted-foreground">Focuszoekwoord</dt>
-        <dd>
-          <KeywordEditor
-            scanId={scanId}
-            detail={detail}
-            onSaved={(next) => {
-              setDetail(next)
-              onChanged()
-            }}
-          />
-        </dd>
-        {detail.readability && (
-          <>
-            <dt className="text-muted-foreground">Leesbaarheid</dt>
-            <dd>{detail.readability}</dd>
-          </>
-        )}
-        <dt className="text-muted-foreground">Pagina</dt>
-        <dd className="text-xs text-muted-foreground">
-          {detail.word_count ?? 0} woorden · {detail.images_total} afbeeldingen · {detail.links_total} interne links
-          {detail.analyzed_at ? ` · geanalyseerd ${formatDateTime(detail.analyzed_at)}` : ""}
-        </dd>
-      </dl>
-      {detail.analysis_error && <p className="text-xs text-red-700">AI-analyse: {detail.analysis_error}</p>}
+    <div className="divide-y">
+      <section className="px-5 py-4">
+        <dl className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
+          <dt className="text-muted-foreground">Meta titel</dt>
+          <dd className="min-w-0 break-words">{detail.title || "—"}</dd>
+          <dt className="text-muted-foreground">Meta description</dt>
+          <dd className="min-w-0 break-words">{detail.meta_description || "—"}</dd>
+          <dt className="text-muted-foreground">Focuszoekwoord</dt>
+          <dd>
+            <KeywordEditor
+              scanId={scanId}
+              detail={detail}
+              onSaved={(next) => {
+                setDetail(next)
+                onChanged()
+              }}
+            />
+          </dd>
+          {detail.readability && (
+            <>
+              <dt className="text-muted-foreground">Leesbaarheid</dt>
+              <dd>{detail.readability}</dd>
+            </>
+          )}
+          <dt className="text-muted-foreground">Pagina</dt>
+          <dd className="text-xs text-muted-foreground sm:pt-0.5">
+            {detail.word_count ?? 0} woorden · {detail.images_total} afbeeldingen · {detail.links_total} interne links
+            {detail.analyzed_at ? ` · geanalyseerd ${formatDateTime(detail.analyzed_at)}` : ""}
+          </dd>
+        </dl>
+        {detail.analysis_error && <p className="mt-2 text-xs text-red-700">AI-analyse: {detail.analysis_error}</p>}
+      </section>
 
-      {todo.length > 0 ? (
-        <ul className="divide-y overflow-hidden rounded-md border bg-card">{todo.map(renderItem)}</ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">Geen verbeterpunten of voorstellen voor deze pagina.</p>
-      )}
+      <section className="pt-4">
+        <p className="px-5 pb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Actiepunten ({todo.length})
+        </p>
+        {todo.length > 0 ? (
+          <ul className="space-y-4 pb-4">{todo.map(renderItem)}</ul>
+        ) : (
+          <p className="px-5 pb-4 text-sm text-muted-foreground">Geen verbeterpunten of voorstellen voor deze pagina.</p>
+        )}
+      </section>
 
       {fine.length > 0 && (
-        <div>
+        <section className="px-5 py-3">
           <button
             type="button"
             onClick={() => setShowFine(!showFine)}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <ChevronDown className={cn("size-3.5 transition-transform", showFine && "rotate-180")} />
+            <ChevronDown className={cn("size-3.5 transition-transform", (showFine || focusKey) && "rotate-180")} />
             {fine.length} {fine.length === 1 ? "punt" : "punten"} zonder verbeterpunt
           </button>
-          {showFine && <ul className="mt-2 divide-y overflow-hidden rounded-md border bg-card">{fine.map(renderItem)}</ul>}
-        </div>
+          {(showFine || focusKey) && <ul className="-mx-5 mt-3 space-y-2">{fine.map(renderItem)}</ul>}
+        </section>
       )}
     </div>
   )
@@ -402,6 +421,9 @@ export function ContentPagesTab({
     () => Object.fromEntries(FILTERS.map((f) => [f.key, (pages ?? []).filter((p) => matches(p, f.key)).length])) as Record<Filter, number>,
     [pages]
   )
+
+  // Rechts staat altijd een pagina: de aangeklikte, anders de eerste uit de lijst.
+  const openPage = visible.find((p) => p.id === open) ?? visible[0] ?? null
 
   const tooMany = selected.size > maxPages
   const allVisibleSelected = visible.length > 0 && visible.every((p) => selected.has(p.id))
@@ -526,109 +548,101 @@ export function ContentPagesTab({
       )}
       {error && <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <div className="overflow-x-auto rounded-lg border bg-card">
-        {/* Vaste kolombreedtes: lange teksten kappen af of breken af in plaats van de tabel op te rekken. */}
-        <table className="w-full min-w-[760px] table-fixed text-sm">
-          <thead className="border-b text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="w-10 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={allVisibleSelected}
-                  onChange={toggleVisible}
-                  aria-label="Selecteer zichtbare pagina's"
-                />
-              </th>
-              <th className="px-3 py-2 font-medium">Pagina</th>
-              <th className="w-36 px-3 py-2 font-medium">Type</th>
-              <th className="w-24 px-3 py-2 font-medium">Problemen</th>
-              <th className="w-36 px-3 py-2 font-medium">AI-analyse</th>
-              <th className="w-28 px-3 py-2 font-medium">Voorstellen</th>
-              <th className="w-20 px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {visible.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
-                  Geen pagina&apos;s voor dit filter.
-                </td>
-              </tr>
-            )}
-            {visible.map((page) => {
-              const isOpen = open === page.id
-              return (
-                <Fragment key={page.id}>
-                  <tr className={cn("align-top", isOpen && "bg-muted/30")}>
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(page.id)}
-                        onChange={() => toggle(page.id)}
-                        aria-label={`Selecteer ${page.path}`}
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <button type="button" className="block w-full text-left" onClick={() => setOpen(isOpen ? null : page.id)}>
-                        <span className="block truncate font-medium">{page.path}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{page.title || "Geen meta titel"}</span>
-                      </button>
-                    </td>
-                    <td className="truncate px-3 py-2 text-xs text-muted-foreground">
-                      {PAGE_TYPE_LABELS[page.page_type ?? "overig"] ?? page.page_type}
-                    </td>
-                    <td className="px-3 py-2">
-                      {page.problem_count > 0 ? (
-                        <Pill tone={page.problem_count >= 4 ? "red" : "amber"}>{page.problem_count}</Pill>
-                      ) : (
-                        <Pill tone="green">0</Pill>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <AnalysisBadge status={page.analysis_status} />
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-xs">
-                      {page.suggestions_total > 0 ? (
-                        <span>
-                          <span className="font-medium">{page.suggestions_open}</span> open
-                          <span className="text-muted-foreground"> / {page.suggestions_total}</span>
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <a href={page.url} target="_blank" rel="noreferrer noopener" aria-label="Open pagina" className="text-muted-foreground hover:text-foreground">
-                          <ExternalLink className="size-4" />
-                        </a>
-                        <button type="button" aria-label="Details" onClick={() => setOpen(isOpen ? null : page.id)}>
-                          <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {isOpen && (
-                    <tr className="bg-muted/30">
-                      <td colSpan={7} className="min-w-0 px-4 pb-4 pt-1 [overflow-wrap:anywhere]">
-                        <PageDetail
-                          scanId={scanId}
-                          page={page}
-                          itemLabels={itemLabels}
-                          focusKey={itemFilter}
-                          onChanged={() => {
-                            void load()
-                            void onChanged()
-                          }}
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        {/* Links: pagina's als tabs */}
+        <aside className="overflow-hidden rounded-lg border bg-card lg:sticky lg:top-4 lg:self-start">
+          <label className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={toggleVisible}
+              aria-label="Selecteer zichtbare pagina's"
+            />
+            {selected.size > 0 ? `${selected.size} geselecteerd voor analyse` : `${visible.length} pagina's`}
+          </label>
+          {visible.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">Geen pagina&apos;s voor dit filter.</p>
+          ) : (
+            <ul className="max-h-[70vh] divide-y overflow-y-auto">
+              {visible.map((page) => {
+                const active = openPage?.id === page.id
+                return (
+                  <li
+                    key={page.id}
+                    className={cn(
+                      "flex items-start gap-2 border-l-2 px-3 py-2",
+                      active ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-muted/50"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={selected.has(page.id)}
+                      onChange={() => toggle(page.id)}
+                      aria-label={`Selecteer ${page.path}`}
+                    />
+                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(page.id)}>
+                      <span className="flex items-center gap-2">
+                        <span className={cn("min-w-0 flex-1 truncate text-sm", active && "font-medium")}>{page.path}</span>
+                        <span
+                          title={`${page.problem_count} problemen`}
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            page.problem_count >= 4 ? "bg-red-500" : page.problem_count > 0 ? "bg-amber-500" : "bg-green-500"
+                          )}
                         />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
+                        <span className="w-4 shrink-0 text-right text-xs text-muted-foreground">{page.problem_count}</span>
+                      </span>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0 flex-1 truncate">{page.title || "Geen meta titel"}</span>
+                        <PageAiStatus page={page} />
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </aside>
+
+        {/* Rechts: alle punten van de gekozen pagina */}
+        <section className="min-w-0 overflow-hidden rounded-lg border bg-card">
+          {openPage ? (
+            <>
+              <header className="space-y-1 border-b px-5 py-4">
+                <h3 className="truncate font-semibold">{openPage.path}</h3>
+                <p className="truncate text-sm text-muted-foreground">{openPage.title || "Geen meta titel"}</p>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <AnalysisBadge status={openPage.analysis_status} />
+                  <span>{PAGE_TYPE_LABELS[openPage.page_type ?? "overig"] ?? openPage.page_type}</span>
+                  <a
+                    href={openPage.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                  >
+                    Open pagina <ExternalLink className="size-3" />
+                  </a>
+                </div>
+              </header>
+              <div className="[overflow-wrap:anywhere]">
+                <PageDetail
+                  key={openPage.id}
+                  scanId={scanId}
+                  page={openPage}
+                  itemLabels={itemLabels}
+                  focusKey={itemFilter}
+                  onChanged={() => {
+                    void load()
+                    void onChanged()
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <p className="px-5 py-10 text-center text-sm text-muted-foreground">Kies links een pagina.</p>
+          )}
+        </section>
       </div>
     </div>
   )

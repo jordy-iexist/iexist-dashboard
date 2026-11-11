@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown"
 import { Bot, ChevronDown, TriangleAlert } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { StatTile } from "@/components/livegang/shared"
+import { CompactStat, StatGrid } from "@/components/livegang/shared"
 import type { LaunchScanDetail } from "@/lib/launch-checklist"
 
 function pct(part: number, total: number) {
@@ -16,7 +16,7 @@ export function OverviewTab({ scan }: { scan: LaunchScanDetail }) {
   const trace = scan.agent_trace
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {scan.warnings && scan.warnings.length > 0 && (
         <div className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
           {scan.warnings.map((w) => (
@@ -30,75 +30,72 @@ export function OverviewTab({ scan }: { scan: LaunchScanDetail }) {
 
       {stats && (
         <>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Inventaris</h3>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <StatTile
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inventaris</h3>
+            <StatGrid className="grid-cols-2 sm:grid-cols-4 xl:grid-cols-8">
+              <CompactStat
                 label="URL's gescand"
                 value={stats.total_urls}
                 hint={scan.discovery_source === "sitemap" ? "Uit de sitemap" : "Via crawl"}
               />
-              <StatTile
-                label="Indexeerbaar"
-                value={stats.indexable}
-                hint={`${stats.non_indexable} niet indexeerbaar`}
-              />
-              <StatTile
+              <CompactStat label="Indexeerbaar" value={stats.indexable} hint={`${stats.non_indexable} niet indexeerbaar`} />
+              <CompactStat
                 label="Fouten (4xx/5xx)"
                 value={(stats.status["4xx"] ?? 0) + (stats.status["5xx"] ?? 0) + (stats.status.error ?? 0)}
                 tone={(stats.status["4xx"] ?? 0) + (stats.status["5xx"] ?? 0) > 0 ? "bad" : "good"}
                 hint={`${stats.redirects} redirects`}
               />
-              <StatTile
+              <CompactStat
                 label="HTTP/2"
                 value={pct(stats.http2_pages, stats.html_pages)}
                 hint={`Gem. scan-respons ${stats.avg_response_ms ?? "—"} ms`}
               />
-              <StatTile label="Title ontbreekt" value={stats.missing_title} tone={stats.missing_title ? "bad" : "good"} />
-              <StatTile label="Meta description ontbreekt" value={stats.missing_meta} tone={stats.missing_meta ? "warn" : "good"} />
-              <StatTile
+              <CompactStat label="Title ontbreekt" value={stats.missing_title} tone={stats.missing_title ? "bad" : "good"} />
+              <CompactStat label="Meta description ontbreekt" value={stats.missing_meta} tone={stats.missing_meta ? "warn" : "good"} />
+              <CompactStat
                 label="H1 ontbreekt / meerdere"
                 value={`${stats.missing_h1} / ${stats.multiple_h1}`}
                 tone={stats.missing_h1 ? "bad" : stats.multiple_h1 ? "warn" : "good"}
               />
-              <StatTile
+              <CompactStat
                 label="Pagina's met kapotte links"
                 value={stats.broken_link_pages}
                 tone={stats.broken_link_pages ? "bad" : "good"}
               />
-            </div>
+            </StatGrid>
           </section>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Core Web Vitals (mobiel)
-            </h3>
-            {stats.cwv.measured === 0 ? (
-              <p className="text-sm text-muted-foreground">Er zijn geen Core Web Vitals gemeten.</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <StatTile label="Gemeten pagina's" value={stats.cwv.measured} />
-                <StatTile label="Goed" value={stats.cwv.good} tone="good" />
-                <StatTile label="Verbeteren" value={stats.cwv.needs_improvement} tone="warn" />
-                <StatTile
-                  label="Slecht"
-                  value={stats.cwv.poor}
-                  tone="bad"
-                  hint={`Gem. performance-score ${stats.cwv.avg_performance_score ?? "—"}`}
-                />
-              </div>
-            )}
-          </section>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Core Web Vitals (mobiel)
+              </h3>
+              {stats.cwv.measured === 0 ? (
+                <p className="text-sm text-muted-foreground">Er zijn geen Core Web Vitals gemeten.</p>
+              ) : (
+                <StatGrid className="grid-cols-2 sm:grid-cols-4">
+                  <CompactStat
+                    label="Gemeten"
+                    value={stats.cwv.measured}
+                    hint={`Gem. score ${stats.cwv.avg_performance_score ?? "—"}`}
+                  />
+                  <CompactStat label="Goed" value={stats.cwv.good} tone="good" />
+                  <CompactStat label="Verbeteren" value={stats.cwv.needs_improvement} tone="warn" />
+                  <CompactStat label="Slecht" value={stats.cwv.poor} tone="bad" />
+                </StatGrid>
+              )}
+            </section>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Actiepunten</h3>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <StatTile label="Totaal" value={stats.issues.total} />
-              <StatTile label="Hoog" value={stats.issues.by_severity.hoog ?? 0} tone="bad" />
-              <StatTile label="Middel" value={stats.issues.by_severity.middel ?? 0} tone="warn" />
-              <StatTile label="Laag" value={stats.issues.by_severity.laag ?? 0} />
-            </div>
-          </section>
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actiepunten</h3>
+              <StatGrid className="grid-cols-2 sm:grid-cols-4">
+                <CompactStat label="Totaal" value={stats.issues.total} />
+                <CompactStat label="Hoog" value={stats.issues.by_severity.hoog ?? 0} tone="bad" />
+                <CompactStat label="Middel" value={stats.issues.by_severity.middel ?? 0} tone="warn" />
+                <CompactStat label="Laag" value={stats.issues.by_severity.laag ?? 0} />
+              </StatGrid>
+            </section>
+          </div>
         </>
       )}
 

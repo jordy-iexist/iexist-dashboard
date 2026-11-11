@@ -1,10 +1,11 @@
 "use client"
 
-import { ExternalLink, Loader2 } from "lucide-react"
+import { ExternalLink, KanbanSquare, Loader2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Pill } from "@/components/livegang/shared"
 import {
   createMondayBoard,
   fetchMondaySettings,
@@ -13,7 +14,10 @@ import {
   type MondaySettings,
 } from "@/lib/launch-checklist"
 
-/** Monday-bord van de klant: tonen, aanmaken in de map, of een bestaand bord koppelen. */
+/**
+ * Monday-bord van de klant: tonen, aanmaken in de map, of een bestaand bord koppelen.
+ * Wordt als strook onderin de fasekaart getoond.
+ */
 export function MondayBoardSetting({ customerId }: { customerId: string }) {
   const [settings, setSettings] = useState<MondaySettings | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,34 +55,55 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
     }
   }
 
+  const label = (
+    <span className="flex items-center gap-2 font-medium">
+      <KanbanSquare className="size-4 text-muted-foreground" />
+      Monday
+    </span>
+  )
+
   if (!settings) {
-    return error ? <p className="text-sm text-red-700">Monday: {error}</p> : null
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t bg-muted/30 px-4 py-3 text-sm sm:px-5">
+        {label}
+        {error ? (
+          <span className="text-red-700 dark:text-red-400">{error}</span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Status laden…
+          </span>
+        )}
+      </div>
+    )
   }
 
   const hasBoard = Boolean(settings.board_id)
+  const boardName = settings.board_name ?? `Bord ${settings.board_id}`
 
   return (
-    <section className="space-y-2 rounded-lg border bg-card px-4 py-3 text-sm">
+    <div className="space-y-3 border-t bg-muted/30 px-4 py-3 text-sm sm:px-5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="font-medium">Monday-bord</span>
+        {label}
         {!settings.token_configured ? (
-          <span className="text-muted-foreground">
-            Niet gekoppeld: zet MONDAY_API_TOKEN in de backend-configuratie.
-          </span>
+          <>
+            <Pill>Niet geconfigureerd</Pill>
+            <span className="text-muted-foreground">Zet MONDAY_API_TOKEN in de backend-configuratie.</span>
+          </>
         ) : hasBoard ? (
           <>
+            <Pill tone="green">Gekoppeld</Pill>
             {settings.board_url ? (
               <a
                 href={settings.board_url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
+                className="inline-flex min-w-0 items-center gap-1 font-medium text-primary hover:underline"
               >
-                {settings.board_name ?? `Bord ${settings.board_id}`}
-                <ExternalLink className="size-3.5" />
+                <span className="truncate">{boardName}</span>
+                <ExternalLink className="size-3.5 shrink-0" />
               </a>
             ) : (
-              <span>{settings.board_name ?? `Bord ${settings.board_id}`}</span>
+              <span className="font-medium">{boardName}</span>
             )}
             <Button
               size="sm"
@@ -91,19 +116,20 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
                 }
               }}
             >
-              Ontkoppelen
+              {busy ? <Loader2 className="animate-spin" /> : null} Ontkoppelen
             </Button>
           </>
         ) : (
           <>
+            <Pill tone="amber">Nog geen bord</Pill>
             <span className="text-muted-foreground">
-              Nog geen bord. Het wordt aangemaakt in de map “{settings.folder_name}” zodra je punten doorzet.
+              Wordt aangemaakt in map “{settings.folder_name}” zodra je punten doorzet.
             </span>
             <div className="ml-auto flex flex-wrap gap-2">
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => createMondayBoard(customerId))}>
                 {busy && !linking ? <Loader2 className="animate-spin" /> : null} Bord nu aanmaken
               </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setLinking((v) => !v)}>
+              <Button size="sm" variant={linking ? "secondary" : "ghost"} disabled={busy} onClick={() => setLinking((v) => !v)}>
                 Bestaand bord koppelen
               </Button>
             </div>
@@ -123,16 +149,24 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
             value={boardInput}
             onChange={(e) => setBoardInput(e.target.value)}
             placeholder="Bord-id of bord-URL uit Monday"
-            className="h-8 max-w-md"
+            className="h-8 max-w-md bg-background"
+            autoFocus
           />
           <Button size="sm" type="submit" disabled={busy || !boardInput.trim()}>
-            Koppelen
+            {busy ? <Loader2 className="animate-spin" /> : null} Koppelen
+          </Button>
+          <Button size="sm" type="button" variant="ghost" disabled={busy} onClick={() => setLinking(false)}>
+            Annuleren
           </Button>
         </form>
       )}
 
-      {settings.board_error && <p className="text-red-700">{settings.board_error}</p>}
-      {error && <p className="text-red-700">{error}</p>}
-    </section>
+      {(settings.board_error || error) && (
+        <div className="space-y-1 rounded-md border border-red-300 bg-background px-3 py-2 text-red-700 dark:text-red-400">
+          {settings.board_error && <p>{settings.board_error}</p>}
+          {error && <p>{error}</p>}
+        </div>
+      )}
+    </div>
   )
 }
