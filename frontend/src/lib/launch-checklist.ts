@@ -436,6 +436,37 @@ export type SuggestionStatus = "open" | "overgenomen" | "afgewezen"
 
 export type ContentCheck = { status: AutoStatus; message: string; details?: unknown }
 
+/** Eén <a>-tag naar een kapot of doorverwezen doel; `href` zoals hij in de HTML staat. */
+export type LinkAnchor = { text: string; href: string; in_content: boolean }
+
+/** Kapotte of doorverwezen interne link (`c3_redirects_404`). Oudere scans hebben geen `anchors`. */
+export type LinkProblem = {
+  url: string
+  text: string
+  status: number | null
+  final_url?: string | null
+  final_status?: number | null
+  in_content?: boolean
+  anchors?: LinkAnchor[]
+}
+
+export type RedirectDetails = {
+  broken?: LinkProblem[]
+  redirects?: LinkProblem[]
+  broken_total?: number
+  redirects_total?: number
+}
+
+export type ImageProblem = {
+  src: string
+  filename: string
+  alt: string | null
+  missing_alt: boolean
+  generic_filename: boolean
+}
+
+export type InternalLinkDetails = { generic?: { url: string; text: string }[] }
+
 export type ContentSuggestion = {
   id: string
   scan_id: string

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CheckDetails } from "@/components/livegang/CheckDetails"
 import { AutoStatusBadge, Pill } from "@/components/livegang/shared"
 import { SuggestionRow } from "@/components/livegang/SuggestionRow"
 import {
@@ -25,6 +26,9 @@ import { usePolling } from "@/hooks/use-polling"
 import { cn } from "@/lib/utils"
 
 type Filter = "all" | "problems" | "not_analysed" | "analysed"
+
+/** Punten die alleen de regelcontrole oplevert; de AI maakt hier geen voorstellen voor. */
+const RULE_ONLY_KEYS = new Set(["c3_redirects_404"])
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Alle" },
@@ -282,6 +286,7 @@ function PageDetail({
             <AutoStatusBadge status={check.status} />
           </span>
         </div>
+        {needsWork(key) && <CheckDetails itemKey={key} details={check.details} className="px-5 py-3" />}
         {suggestions.length > 0 ? (
           <ul className="divide-y divide-dashed px-5 pb-2">
             {suggestions.map((s) => (
@@ -301,7 +306,8 @@ function PageDetail({
             ))}
           </ul>
         ) : (
-          needsWork(key) && (
+          needsWork(key) &&
+          !RULE_ONLY_KEYS.has(key) && (
             <p className="px-5 py-3 text-xs text-muted-foreground">
               {detail!.analysis_status === "done"
                 ? "Geen AI-voorstellen voor dit punt."

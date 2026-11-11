@@ -4,6 +4,7 @@ import { ChevronDown, ExternalLink, Loader2, Send } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { CheckDetails, DETAIL_ITEM_KEYS } from "@/components/livegang/CheckDetails"
 import { Pill, SeverityBadge } from "@/components/livegang/shared"
 import {
   apiFetch,
@@ -23,6 +24,13 @@ import { cn } from "@/lib/utils"
 type IssuesResponse = { issues: LaunchScanIssue[]; total: number; groups: IssueGroup[] }
 
 const STATUS_OPTIONS: IssueStatus[] = ["open", "doorgezet", "opgelost", "genegeerd"]
+
+/** Lijst met links/afbeeldingen van een fase-3 actiepunt, of null als we die niet als lijst tonen. */
+function issueDetailData(issue: LaunchScanIssue): unknown {
+  if (!DETAIL_ITEM_KEYS.has(issue.issue_type)) return null
+  const data = (issue.details as { data?: unknown } | null)?.data
+  return data && typeof data === "object" ? data : null
+}
 
 export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: string }) {
   const [data, setData] = useState<IssuesResponse | null>(null)
@@ -312,8 +320,12 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                     {issue.recommendation && (
                       <p className="rounded-md bg-primary/5 p-2"><span className="font-medium">Aanpak: </span>{issue.recommendation}</p>
                     )}
-                    {issue.details != null && (
-                      <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">{JSON.stringify(issue.details, null, 2)}</pre>
+                    {issueDetailData(issue) !== null ? (
+                      <CheckDetails itemKey={issue.issue_type} details={issueDetailData(issue)} />
+                    ) : (
+                      issue.details != null && (
+                        <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">{JSON.stringify(issue.details, null, 2)}</pre>
+                      )
                     )}
                   </div>
                 )}

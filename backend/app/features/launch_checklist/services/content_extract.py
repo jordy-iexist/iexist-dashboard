@@ -269,7 +269,7 @@ def extract_content(html: str, page_url: str, root_domain: str) -> ContentExtrac
             break
 
     links: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, bool]] = set()
     external = 0
     for raw in parser.raw_links:
         href = raw["href"]
@@ -281,11 +281,14 @@ def extract_content(html: str, page_url: str, root_domain: str) -> ContentExtrac
         if not is_internal(absolute, root_domain):
             external += 1
             continue
-        key = (url_key(absolute), raw["text"].lower())
+        # Dezelfde link in de tekst én in menu/footer apart houden: de plek is nodig om hem te vinden.
+        key = (url_key(absolute), raw["text"].lower(), bool(raw["in_content"]))
         if key in seen or len(links) >= MAX_LINKS:
             continue
         seen.add(key)
-        links.append({"url": absolute, "text": raw["text"], "in_content": bool(raw["in_content"])})
+        links.append({
+            "url": absolute, "href": href, "text": raw["text"], "in_content": bool(raw["in_content"]),
+        })
 
     schema_types = sorted(all_types(parser.jsonld_nodes))
     content_words = sum(len(_WORD_RE.findall(text)) for _, text in blocks)

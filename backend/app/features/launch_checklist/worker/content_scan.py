@@ -186,6 +186,7 @@ async def _check_links(urls: list[str], known_ok: set[str]) -> dict[str, dict[st
                         info.update({
                             "redirect": not same,
                             "final_url": str(final.url),
+                            "final_status": final.status_code,
                             "status": final.status_code if same else status,
                         })
                         status = final.status_code

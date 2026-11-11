@@ -36,6 +36,7 @@ THIN_WORDS = 300
 SCANNABLE_MIN_WORDS = 400
 FIRST_PARAGRAPH_MAX_WORDS = 90
 MAX_EVIDENCE_URLS = 25
+MAX_LINK_DETAILS = 30
 REDIRECTS_KEY = "c3_redirects_404"
 META_FIXED_KEY = "c3_meta_fixed"
 
@@ -379,28 +380,57 @@ def _local(page: Any, place: str | None) -> Check:
 def _redirects(page: Any, link_status: dict[str, dict[str, Any]] | None) -> Check:
     if link_status is None:
         return _c("unknown", "Links zijn niet gecontroleerd.")
-    broken: list[dict[str, Any]] = []
-    redirects: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    # Per doel-URL alle <a>-tags die ernaar wijzen (ankertekst, href zoals in de HTML, plek).
+    entries: dict[str, dict[str, Any]] = {}
+    broken_keys: set[str] = set()
     for link in page.links or []:
         key = url_key(link["url"])
-        if key in seen:
-            continue
-        seen.add(key)
         info = link_status.get(key)
-        if not info:
+        if not info or not (info.get("broken") or info.get("redirect")):
             continue
-        entry = {"url": link["url"], "text": link.get("text") or "", "status": info.get("status")}
-        if info.get("broken"):
-            broken.append(entry)
-        elif info.get("redirect"):
-            redirects.append({**entry, "final_url": info.get("final_url")})
-    details = {"broken": broken[:20], "redirects": redirects[:20]}
+        entry = entries.get(key)
+        if entry is None:
+            entry = entries[key] = {
+                "url": link["url"], "text": link.get("text") or "", "status": info.get("status"),
+                "anchors": [],
+            }
+            if info.get("final_url"):
+                entry["final_url"] = info["final_url"]  # bij een 404 via een redirect: waar hij eindigt
+                entry["final_status"] = info.get("final_status")
+            if info.get("broken"):
+                broken_keys.add(key)
+        anchor = {
+            "text": link.get("text") or "",
+            "href": link.get("href") or link["url"],
+            "in_content": bool(link.get("in_content", True)),
+        }
+        if anchor not in entry["anchors"]:
+            entry["anchors"].append(anchor)
+
+    def ordered(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Links in de lopende tekst eerst; menu/footer-links staan op elke pagina.
+        for row in rows:
+            row["anchors"].sort(key=lambda a: not a["in_content"])
+            row["in_content"] = any(a["in_content"] for a in row["anchors"])
+            row["text"] = row["anchors"][0]["text"] if row["anchors"] else row["text"]
+        return sorted(rows, key=lambda r: not r["in_content"])
+
+    broken = ordered([e for k, e in entries.items() if k in broken_keys])
+    redirects = ordered([e for k, e in entries.items() if k not in broken_keys])
+    details = {
+        "broken": broken[:MAX_LINK_DETAILS], "redirects": redirects[:MAX_LINK_DETAILS],
+        "broken_total": len(broken), "redirects_total": len(redirects),
+    }
+
+    def counted(rows: list[dict[str, Any]], label: str) -> str:
+        chrome = sum(1 for r in rows if not r["in_content"])
+        return f"{len(rows)} {label}" + (f" ({chrome} in menu/footer)" if chrome else "")
+
     if broken:
-        return _c("error", f"{len(broken)} link(s) naar een 404/foutpagina"
-                  + (f" en {len(redirects)} naar een redirect." if redirects else "."), details)
+        return _c("error", counted(broken, "link(s) naar een 404/foutpagina")
+                  + (f" en {counted(redirects, 'naar een redirect')}." if redirects else "."), details)
     if redirects:
-        return _c("warning", f"{len(redirects)} link(s) naar een redirect.", details)
+        return _c("warning", counted(redirects, "link(s) naar een redirect") + ".", details)
     return _c("ok", "Geen links naar 404's of redirects.")
 
 
