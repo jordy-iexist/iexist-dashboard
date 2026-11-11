@@ -15,6 +15,7 @@ from app.agents.nulmeting.tools import NulmetingContext
 from app.core.config import settings
 from app.db.models import CustomerWebsite, LaunchScan, LaunchScanIssue, LaunchScanPage
 from app.db.session import SessionLocal
+from app.features.launch_checklist.services import ahrefs_enrich
 from app.features.launch_checklist.services.ai_checks import run_ai_checks
 from app.features.launch_checklist.services.discovery import discover_from_sitemaps, url_key
 from app.features.launch_checklist.services.inventory import PageRecord, run_inventory
@@ -25,6 +26,7 @@ from app.features.launch_checklist.services.issue_state import (
 from app.features.launch_checklist.services.issues import generate_issues
 from app.features.launch_checklist.services.pagespeed import measure_vitals
 from app.features.launch_checklist.services.stats import build_summary_stats
+from app.services.ahrefs import is_configured as ahrefs_is_configured
 from app.worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -60,6 +62,39 @@ def _update(scan_id: str, **fields: Any) -> None:
 def _record_to_row(scan_id: str, rec: PageRecord) -> LaunchScanPage:
     data = {k: v for k, v in asdict(rec).items() if k in _PAGE_FIELDS}
     return LaunchScanPage(id=str(uuid.uuid4()), scan_id=scan_id, **data)
+
+
+def _enrich_with_ahrefs(scan_id: str, records: list[PageRecord], warnings: list[str]) -> dict[str, Any] | None:
+    """Zet verkeer en backlinks uit Ahrefs op de records en haal onbekende URL's op.
+
+    URL's die Ahrefs kent maar de crawl niet vond (oude of gewijzigde URL's)
+    worden aan `records` toegevoegd, zodat een 404 daarop een actiepunt wordt.
+    """
+    if not ahrefs_is_configured():
+        warnings.append("AHREFS_API_KEY ontbreekt: geen verkeers- en backlinkdata uit Ahrefs.")
+        return None
+    with SessionLocal() as db:
+        scan = db.get(LaunchScan, scan_id)
+        if scan is None:
+            return None
+        snapshot = ahrefs_enrich.load_snapshot(db, scan)
+    warnings.extend(f"Ahrefs: {error}" for error in snapshot.errors)
+
+    unknown = ahrefs_enrich.merge_into_records(records, snapshot)
+    if unknown and not _is_stopped(scan_id):
+        extra = asyncio.run(
+            run_inventory(
+                seed_urls=unknown,
+                in_sitemap=False,
+                follow_links=False,
+                max_pages=len(unknown),
+                concurrency=settings.launch_scan_http_concurrency,
+                on_batch=lambda _batch: not _is_stopped(scan_id),
+            )
+        )
+        ahrefs_enrich.mark_extra_records(extra, snapshot)
+        records.extend(extra)
+    return ahrefs_enrich.scan_summary(snapshot, records)
 
 
 def _vitals_candidates(pages: list[LaunchScanPage], base_url: str, limit: int) -> list[LaunchScanPage]:
@@ -145,7 +180,7 @@ def run_launch_scan_task(self, scan_id: str) -> None:
                 "wordt waarschijnlijk geblokkeerd door een firewall of bot-protectie."
             )
 
-        # 3. AI-checks (gebruikt de in-memory records)
+        # 3. AI-checks (gebruikt de in-memory records van de eigen crawl)
         ai_checks = run_ai_checks(
             base_url=base_url,
             robots_txt=discovery.robots_txt,
@@ -154,10 +189,28 @@ def run_launch_scan_task(self, scan_id: str) -> None:
             records=records,
         )
 
+        # 3b. Ahrefs: verkeer en backlinks per URL, plus URL's die de crawl niet vond.
+        # Na de AI-checks, zodat die extra URL's de schema-dekking niet vertekenen.
+        ahrefs_summary: dict[str, Any] | None = None
+        try:
+            ahrefs_summary = _enrich_with_ahrefs(scan_id, records, warnings)
+        except Exception as exc:  # Ahrefs is een verrijking: de scan gaat zonder door
+            logger.warning("Ahrefs-verrijking faalde voor scan %s: %s", scan_id, exc)
+            warnings.append(f"Ahrefs-data niet opgehaald: {exc}")
+        if _is_stopped(scan_id):
+            return
+
         with SessionLocal() as db:
             db.add_all([_record_to_row(scan_id, r) for r in records])
             db.commit()
-        _update(scan_id, total_urls=len(records), inventoried_urls=len(records), ai_checks=ai_checks)
+        _update(
+            scan_id,
+            total_urls=len(records),
+            inventoried_urls=len(records),
+            ai_checks=ai_checks,
+            warnings=warnings,
+            **({"ahrefs": ahrefs_summary} if ahrefs_summary is not None else {}),
+        )
 
         # 4. Core Web Vitals via PSI
         with SessionLocal() as db:

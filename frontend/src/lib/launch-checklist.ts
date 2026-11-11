@@ -104,8 +104,69 @@ export type AgentTrace = {
   error?: string
 }
 
+/** Ahrefs-snapshot van het domein (alleen op een fase 1-scan). */
+export type AhrefsScan = {
+  target: string
+  country: string
+  fetched_at: string
+  /** Scan waarvan de data is overgenomen (herscan binnen de bewaartermijn: 0 units). */
+  reused_from: string | null
+  units: number
+  domain: {
+    domain_rating?: number | null
+    refdomains?: number | null
+    backlinks?: number | null
+    org_traffic?: number | null
+    org_keywords?: number | null
+    org_keywords_1_3?: number | null
+    /** Geschatte waarde van het organische verkeer, in dollarcenten per maand. */
+    org_cost?: number | null
+  }
+  errors: string[]
+  pages_with_traffic: number
+  pages_with_backlinks: number
+  /** URL's die Ahrefs kent maar die niet in de crawl zaten. */
+  extra_urls: number
+  /** URL's met verkeer of backlinks die niet (meer) werken. */
+  lost_value_urls: number
+}
+
+/** Ahrefs-details per pagina; verkeer en verwijzende domeinen staan los op de pagina. */
+export type AhrefsPage = {
+  /** "ahrefs" = de URL zat niet in de crawl en is alleen bij Ahrefs bekend. */
+  source: "crawl" | "ahrefs"
+  keywords?: number
+  top_keyword?: string
+  top_keyword_position?: number
+  top_keyword_volume?: number
+  dofollow_backlinks?: number
+  broken_backlinks?: { url_from: string; dr: number | null; anchor: string }[]
+}
+
+/** Het zoekwoord waarop een pagina nu het meeste organische verkeer krijgt (Ahrefs). */
+export type AhrefsKeyword = {
+  keyword: string
+  position: number | null
+  volume: number | null
+  traffic: number | null
+}
+
+/** Waarom een actiepunt zwaarder weegt: de pagina heeft verkeer of backlinks. */
+export type ValueBoost = { org_traffic: number | null; refdomains: number | null; from: IssueSeverity | null }
+
+export function valueBoostOf(details: unknown): ValueBoost | null {
+  if (!details || typeof details !== "object") return null
+  const boost = (details as { value_boost?: unknown }).value_boost
+  return boost && typeof boost === "object" ? (boost as ValueBoost) : null
+}
+
+export function formatCount(value: number | null | undefined) {
+  return value == null ? "—" : value.toLocaleString("nl-NL")
+}
+
 export type LaunchScanDetail = LaunchScan & {
   ai_checks: AiChecks | null
+  ahrefs?: AhrefsScan | null
   ai_summary: string | null
   agent_trace: AgentTrace | null
 }
@@ -121,6 +182,9 @@ export type LaunchCustomer = {
   checklist_progress: ChecklistProgress | null
   latest_content_scan: LaunchScan | null
   content_progress: ChecklistProgress | null
+  /** Fase 2/3 gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende). */
+  geo_outdated?: boolean
+  content_outdated?: boolean
 }
 
 export type CwvMetric = { value: number | null; rating: CwvRating | null }
@@ -184,6 +248,10 @@ export type LaunchScanPage = {
   click_depth: number | null
   inlinks: number | null
   schema_all: string[] | null
+  /** Ahrefs: geschat organisch verkeer per maand en aantal verwijzende domeinen. */
+  org_traffic: number | null
+  refdomains: number | null
+  ahrefs: AhrefsPage | null
   issue_count: number
 }
 
@@ -401,6 +469,7 @@ export type ContentPage = {
   focus_keyword: string | null
   intent: string | null
   keyword_source: string | null
+  ahrefs_keyword: AhrefsKeyword | null
   analyzed_at: string | null
   suggestions_open: number
   suggestions_total: number
@@ -447,7 +516,7 @@ export const KEYWORD_SOURCE_LABELS: Record<string, string> = {
   ahrefs: "Ahrefs",
 }
 
-/** Focuszoekwoord handmatig vastleggen; leeg = weer door de AI laten bepalen. */
+/** Focuszoekwoord handmatig vastleggen; leeg = weer automatisch (Ahrefs-ranking, anders de AI). */
 export function updatePageKeyword(scanId: string, pageId: string, focus_keyword: string, intent: string | null) {
   return apiFetch<ContentPageDetail>(`/scans/${scanId}/content-pages/${pageId}/keyword`, {
     method: "PATCH",

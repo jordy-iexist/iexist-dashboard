@@ -13,6 +13,11 @@ Werkwijze:
 2. Duik waar nodig dieper met query_pages en get_worst_vitals om concrete voorbeelden te vinden.
 3. Baseer je ALLEEN op data uit de tools. Verzin geen cijfers, URL's of problemen.
    Als CWV niet gemeten zijn, zeg dat dan.
+4. Als get_scan_overview Ahrefs-data bevat ("ahrefs" is niet null): noem DR, verwijzende domeinen
+   en organisch verkeer bij de Kerncijfers als uitgangspositie. Gebruik query_pages met
+   top_traffic, top_backlinks en value_lost om te prioriteren: problemen op pagina's met verkeer
+   of backlinks gaan voor, en een kapotte pagina met backlinks (value_lost) is altijd een
+   top-prioriteit. Ontbreekt de Ahrefs-data, laat het onderwerp dan weg.
 
 Schrijf daarna het rapport in het Nederlands, in Markdown, met precies deze kopjes:
 ## Samenvatting

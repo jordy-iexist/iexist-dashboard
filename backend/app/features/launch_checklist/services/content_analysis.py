@@ -230,6 +230,18 @@ def _run_links(
     return _clean_suggestions(result.parsed().get("suggestions"), keys)
 
 
+def _ranking_note(hint: dict[str, Any] | None, keyword: str | None) -> str:
+    """' (positie 4 in Google, circa 320 zoekopdrachten per maand)' als de Ahrefs-data bij dit zoekwoord hoort."""
+    if not hint or not keyword or hint.get("keyword") != keyword:
+        return ""
+    parts = []
+    if hint.get("position") is not None:
+        parts.append(f"positie {hint['position']} in Google")
+    if hint.get("volume") is not None:
+        parts.append(f"circa {hint['volume']} zoekopdrachten per maand")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 # --- per pagina ---------------------------------------------------------------------
 
 def analyse_page(scan_id: str, page_id: str, *, user_id: str, customer_name: str) -> dict[str, Any]:
@@ -266,8 +278,9 @@ def analyse_page(scan_id: str, page_id: str, *, user_id: str, customer_name: str
         # 1. Tekst & structuur (bepaalt ook focuszoekwoord en intentie)
         text_keys = applicable_keys(AGENT_ITEMS["content_text"], checks)
 
-        # Een zoekwoord dat niet van de AI komt (handmatig, later Ahrefs) ligt vast.
+        # Een zoekwoord dat niet van de AI komt (handmatig of Ahrefs) ligt vast.
         fixed_keyword = bool(page.focus_keyword) and page.keyword_source not in (None, "ai")
+        ahrefs_hint = (page.signals or {}).get("ahrefs") or None
 
         def run_text() -> list[dict[str, Any]]:
             prompt = (
@@ -277,10 +290,21 @@ def analyse_page(scan_id: str, page_id: str, *, user_id: str, customer_name: str
                 "Er zijn geen checklistpunten van toepassing: bepaal alleen focus_keyword, intent en readability."
             )
             if fixed_keyword:
+                origin = (
+                    f"komt uit Ahrefs{_ranking_note(ahrefs_hint, page.focus_keyword)}"
+                    if page.keyword_source == "ahrefs" else "is vastgesteld door de gebruiker"
+                )
                 prompt += (
-                    f"\n\nHet focuszoekwoord is vastgesteld door de gebruiker: \"{page.focus_keyword}\". "
+                    f"\n\nHet focuszoekwoord {origin}: \"{page.focus_keyword}\". "
                     "Leid zelf geen ander zoekwoord af: geef exact dit zoekwoord terug als focus_keyword en "
                     "baseer alle voorstellen hierop."
+                )
+            elif ahrefs_hint:
+                prompt += (
+                    f"\n\nTer info uit Ahrefs: de pagina krijgt nu het meeste organische verkeer via "
+                    f"\"{ahrefs_hint.get('keyword')}\"{_ranking_note(ahrefs_hint, ahrefs_hint.get('keyword'))}. "
+                    "Weeg dit mee bij het bepalen van het focuszoekwoord, maar kies een ander zoekwoord als "
+                    "dat beter bij de inhoud van de pagina past."
                 )
             agent = build_content_text_agent(text_keys or AGENT_ITEMS["content_text"])
             result = run_agent(agent, user_id=user_id, input=prompt, context=ctx)
@@ -289,7 +313,7 @@ def analyse_page(scan_id: str, page_id: str, *, user_id: str, customer_name: str
             keyword = str(data.get("focus_keyword") or "").strip()[:200]
             intent = str(data.get("intent") or "").strip()[:40] or None
             if fixed_keyword:
-                # Handmatig (of later Ahrefs) zoekwoord blijft staan; alleen een lege intentie vullen we aan.
+                # Handmatig of Ahrefs-zoekwoord blijft staan; alleen een lege intentie vullen we aan.
                 page.intent = page.intent or intent
             elif keyword:
                 page.focus_keyword = keyword

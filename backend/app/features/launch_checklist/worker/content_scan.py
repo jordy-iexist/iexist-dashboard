@@ -31,6 +31,7 @@ from app.db.models import (
     LaunchScanPage,
 )
 from app.db.session import SessionLocal
+from app.features.launch_checklist.services import ahrefs_enrich
 from app.features.launch_checklist.services.content_analysis import (
     Usage,
     analyse_page,
@@ -92,6 +93,13 @@ def _update(scan_id: str, **fields: Any) -> None:
 
 
 # --- stap 1: scan -----------------------------------------------------------------
+
+def _with_ahrefs_signal(fields: dict[str, Any], hint: dict[str, Any] | None) -> dict[str, Any]:
+    """Bewaar het Ahrefs-topzoekwoord (met positie en volume) bij de signalen van de pagina."""
+    if not hint:
+        return fields
+    return {**fields, "signals": {**(fields.get("signals") or {}), "ahrefs": hint}}
+
 
 async def _fetch_content(
     targets: list[dict[str, Any]], root_domain: str, concurrency: int, on_batch: Any,
@@ -209,11 +217,13 @@ def run_content_scan_task(self, scan_id: str) -> None:
         base_url = scan.base_url
         pages = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == source.id).all()
         targets = [
-            {"id": p.id, "url": p.final_url or p.url, "page_type": p.page_type}
+            {"id": p.id, "url": p.final_url or p.url, "page_type": p.page_type,
+             "ahrefs": ahrefs_enrich.keyword_hint(p)}
             for p in pages
             if _is_ok_html(p) and p.indexable is not False
         ]
-        # Vastgelegde zoekwoorden (handmatig, later Ahrefs) meenemen uit de vorige fase-3 scan.
+        ahrefs_enrich.mark_fixed_keywords(t["ahrefs"] for t in targets)
+        # Vastgelegde zoekwoorden (handmatig of Ahrefs) meenemen uit de vorige fase-3 scan.
         keywords: dict[str, dict[str, Any]] = {}
         previous = (
             db.query(LaunchScan)
@@ -258,7 +268,8 @@ def run_content_scan_task(self, scan_id: str) -> None:
                 LaunchContentPage(
                     id=str(uuid.uuid4()), scan_id=scan_id, source_page_id=t["id"], url=t["url"],
                     path=_path_of(t["url"]), page_type=t["page_type"], created_at=now,
-                    **fetched[t["id"]], **keywords.get(url_key(t["url"]), {}),
+                    **_with_ahrefs_signal(fetched[t["id"]], t["ahrefs"]),
+                    **ahrefs_enrich.choose_keyword(keywords.get(url_key(t["url"])), t["ahrefs"]),
                 )
                 for t in targets if t["id"] in fetched
             ])

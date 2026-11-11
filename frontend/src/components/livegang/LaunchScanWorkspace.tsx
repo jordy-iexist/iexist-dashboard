@@ -54,12 +54,25 @@ async function fetchPhaseState(customerId: string) {
   const phase1 = p1.items.filter((s) => (s.phase ?? 1) === 1)
   const phase2 = p2.items.filter((s) => s.phase === 2)
   const phase3 = p3.items.filter((s) => s.phase === 3)
+  // Lijsten zijn gesorteerd op created_at desc: find() geeft de nieuwste.
+  const latest1 = phase1.find((s) => s.status === "completed")
+  const latest2 = phase2.find((s) => s.status === "completed")
+  // Tijdens een AI-analyse staat de (al voltooide) scan tijdelijk op 'analyzing'.
+  const latest3 = phase3.find((s) => s.status === "completed" || s.status === "analyzing")
+  // Verouderd: de fase is gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende)
+  // nulmeting. Mislukte of geannuleerde nulmetingen tellen niet mee.
+  const newest1 = phase1.find((s) => s.status !== "failed" && s.status !== "canceled")
+  const isOutdated = (scan: LaunchScan | undefined) =>
+    !!scan && !!newest1 && scan.source_scan_id !== newest1.id
   return {
     done: {
-      1: phase1.some((s) => s.status === "completed"),
-      2: phase2.some((s) => s.status === "completed"),
-      // Tijdens een AI-analyse staat de (al voltooide) scan tijdelijk op 'analyzing'.
-      3: phase3.some((s) => s.status === "completed" || s.status === "analyzing"),
+      1: !!latest1,
+      2: !!latest2,
+      3: !!latest3,
+    } as Record<number, boolean>,
+    outdated: {
+      2: isOutdated(latest2),
+      3: isOutdated(latest3),
     } as Record<number, boolean>,
     hasGeoScans: phase2.length > 0,
     hasContentScans: phase3.length > 0,
@@ -69,6 +82,7 @@ async function fetchPhaseState(customerId: string) {
 export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
   const [phase, setPhase] = useState<number | null>(null)
   const [done, setDone] = useState<Record<number, boolean>>({})
+  const [outdated, setOutdated] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +90,7 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
       .then((state) => {
         if (cancelled) return
         setDone(state.done)
+        setOutdated(state.outdated)
         // De fase uit de URL (?fase=) gaat voor, zodat een refresh op dezelfde fase
         // blijft. Zonder keuze: fase 2 openen als die al eerder gestart is.
         const fromUrl = readUrlParam("fase")
@@ -100,7 +115,10 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
 
   const refreshPhases = useCallback(() => {
     fetchPhaseState(customerId)
-      .then((state) => setDone(state.done))
+      .then((state) => {
+        setDone(state.done)
+        setOutdated(state.outdated)
+      })
       .catch(() => {})
   }, [customerId])
 
@@ -110,6 +128,7 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
         <PhaseStepper
           active={phase ?? 1}
           completed={done}
+          outdated={outdated}
           locked={{
             2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
             3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
@@ -349,7 +368,7 @@ function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onCh
         <>
           {tab === "overview" && <OverviewTab scan={scan} />}
           {tab === "issues" && <IssuesTab scanId={scan.id} customerId={customerId} />}
-          {tab === "inventory" && <InventoryTab scanId={scan.id} />}
+          {tab === "inventory" && <InventoryTab scanId={scan.id} hasAhrefs={Boolean(scan.ahrefs)} />}
           {tab === "vitals" && <VitalsTab scanId={scan.id} measuring={scan.status === "vitals"} />}
           {tab === "ai" && <AiChecksTab checks={scan.ai_checks} />}
         </>

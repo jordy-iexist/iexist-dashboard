@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { CwvBadge, HttpStatusBadge, Pill } from "@/components/livegang/shared"
-import { apiFetch, type LaunchScanIssue, type LaunchScanPage } from "@/lib/launch-checklist"
+import { apiFetch, formatCount, type LaunchScanIssue, type LaunchScanPage } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
 const FILTERS: { value: string; label: string }[] = [
@@ -22,6 +22,14 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "multiple_h1", label: "Meerdere H1" },
 ]
 
+/** Alleen zichtbaar als de scan Ahrefs-data heeft; deze filters sorteren op verkeer. */
+const AHREFS_FILTERS: { value: string; label: string }[] = [
+  { value: "value", label: "Met verkeer of backlinks" },
+  { value: "value_lost", label: "Waarde, werkt niet" },
+  { value: "ahrefs_only", label: "Niet in crawl (Ahrefs)" },
+]
+const AHREFS_FILTER_VALUES = new Set(AHREFS_FILTERS.map((f) => f.value))
+
 const PAGE_SIZE = 50
 
 function lengthTone(length: number | null, min: number, max: number) {
@@ -30,7 +38,7 @@ function lengthTone(length: number | null, min: number, max: number) {
   return "text-muted-foreground"
 }
 
-export function InventoryTab({ scanId }: { scanId: string }) {
+export function InventoryTab({ scanId, hasAhrefs = false }: { scanId: string; hasAhrefs?: boolean }) {
   const [filter, setFilter] = useState("")
   const [search, setSearch] = useState("")
   const [debounced, setDebounced] = useState("")
@@ -50,6 +58,7 @@ export function InventoryTab({ scanId }: { scanId: string }) {
   useEffect(() => {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) })
     if (filter) params.set("filter", filter)
+    if (AHREFS_FILTER_VALUES.has(filter)) params.set("sort", "traffic")
     if (debounced.trim()) params.set("search", debounced.trim())
     let cancelled = false
     apiFetch<{ pages: LaunchScanPage[]; total: number }>(`/scans/${scanId}/pages?${params}`)
@@ -63,7 +72,7 @@ export function InventoryTab({ scanId }: { scanId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((f) => (
+        {(hasAhrefs ? [...FILTERS, ...AHREFS_FILTERS] : FILTERS).map((f) => (
           <button
             key={f.value}
             type="button"
@@ -88,11 +97,17 @@ export function InventoryTab({ scanId }: { scanId: string }) {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[900px] text-sm">
+        <table className={cn("w-full text-sm", hasAhrefs ? "min-w-[1040px]" : "min-w-[900px]")}>
           <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">URL</th>
               <th className="px-3 py-2 font-medium">Status</th>
+              {hasAhrefs && (
+                <>
+                  <th className="px-3 py-2 font-medium" title="Geschat organisch verkeer per maand (Ahrefs)">Verkeer</th>
+                  <th className="px-3 py-2 font-medium" title="Verwijzende domeinen (Ahrefs)">Ref. dom.</th>
+                </>
+              )}
               <th className="px-3 py-2 font-medium">Indexeerbaar</th>
               <th className="px-3 py-2 font-medium">Title</th>
               <th className="px-3 py-2 font-medium">Meta</th>
@@ -110,8 +125,17 @@ export function InventoryTab({ scanId }: { scanId: string }) {
                   {page.final_url && page.redirect_chain?.length ? (
                     <p className="truncate text-xs text-muted-foreground">→ {page.final_url}</p>
                   ) : null}
+                  {page.ahrefs?.source === "ahrefs" && <Pill tone="blue">Niet in crawl</Pill>}
                 </td>
                 <td className="px-3 py-2"><HttpStatusBadge status={page.status_code} error={page.error} /></td>
+                {hasAhrefs && (
+                  <>
+                    <td className="px-3 py-2 text-xs tabular-nums" title={page.ahrefs?.top_keyword ? `Topzoekwoord: ${page.ahrefs.top_keyword}` : undefined}>
+                      {page.org_traffic ? formatCount(page.org_traffic) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs tabular-nums">{page.refdomains ? formatCount(page.refdomains) : "—"}</td>
+                  </>
+                )}
                 <td className="px-3 py-2">
                   {page.indexable === true ? (
                     <Pill tone="green">Ja</Pill>
@@ -140,7 +164,7 @@ export function InventoryTab({ scanId }: { scanId: string }) {
             ))}
             {data && data.pages.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-sm text-muted-foreground">Geen URL&apos;s voor dit filter.</td>
+                <td colSpan={hasAhrefs ? 11 : 9} className="px-3 py-8 text-center text-sm text-muted-foreground">Geen URL&apos;s voor dit filter.</td>
               </tr>
             )}
           </tbody>
@@ -217,6 +241,49 @@ function PageDetailSheet({ scanId, page, onClose }: { scanId: string; page: Laun
                     ))}
                   </ol>
                 </Field>
+              )}
+              {(page.ahrefs || page.org_traffic != null || page.refdomains != null) && (
+                <>
+                  <Field label="Organisch verkeer / mnd (Ahrefs)">
+                    {formatCount(page.org_traffic)}
+                    {page.ahrefs?.keywords ? ` · ${formatCount(page.ahrefs.keywords)} zoekwoorden` : ""}
+                  </Field>
+                  <Field label="Verwijzende domeinen (Ahrefs)">
+                    {formatCount(page.refdomains)}
+                    {page.ahrefs?.dofollow_backlinks ? ` · ${formatCount(page.ahrefs.dofollow_backlinks)} dofollow-links` : ""}
+                  </Field>
+                  {page.ahrefs?.top_keyword && (
+                    <div className="sm:col-span-2">
+                      <Field label="Topzoekwoord (Ahrefs)">
+                        {page.ahrefs.top_keyword}
+                        <span className="text-muted-foreground">
+                          {" "}· positie {page.ahrefs.top_keyword_position ?? "—"} · volume {formatCount(page.ahrefs.top_keyword_volume)}
+                        </span>
+                      </Field>
+                    </div>
+                  )}
+                  {page.ahrefs?.source === "ahrefs" && (
+                    <div className="sm:col-span-2">
+                      <Field label="Herkomst">
+                        Deze URL zat niet in de sitemap of crawl, maar is bij Ahrefs bekend door verkeer of backlinks.
+                      </Field>
+                    </div>
+                  )}
+                  {page.ahrefs?.broken_backlinks && page.ahrefs.broken_backlinks.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <Field label="Backlinks die hier op een kapotte pagina uitkomen">
+                        <ul className="space-y-0.5 text-xs">
+                          {page.ahrefs.broken_backlinks.map((link) => (
+                            <li key={link.url_from} className="break-all">
+                              DR {link.dr != null ? Math.round(link.dr) : "—"} · {link.url_from}
+                              {link.anchor ? ` · "${link.anchor}"` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </Field>
+                    </div>
+                  )}
+                </>
               )}
               <div className="sm:col-span-2"><Field label={`Title (${page.title_length ?? 0})`}>{page.title || "—"}</Field></div>
               <div className="sm:col-span-2"><Field label={`Meta description (${page.meta_description_length ?? 0})`}>{page.meta_description || "—"}</Field></div>

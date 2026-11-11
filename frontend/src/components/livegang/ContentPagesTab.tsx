@@ -10,6 +10,7 @@ import { SuggestionRow } from "@/components/livegang/SuggestionRow"
 import {
   ANALYSIS_STATUS_LABELS,
   apiFetch,
+  formatCount,
   formatDateTime,
   INTENTS,
   KEYWORD_SOURCE_LABELS,
@@ -113,6 +114,8 @@ function KeywordEditor({
     }
   }
 
+  const ranking = detail.ahrefs_keyword
+
   if (!editing) {
     return (
       <div className="space-y-1">
@@ -125,6 +128,11 @@ function KeywordEditor({
                 <Pill tone={detail.keyword_source === "ai" ? "muted" : "blue"}>
                   {KEYWORD_SOURCE_LABELS[detail.keyword_source] ?? detail.keyword_source}
                 </Pill>
+              )}
+              {ranking && ranking.keyword === detail.focus_keyword && (
+                <span className="text-xs text-muted-foreground">
+                  positie {ranking.position ?? "—"} · volume {formatCount(ranking.volume)}
+                </span>
               )}
             </>
           ) : (
@@ -143,6 +151,12 @@ function KeywordEditor({
             <Pencil /> {detail.focus_keyword ? "Wijzigen" : "Instellen"}
           </Button>
         </div>
+        {ranking && ranking.keyword !== detail.focus_keyword && (
+          <p className="text-xs text-muted-foreground">
+            Ahrefs: de pagina krijgt nu het meeste verkeer via &ldquo;{ranking.keyword}&rdquo; (positie{" "}
+            {ranking.position ?? "—"}, volume {formatCount(ranking.volume)}).
+          </p>
+        )}
         {changed && detail.analysis_status === "done" && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
             Zoekwoord gewijzigd: analyseer deze pagina opnieuw om de voorstellen hierop te baseren.
@@ -190,7 +204,7 @@ function KeywordEditor({
         </Button>
         {detail.keyword_source === "manual" && (
           <Button size="sm" type="button" variant="ghost" disabled={busy} onClick={() => void save("")}>
-            Terug naar AI
+            Terug naar automatisch
           </Button>
         )}
       </div>

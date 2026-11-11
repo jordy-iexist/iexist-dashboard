@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Callable, Iterable
 
+from app.core.config import settings
 from app.db.models import LaunchScanPage
 from app.features.launch_checklist.services.pagespeed import rate
 
@@ -31,6 +32,7 @@ ISSUE_TYPES: dict[str, dict[str, str]] = {
     "noindex_in_sitemap": {"label": "Noindex-pagina in sitemap", "category": "techniek"},
     "canonical_mismatch": {"label": "Canonical wijst naar andere URL", "category": "techniek"},
     "broken_links": {"label": "Kapotte interne links", "category": "techniek"},
+    "broken_backlinks": {"label": "Backlinks naar kapotte pagina", "category": "techniek"},
     "slow_response": {"label": "Trage serverrespons", "category": "performance"},
     "title_missing": {"label": "Title ontbreekt", "category": "on-page"},
     "title_too_long": {"label": "Title te lang", "category": "on-page"},
@@ -138,6 +140,45 @@ def rule_status(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issu
                 recommendation="Laat de developer/hosting de serverfout onderzoeken.",
                 details={"status": status},
             )
+
+
+# Statussen die op blokkade/rate-limiting wijzen, niet op een kapotte pagina.
+_INCONCLUSIVE_STATUSES = {401, 403, 429, 503}
+
+
+def rule_backlinks(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]:
+    """Pagina's waar andere websites naar linken (Ahrefs) maar die niet meer werken."""
+    for p in pages:
+        refdomains = getattr(p, "refdomains", None) or 0
+        if refdomains <= 0:
+            continue
+        status = final_status(p)
+        if status is None:
+            if not p.error:
+                continue
+            state = "is niet bereikbaar"
+        elif status >= 400 and status not in _INCONCLUSIVE_STATUSES:
+            state = f"geeft statuscode {status}"
+        else:
+            continue
+        traffic = getattr(p, "org_traffic", None) or 0
+        domains = "1 website linkt" if refdomains == 1 else f"{refdomains} websites linken"
+        yield _issue(
+            "broken_backlinks", "hoog", page=p,
+            title=f"{refdomains} verwijzend(e) domein(en) naar kapotte pagina {p.path}",
+            description=(
+                f"De pagina {state}, maar {domains} ernaar volgens Ahrefs"
+                + (f" en de URL trok circa {traffic} organische bezoeken per maand." if traffic else ".")
+                + " De linkwaarde gaat nu verloren."
+            ),
+            recommendation="Zet een 301-redirect naar de best passende bestaande pagina, of herstel de pagina.",
+            details={
+                "status": status,
+                "refdomains": refdomains,
+                "org_traffic": traffic or None,
+                "backlinks": (getattr(p, "ahrefs", None) or {}).get("broken_backlinks") or [],
+            },
+        )
 
 
 def rule_redirects(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]:
@@ -429,6 +470,7 @@ def rule_ai(_: list[LaunchScanPage], ctx: dict[str, Any]) -> Iterable[Issue]:
 
 RULES: list[Rule] = [
     rule_status,
+    rule_backlinks,
     rule_redirects,
     rule_indexability,
     rule_onpage,
@@ -440,11 +482,52 @@ RULES: list[Rule] = [
 ]
 
 
+_RAISED_SEVERITY = {"laag": "middel", "middel": "hoog"}
+
+
+def is_valuable(page: LaunchScanPage) -> bool:
+    """Pagina met genoeg organisch verkeer of verwijzende domeinen (Ahrefs) om voorrang te krijgen."""
+    return (
+        (getattr(page, "org_traffic", None) or 0) >= settings.ahrefs_value_min_traffic
+        or (getattr(page, "refdomains", None) or 0) >= settings.ahrefs_value_min_refdomains
+    )
+
+
+def apply_value_boost(issues: list[Issue], pages: list[LaunchScanPage]) -> None:
+    """Actiepunten op pagina's met waarde gaan één stap omhoog in prioriteit.
+
+    `details.value_boost` legt vast waarom (en vanaf welke prioriteit), zodat de
+    UI het kan tonen.
+    """
+    valuable = {p.id: p for p in pages if is_valuable(p)}
+    for issue in issues:
+        page = valuable.get(issue.get("page_id"))
+        if page is None:
+            continue
+        previous = issue["severity"]
+        raised = _RAISED_SEVERITY.get(previous)
+        boost = {
+            "org_traffic": getattr(page, "org_traffic", None),
+            "refdomains": getattr(page, "refdomains", None),
+            "from": previous if raised else None,
+        }
+        details = issue.get("details")
+        if details is None:
+            issue["details"] = {"value_boost": boost}
+        elif isinstance(details, dict):
+            issue["details"] = {**details, "value_boost": boost}
+        else:
+            issue["details"] = {"data": details, "value_boost": boost}
+        if raised:
+            issue["severity"] = raised
+
+
 def generate_issues(pages: list[LaunchScanPage], ai_checks: dict[str, Any] | None) -> list[Issue]:
     ctx = {"ai_checks": ai_checks or {}}
     issues: list[Issue] = []
     for rule in RULES:
         issues.extend(rule(pages, ctx))
+    apply_value_boost(issues, pages)
     return issues
 
 

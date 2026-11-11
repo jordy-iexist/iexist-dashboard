@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock } from "lucide-react"
+import { Check, Loader2, Lock, RefreshCw } from "lucide-react"
 
 import {
   ACTIVE_STATUSES,
@@ -104,11 +104,14 @@ export const PHASES = [
 export function PhaseStepper({
   active,
   completed,
+  outdated = {},
   locked = {},
   onSelect,
 }: {
   active: number
   completed: Record<number, boolean>
+  /** Afgeronde fases die op een oudere nulmeting zijn gebaseerd (oranje i.p.v. groen). */
+  outdated?: Record<number, boolean>
   locked?: Record<number, string | undefined>
   onSelect?: (phase: number) => void
 }) {
@@ -118,25 +121,29 @@ export function PhaseStepper({
         {PHASES.map((phase, index) => {
           const isActive = phase.number === active
           const isDone = completed[phase.number] ?? false
+          const isOutdated = isDone && (outdated[phase.number] ?? false)
           const lockReason = phase.available ? locked[phase.number] : undefined
           const clickable = phase.available && !lockReason && !!onSelect
           const isLast = index === PHASES.length - 1
+          const outdatedHint = isOutdated ? "Gebaseerd op een oudere nulmeting — scan opnieuw." : undefined
           const status: { label: string; tone: Tone } = !phase.available
             ? { label: "Binnenkort", tone: "muted" }
-            : isDone
-              ? { label: "Afgerond", tone: "green" }
-              : lockReason
-                ? { label: "Vergrendeld", tone: "muted" }
-                : isActive
-                  ? { label: "Bezig", tone: "blue" }
-                  : { label: "Open", tone: "muted" }
+            : isOutdated
+              ? { label: "Verouderd", tone: "amber" }
+              : isDone
+                ? { label: "Afgerond", tone: "green" }
+                : lockReason
+                  ? { label: "Vergrendeld", tone: "muted" }
+                  : isActive
+                    ? { label: "Bezig", tone: "blue" }
+                    : { label: "Open", tone: "muted" }
           return (
             <li key={phase.number} className="min-w-0">
               <button
                 type="button"
                 disabled={!clickable}
                 onClick={() => onSelect?.(phase.number)}
-                title={lockReason}
+                title={lockReason ?? outdatedHint}
                 aria-current={isActive ? "step" : undefined}
                 className={cn(
                   "relative flex h-full w-full gap-3 rounded-md p-3 text-left transition-colors sm:flex-col sm:gap-3",
@@ -148,17 +155,29 @@ export function PhaseStepper({
                   <span
                     className={cn(
                       "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-4 ring-card",
-                      isDone && "bg-green-600 text-white",
+                      isOutdated && "bg-amber-500 text-white",
+                      isDone && !isOutdated && "bg-green-600 text-white",
                       !isDone && isActive && "bg-primary text-primary-foreground",
                       !isDone && !isActive && "border bg-muted text-muted-foreground"
                     )}
                   >
-                    {isDone ? <Check className="size-4" /> : lockReason || !phase.available ? <Lock className="size-3.5" /> : phase.number}
+                    {isOutdated ? (
+                      <RefreshCw className="size-4" />
+                    ) : isDone ? (
+                      <Check className="size-4" />
+                    ) : lockReason || !phase.available ? (
+                      <Lock className="size-3.5" />
+                    ) : (
+                      phase.number
+                    )}
                   </span>
                   {!isLast && (
                     <span
                       aria-hidden
-                      className={cn("ml-3 hidden h-0.5 flex-1 rounded-full sm:block", isDone ? "bg-green-600/70" : "bg-border")}
+                      className={cn(
+                        "ml-3 hidden h-0.5 flex-1 rounded-full sm:block",
+                        isOutdated ? "bg-amber-500/70" : isDone ? "bg-green-600/70" : "bg-border"
+                      )}
                     />
                   )}
                 </span>
@@ -168,7 +187,7 @@ export function PhaseStepper({
                     <Pill tone={status.tone}>{status.label}</Pill>
                   </span>
                   <span className={cn("block text-sm leading-snug", isActive ? "font-semibold" : "font-medium")}>{phase.title}</span>
-                  <span className="block text-xs leading-snug text-muted-foreground">{lockReason ?? phase.description}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{lockReason ?? outdatedHint ?? phase.description}</span>
                 </span>
                 {isActive && <span aria-hidden className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary" />}
               </button>

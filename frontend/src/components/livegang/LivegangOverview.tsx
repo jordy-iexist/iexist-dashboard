@@ -1,12 +1,22 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight, Search } from "lucide-react"
+import { ChevronRight, RefreshCw, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Input } from "@/components/ui/input"
 import { isActive, Pill, ScanStatusBadge } from "@/components/livegang/shared"
 import { apiFetch, formatDateTime, type LaunchCustomer } from "@/lib/launch-checklist"
+
+function OutdatedPill() {
+  return (
+    <span title="Gebaseerd op een oudere nulmeting — scan opnieuw.">
+      <Pill tone="amber">
+        <RefreshCw className="size-3" /> Verouderd
+      </Pill>
+    </span>
+  )
+}
 
 export function LivegangOverview() {
   const [customers, setCustomers] = useState<LaunchCustomer[] | null>(null)
@@ -84,6 +94,7 @@ export function LivegangOverview() {
                         <Pill tone={contentProgress.percent >= 80 ? "green" : contentProgress.percent >= 50 ? "amber" : "red"}>
                           {contentProgress.percent}% checklist
                         </Pill>
+                        {customer.content_outdated && <OutdatedPill />}
                       </>
                     ) : geoScan && isActive(geoScan.status) ? (
                       <>
@@ -96,6 +107,7 @@ export function LivegangOverview() {
                         <Pill tone={progress.percent >= 80 ? "green" : progress.percent >= 50 ? "amber" : "red"}>
                           {progress.percent}% checklist
                         </Pill>
+                        {customer.geo_outdated && <OutdatedPill />}
                       </>
                     ) : (
                       <>

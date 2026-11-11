@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.tools import tool
 from app.db.models import LaunchScan, LaunchScanIssue, LaunchScanPage
+from app.features.launch_checklist.services.ahrefs_enrich import is_lost
 
 
 @dataclass
@@ -30,12 +31,27 @@ def _page_brief(p: LaunchScanPage) -> dict[str, Any]:
         "words": p.word_count,
         "ms": p.response_time_ms,
         "cwv": p.cwv_status,
+        "org_traffic": p.org_traffic,
+        "refdomains": p.refdomains,
+        "top_keyword": (p.ahrefs or {}).get("top_keyword"),
+    }
+
+
+def _ahrefs_overview(data: Any) -> dict[str, Any] | None:
+    if not isinstance(data, dict):
+        return None
+    return {
+        "domain": data.get("domain"),
+        "country": data.get("country"),
+        "pages_with_traffic": data.get("pages_with_traffic"),
+        "pages_with_backlinks": data.get("pages_with_backlinks"),
+        "lost_value_urls": data.get("lost_value_urls"),
     }
 
 
 @tool(
     "get_scan_overview",
-    "Algemene info over de scan: klant, URL, discovery-bron, samenvattende cijfers (statuscodes, indexeerbaarheid, ontbrekende titles/meta/H1, CWV-verdeling, issues per ernst/categorie/type) en waarschuwingen.",
+    "Algemene info over de scan: klant, URL, discovery-bron, samenvattende cijfers (statuscodes, indexeerbaarheid, ontbrekende titles/meta/H1, CWV-verdeling, issues per ernst/categorie/type), Ahrefs-domeincijfers (DR, verwijzende domeinen, organisch verkeer; null als Ahrefs niet gekoppeld is) en waarschuwingen.",
 )
 def get_scan_overview(ctx: NulmetingContext) -> dict[str, Any]:
     scan = ctx.db.get(LaunchScan, ctx.scan_id)
@@ -48,6 +64,7 @@ def get_scan_overview(ctx: NulmetingContext) -> dict[str, Any]:
         "total_urls": scan.total_urls,
         "vitals_measured": scan.vitals_measured,
         "stats": scan.summary_stats,
+        "ahrefs": _ahrefs_overview(scan.ahrefs),
         "warnings": scan.warnings,
     }
 
@@ -99,6 +116,7 @@ def get_issue_groups(ctx: NulmetingContext, category: str | None = None) -> list
             "enum": [
                 "all", "errors", "redirects", "non_indexable", "missing_title",
                 "missing_meta", "missing_h1", "multiple_h1", "thin_content", "slow", "cwv_poor",
+                "top_traffic", "top_backlinks", "value_lost",
             ],
         },
         "limit": {"type": "integer", "minimum": 1, "maximum": 50},
@@ -119,9 +137,17 @@ def query_pages(ctx: NulmetingContext, filter: str = "all", limit: int = 15) -> 
         "thin_content": lambda p: p.indexable and (p.word_count or 0) < 300,
         "slow": lambda p: (p.response_time_ms or 0) > 2000,
         "cwv_poor": lambda p: p.cwv_status == "poor",
+        # Ahrefs: pagina's met het meeste verkeer / de meeste verwijzende domeinen.
+        "top_traffic": lambda p: (p.org_traffic or 0) > 0,
+        "top_backlinks": lambda p: (p.refdomains or 0) > 0,
+        "value_lost": is_lost,
     }
     pred = predicates.get(filter, predicates["all"])
     matches = [p for p in pages if pred(p)]
+    if filter == "top_traffic":
+        matches.sort(key=lambda p: -(p.org_traffic or 0))
+    elif filter in {"top_backlinks", "value_lost"}:
+        matches.sort(key=lambda p: -((p.refdomains or 0) * 1000 + (p.org_traffic or 0)))
     limit = max(1, min(int(limit or 15), 50))
     return {"total_matches": len(matches), "pages": [_page_brief(p) for p in matches[:limit]]}
 

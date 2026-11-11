@@ -243,6 +243,38 @@ class Settings(BaseSettings):
         default="", validation_alias="DASHBOARD_PUBLIC_URL"
     )
 
+    # Ahrefs API v3 (livegang): verkeer, backlinks en zoekwoorden per URL.
+    ahrefs_api_key: str = Field(default="", validation_alias="AHREFS_API_KEY")
+    ahrefs_country: str = Field(default="nl", validation_alias="AHREFS_COUNTRY")
+    # Rijen per request; het Standard-abonnement staat maximaal 250 toe.
+    ahrefs_top_pages_limit: int = Field(
+        default=200, ge=0, le=1000, validation_alias="AHREFS_TOP_PAGES_LIMIT"
+    )
+    ahrefs_backlink_pages_limit: int = Field(
+        default=200, ge=0, le=1000, validation_alias="AHREFS_BACKLINK_PAGES_LIMIT"
+    )
+    ahrefs_broken_backlinks_limit: int = Field(
+        default=100, ge=0, le=1000, validation_alias="AHREFS_BROKEN_BACKLINKS_LIMIT"
+    )
+    # Een herscan binnen deze termijn neemt de Ahrefs-data van de vorige scan over (0 units).
+    ahrefs_snapshot_ttl_days: int = Field(
+        default=7, ge=0, le=90, validation_alias="AHREFS_SNAPSHOT_TTL_DAYS"
+    )
+    # Vanaf deze waarden telt een pagina als "met waarde": actiepunten wegen dan zwaarder.
+    ahrefs_value_min_traffic: int = Field(
+        default=50, ge=1, validation_alias="AHREFS_VALUE_MIN_TRAFFIC"
+    )
+    ahrefs_value_min_refdomains: int = Field(
+        default=5, ge=1, validation_alias="AHREFS_VALUE_MIN_REFDOMAINS"
+    )
+    # Tot en met deze positie wordt het Ahrefs-topzoekwoord het vaste focuszoekwoord (fase 3).
+    ahrefs_keyword_max_position: int = Field(
+        default=20, ge=1, le=100, validation_alias="AHREFS_KEYWORD_MAX_POSITION"
+    )
+    ahrefs_request_timeout_seconds: float = Field(
+        default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
+    )
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

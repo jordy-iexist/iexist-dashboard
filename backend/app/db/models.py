@@ -885,6 +885,8 @@ class LaunchScan(Base):
     ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     agent_trace: Mapped[Any] = mapped_column(JSON, nullable=True)
     warnings: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Ahrefs-snapshot van het domein (fase 1): baseline, verbruik en herkomst.
+    ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -954,6 +956,10 @@ class LaunchScanPage(Base):
     inlinks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     outlinks: Mapped[Any] = mapped_column(JSON, nullable=True)
     signals: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Ahrefs: organisch verkeer en verwijzende domeinen per URL (scalair voor sorteren/filteren).
+    org_traffic: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    refdomains: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

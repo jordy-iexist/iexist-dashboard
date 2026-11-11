@@ -5,10 +5,59 @@ import { Bot, ChevronDown, TriangleAlert } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { CompactStat, StatGrid } from "@/components/livegang/shared"
-import type { LaunchScanDetail } from "@/lib/launch-checklist"
+import { formatCount, type AhrefsScan, type LaunchScanDetail } from "@/lib/launch-checklist"
 
 function pct(part: number, total: number) {
   return total > 0 ? `${Math.round((part / total) * 100)}%` : "—"
+}
+
+function AhrefsSection({ data }: { data: AhrefsScan }) {
+  const domain = data.domain ?? {}
+  const hasDomain = domain.domain_rating != null || domain.refdomains != null || domain.org_traffic != null
+  if (!hasDomain && !data.pages_with_traffic && !data.pages_with_backlinks) return null
+  const value = domain.org_cost != null ? Math.round(domain.org_cost / 100) : null
+  const fetched = new Date(data.fetched_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" })
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Autoriteit &amp; organisch (Ahrefs)
+      </h3>
+      <StatGrid className="grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+        <CompactStat label="Domain Rating" value={domain.domain_rating != null ? Math.round(domain.domain_rating) : "—"} hint="Schaal 0–100" />
+        <CompactStat
+          label="Verwijzende domeinen"
+          value={formatCount(domain.refdomains)}
+          hint={`${formatCount(domain.backlinks)} backlinks`}
+        />
+        <CompactStat
+          label="Organisch verkeer / mnd"
+          value={formatCount(domain.org_traffic)}
+          hint={value != null ? `Waarde circa $${formatCount(value)}` : `Land: ${data.country.toUpperCase()}`}
+        />
+        <CompactStat
+          label="Zoekwoorden"
+          value={formatCount(domain.org_keywords)}
+          hint={`${formatCount(domain.org_keywords_1_3)} in de top 3`}
+        />
+        <CompactStat
+          label="Pagina's met verkeer"
+          value={data.pages_with_traffic}
+          hint={`${data.pages_with_backlinks} met backlinks`}
+        />
+        <CompactStat
+          label="URL's met waarde die niet werken"
+          value={data.lost_value_urls}
+          tone={data.lost_value_urls ? "bad" : "good"}
+          hint={`${data.extra_urls} URL's niet in crawl`}
+        />
+      </StatGrid>
+      <p className="text-[11px] text-muted-foreground">
+        Ahrefs · {data.target} · {data.country.toUpperCase()} · data van {fetched} ·{" "}
+        {data.reused_from ? "overgenomen van de vorige scan (0 units)" : `${formatCount(data.units)} API-units`}
+      </p>
+    </section>
+  )
 }
 
 export function OverviewTab({ scan }: { scan: LaunchScanDetail }) {
@@ -64,6 +113,8 @@ export function OverviewTab({ scan }: { scan: LaunchScanDetail }) {
               />
             </StatGrid>
           </section>
+
+          {scan.ahrefs && <AhrefsSection data={scan.ahrefs} />}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="space-y-2">

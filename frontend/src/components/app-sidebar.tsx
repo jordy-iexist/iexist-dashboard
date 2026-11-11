@@ -76,7 +76,7 @@ const blogItems = [
 const landingPageItems = [
   { title: "Alle pagina's", url: "/dashboard/landing-pages", icon: FileText },
   { title: "CSV Upload", url: "/dashboard/landing-pages/upload", icon: Upload },
-]
+];
 
 const seoItems = [
   {
@@ -123,10 +123,14 @@ export function AppSidebar({
             className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
           >
             <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white">
-              <img src="/iExist-favicon-X-blauwgeel.svg" alt="Logo" className="size-4" />
+              <img
+                src="/iExist-favicon-X-blauwgeel.svg"
+                alt="Logo"
+                className="size-4"
+              />
             </span>
             <span className="truncate text-sm font-semibold text-white">
-              iExist Dashboard
+              iExist
             </span>
           </Link>
           <SidebarTrigger className="ml-auto text-white/70 hover:bg-white/10 hover:text-white group-data-[collapsible=icon]:ml-0" />
@@ -135,7 +139,9 @@ export function AppSidebar({
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs text-white/50">Navigatie</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-xs text-white/50">
+            Navigatie
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => {
@@ -164,7 +170,10 @@ export function AppSidebar({
               <Collapsible asChild className="group/collapsible">
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
-                    <SidebarMenuButton tooltip="Blog Generator" className={itemClass}>
+                    <SidebarMenuButton
+                      tooltip="Blog Generator"
+                      className={itemClass}
+                    >
                       <FileText />
                       <span>Blog Generator</span>
                       <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
@@ -176,7 +185,11 @@ export function AppSidebar({
                         const isActive = pathname === item.url;
                         return (
                           <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton asChild isActive={isActive} className={subClass}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={isActive}
+                              className={subClass}
+                            >
                               <Link href={item.url}>
                                 <item.icon />
                                 <span>{item.title}</span>
@@ -210,7 +223,11 @@ export function AppSidebar({
                         const isActive = pathname === item.url;
                         return (
                           <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton asChild isActive={isActive} className={subClass}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={isActive}
+                              className={subClass}
+                            >
                               <Link href={item.url}>
                                 <item.icon />
                                 <span>{item.title}</span>
@@ -233,9 +250,7 @@ export function AppSidebar({
                     >
                       <Search />
                       <span>SEO Tools</span>
-                      <span className={badgeClass}>
-                        Binnenkort
-                      </span>
+                      <span className={badgeClass}>Binnenkort</span>
                       <ChevronDown className="ml-1 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
@@ -249,9 +264,7 @@ export function AppSidebar({
                           >
                             <item.icon />
                             <span>{item.title}</span>
-                            <span className={badgeClass}>
-                              Binnenkort
-                            </span>
+                            <span className={badgeClass}>Binnenkort</span>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
@@ -269,9 +282,7 @@ export function AppSidebar({
                     >
                       <ScanLine />
                       <span>Audit Tools</span>
-                      <span className={badgeClass}>
-                        Binnenkort
-                      </span>
+                      <span className={badgeClass}>Binnenkort</span>
                       <ChevronDown className="ml-1 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
@@ -285,9 +296,7 @@ export function AppSidebar({
                           >
                             <item.icon />
                             <span>{item.title}</span>
-                            <span className={badgeClass}>
-                              Binnenkort
-                            </span>
+                            <span className={badgeClass}>Binnenkort</span>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
@@ -333,7 +342,11 @@ export function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Uitloggen" className={itemClass}>
+            <SidebarMenuButton
+              asChild
+              tooltip="Uitloggen"
+              className={itemClass}
+            >
               <form action="/api/auth/signout" method="POST">
                 <button
                   type="submit"

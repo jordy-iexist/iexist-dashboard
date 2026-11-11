@@ -1,4 +1,5 @@
 """Tools voor de GEO-agent (fase 2): alleen-lezen toegang tot één fase-2 scan."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -8,9 +9,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.tools import tool
-from app.db.models import CustomerWebsite, LaunchScan, LaunchScanPage
-from app.features.launch_checklist.services.checklist_view import merged_checklist
-from app.features.launch_checklist.services.geo_checklist import ITEMS
+from app.db.models import LaunchChecklistState, LaunchScan, LaunchScanPage
+from app.features.launch_checklist.services.geo_checklist import ITEMS, merge_checklist
 from app.features.launch_checklist.services.geo_extract import all_types
 from app.features.launch_checklist.services.page_types import PAGE_TYPES
 
@@ -31,8 +31,16 @@ def _merged(ctx: GeoContext) -> dict[str, Any]:
     scan = _scan(ctx)
     if scan is None:
         return {}
-    customer = ctx.db.get(CustomerWebsite, scan.customer_website_id)
-    return merged_checklist(ctx.db, customer, scan)
+    payload = scan.checklist or {}
+    states = {
+        s.item_key: s
+        for s in ctx.db.query(LaunchChecklistState)
+        .filter(LaunchChecklistState.customer_website_id == scan.customer_website_id)
+        .all()
+    }
+    return merge_checklist(
+        payload.get("items"), states, is_webshop=bool(payload.get("is_webshop"))
+    )
 
 
 @tool(
@@ -48,7 +56,11 @@ def get_checklist(ctx: GeoContext) -> dict[str, Any]:
         "base_url": scan.base_url if scan else None,
         "is_webshop": payload.get("is_webshop"),
         "page_types": payload.get("page_types"),
-        "progress": {"done": merged.get("done"), "total": merged.get("total"), "percent": merged.get("percent")},
+        "progress": {
+            "done": merged.get("done"),
+            "total": merged.get("total"),
+            "percent": merged.get("percent"),
+        },
         "sections": [
             {
                 "section": s["label"],
@@ -85,7 +97,9 @@ def get_item_details(ctx: GeoContext, key: str) -> Any:
     item = ITEMS.get(key)
     result = dict(items.get(key) or {})
     if isinstance(result.get("details"), dict):
-        result["details"] = {k: v for k, v in result["details"].items() if k not in {"tried", "baseline"}}
+        result["details"] = {
+            k: v for k, v in result["details"].items() if k not in {"tried", "baseline"}
+        }
     return {"key": key, "label": item.label if item else key, **result}
 
 
@@ -94,10 +108,17 @@ def get_item_details(ctx: GeoContext, key: str) -> Any:
     "Per paginatype: aantal pagina's en welke schema-types daar voorkomen (aantal pagina's per type).",
 )
 def get_schema_matrix(ctx: GeoContext) -> dict[str, Any]:
-    pages = ctx.db.query(LaunchScanPage).filter(
-        LaunchScanPage.scan_id == ctx.source_scan_id, LaunchScanPage.indexable.is_(True)
-    ).all()
-    matrix: dict[str, dict[str, Any]] = defaultdict(lambda: {"pages": 0, "types": defaultdict(int)})
+    pages = (
+        ctx.db.query(LaunchScanPage)
+        .filter(
+            LaunchScanPage.scan_id == ctx.source_scan_id,
+            LaunchScanPage.indexable.is_(True),
+        )
+        .all()
+    )
+    matrix: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"pages": 0, "types": defaultdict(int)}
+    )
     for p in pages:
         if p.page_type is None:
             continue
@@ -106,7 +127,10 @@ def get_schema_matrix(ctx: GeoContext) -> dict[str, Any]:
         for t in all_types(p.jsonld or []):
             row["types"][t] += 1
     return {
-        PAGE_TYPES.get(k, k): {"pages": v["pages"], "types": dict(sorted(v["types"].items(), key=lambda kv: -kv[1])[:12])}
+        PAGE_TYPES.get(k, k): {
+            "pages": v["pages"],
+            "types": dict(sorted(v["types"].items(), key=lambda kv: -kv[1])[:12]),
+        }
         for k, v in matrix.items()
     }
 
@@ -120,7 +144,11 @@ def get_entity_signals(ctx: GeoContext) -> dict[str, Any]:
     items = ((scan.checklist if scan else None) or {}).get("items") or {}
     nap = ((items.get("nap_linkedin") or {}).get("details") or {}).get("site_nap")
     org = (items.get("schema_org_nap") or {}).get("details")
-    same_as = {k.removeprefix("sameas_"): v.get("evidence") for k, v in items.items() if k.startswith("sameas_")}
+    same_as = {
+        k.removeprefix("sameas_"): v.get("evidence")
+        for k, v in items.items()
+        if k.startswith("sameas_")
+    }
     return {"site_nap": nap, "organization_markup": org, "same_as_or_profiles": same_as}
 
 
@@ -133,10 +161,20 @@ def get_entity_signals(ctx: GeoContext) -> dict[str, Any]:
         "limit": {"type": "integer", "minimum": 1, "maximum": 50},
     },
 )
-def query_pages(ctx: GeoContext, page_type: str | None = None, problem: str | None = None, limit: int = 15) -> dict[str, Any]:
-    pages = ctx.db.query(LaunchScanPage).filter(
-        LaunchScanPage.scan_id == ctx.source_scan_id, LaunchScanPage.indexable.is_(True)
-    ).all()
+def query_pages(
+    ctx: GeoContext,
+    page_type: str | None = None,
+    problem: str | None = None,
+    limit: int = 15,
+) -> dict[str, Any]:
+    pages = (
+        ctx.db.query(LaunchScanPage)
+        .filter(
+            LaunchScanPage.scan_id == ctx.source_scan_id,
+            LaunchScanPage.indexable.is_(True),
+        )
+        .all()
+    )
     if page_type:
         pages = [p for p in pages if p.page_type == page_type]
     predicates = {
@@ -164,4 +202,10 @@ def query_pages(ctx: GeoContext, page_type: str | None = None, problem: str | No
     }
 
 
-GEO_TOOLS = [get_checklist, get_item_details, get_schema_matrix, get_entity_signals, query_pages]
+GEO_TOOLS = [
+    get_checklist,
+    get_item_details,
+    get_schema_matrix,
+    get_entity_signals,
+    query_pages,
+]

@@ -9,9 +9,11 @@ import {
   apiFetch,
   CATEGORY_LABELS,
   describeMondayPush,
+  formatCount,
   ISSUE_STATUS_LABELS,
   pushToMonday,
   syncMondayLinks,
+  valueBoostOf,
   type IssueGroup,
   type IssueStatus,
   type LaunchScanIssue,
@@ -227,6 +229,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
         <ul className="divide-y rounded-lg border bg-card">
           {issues.map((issue) => {
             const open = expanded === issue.id
+            const boost = valueBoostOf(issue.details)
             return (
               <li key={issue.id} className="px-3 py-2">
                 <div className="flex items-start gap-3">
@@ -235,6 +238,22 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                     <div className="flex flex-wrap items-center gap-2">
                       <SeverityBadge severity={issue.severity} />
                       <Pill>{CATEGORY_LABELS[issue.category] ?? issue.category}</Pill>
+                      {boost && (
+                        <Pill
+                          tone="blue"
+                          className="cursor-help"
+                        >
+                          <span
+                            title={
+                              boost.from
+                                ? `Prioriteit verhoogd (was ${boost.from}): deze pagina heeft verkeer of backlinks volgens Ahrefs.`
+                                : "Deze pagina heeft verkeer of backlinks volgens Ahrefs."
+                            }
+                          >
+                            Pagina met waarde · {formatCount(boost.org_traffic ?? 0)} bezoeken · {formatCount(boost.refdomains ?? 0)} domeinen
+                          </span>
+                        </Pill>
+                      )}
                       <span className="text-sm font-medium">{issue.title}</span>
                       <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
                     </div>

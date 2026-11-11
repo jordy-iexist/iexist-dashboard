@@ -69,6 +69,10 @@ class PageRecord:
     schema_types: list[str] = field(default_factory=list)
     open_graph: dict[str, str] = field(default_factory=dict)
     error: str | None = None
+    # Ahrefs-verrijking (services/ahrefs_enrich.py).
+    org_traffic: int | None = None
+    refdomains: int | None = None
+    ahrefs: dict[str, Any] | None = None
     final_status: int | None = None
     # Niet opgeslagen: interne linkdoelen voor crawl + broken-link-check.
     internal_targets: list[str] = field(default_factory=list)

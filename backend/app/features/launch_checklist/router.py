@@ -73,7 +73,7 @@ from app.features.launch_checklist.schemas import (
     LaunchScanPageListResponse,
 )
 from app.core.config import settings
-from app.features.launch_checklist.services import monday_push
+from app.features.launch_checklist.services import ahrefs_enrich, monday_push
 from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo as _latest_completed_geo,
     latest_content_scan as _latest_content_scan,
@@ -155,6 +155,15 @@ async def list_launch_customers(
     customers = db.query(CustomerWebsite).order_by(CustomerWebsite.name.asc()).all()
     categories = {c.id: c.name for c in db.query(CustomerCategory).all()}
     latest = _latest_scans(db, phase=1)
+    # Nieuwste nulmeting die niet mislukt/geannuleerd is (ook als die nog loopt).
+    newest_p1: dict[str, LaunchScan] = {}
+    for row in (
+        db.query(LaunchScan)
+        .filter(LaunchScan.phase == 1, LaunchScan.status.notin_(("failed", "canceled")))
+        .order_by(LaunchScan.created_at.asc())
+        .all()
+    ):
+        newest_p1[row.customer_website_id] = row
     latest_geo = _latest_scans(db, phase=2)
     completed_geo = _latest_scans(db, phase=2, completed_only=True)
     latest_content = _latest_scans(db, phase=3)
@@ -174,6 +183,15 @@ async def list_launch_customers(
             merged = merge_content_checklist(content.checklist.get("items"), states.get(c.id, {}))
             content_progress = ChecklistProgress(
                 done=merged["done"], total=merged["total"], percent=merged["percent"])
+        # Verouderd: gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende).
+        p1 = newest_p1.get(c.id)
+        geo_outdated = geo is not None and p1 is not None and geo.source_scan_id != p1.id
+        content_outdated = (
+            content is not None
+            and content.status in ("completed", "analyzing")
+            and p1 is not None
+            and content.source_scan_id != p1.id
+        )
         items.append(LaunchCustomerItem(
             id=c.id,
             name=c.name,
@@ -185,6 +203,8 @@ async def list_launch_customers(
             checklist_progress=progress,
             latest_content_scan=to_scan_item(content) if content is not None else None,
             content_progress=content_progress,
+            geo_outdated=geo_outdated,
+            content_outdated=content_outdated,
         ))
     return LaunchCustomerListResponse(customers=items)
 
@@ -329,6 +349,13 @@ _PAGE_FILTERS = {
     "cwv_measured": lambda q: q.filter(LaunchScanPage.cwv_status.isnot(None)),
     "cwv_poor": lambda q: q.filter(LaunchScanPage.cwv_status == "poor"),
     "classified": lambda q: q.filter(LaunchScanPage.page_type.isnot(None)),
+    # Ahrefs: pagina's met organisch verkeer of verwijzende domeinen.
+    "value": lambda q: q.filter((LaunchScanPage.org_traffic > 0) | (LaunchScanPage.refdomains > 0)),
+}
+# Ahrefs-filters op JSON-inhoud (eindstatus, bron): in Python op de kleine set pagina's met waarde.
+_VALUE_PAGE_FILTERS = {
+    "value_lost": ahrefs_enrich.is_lost,
+    "ahrefs_only": lambda p: (p.ahrefs or {}).get("source") == "ahrefs",
 }
 
 
@@ -348,6 +375,10 @@ async def list_launch_scan_pages(
     query = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == scan_id)
     if filter and filter in _PAGE_FILTERS:
         query = _PAGE_FILTERS[filter](query)
+    elif filter in _VALUE_PAGE_FILTERS:
+        predicate = _VALUE_PAGE_FILTERS[filter]
+        ids = [p.id for p in _PAGE_FILTERS["value"](query).all() if predicate(p)]
+        query = query.filter(LaunchScanPage.id.in_(ids or [""]))
     if search:
         like = f"%{search.strip()}%"
         query = query.filter((LaunchScanPage.url.ilike(like)) | (LaunchScanPage.title.ilike(like)))
@@ -361,6 +392,8 @@ async def list_launch_scan_pages(
         "words": LaunchScanPage.word_count.asc().nullslast(),
         "depth": LaunchScanPage.click_depth.desc().nullsfirst(),
         "inlinks": LaunchScanPage.inlinks.asc().nullsfirst(),
+        "traffic": LaunchScanPage.org_traffic.desc().nullslast(),
+        "refdomains": LaunchScanPage.refdomains.desc().nullslast(),
     }
     total = query.count()
     rows = query.order_by(sort_columns.get(sort, LaunchScanPage.path.asc())).offset(offset).limit(limit).all()
@@ -1085,14 +1118,20 @@ async def update_content_page_keyword(
     db: Session = Depends(get_db),
 ):
     """Focuszoekwoord handmatig vastleggen. De agents gebruiken het bij de volgende
-    analyse; bestaande voorstellen wijzigen niet. Leeg = weer door de AI laten bepalen."""
+    analyse; bestaande voorstellen wijzigen niet. Leeg = weer automatisch: het zoekwoord
+    waarop de pagina nu rankt (Ahrefs) of anders door de AI laten bepalen."""
     page = _get_content_page(db, scan_id, page_id)
     keyword = " ".join((payload.focus_keyword or "").split())
+    hint = (page.signals or {}).get("ahrefs") or None
     if keyword:
         page.focus_keyword = keyword
         page.keyword_source = "manual"
         if "intent" in payload.model_fields_set:
             page.intent = payload.intent
+    elif ahrefs_enrich.is_fixed_keyword(hint):
+        page.focus_keyword = hint["keyword"]
+        page.keyword_source = "ahrefs"
+        page.intent = None
     else:
         page.focus_keyword = None
         page.intent = None
@@ -1300,6 +1339,8 @@ async def export_launch_scan(
             "Kapotte links", "Afbeeldingen", "Zonder alt", "Schema types", "Open Graph",
             "CWV status", "CWV bron", "Performance score", "LCP (ms)", "CLS", "TBT (ms)", "FCP (ms)",
             "Veld LCP", "Veld INP", "Veld CLS", "Fout",
+            "Organisch verkeer (Ahrefs)", "Verwijzende domeinen (Ahrefs)", "Topzoekwoord", "Positie topzoekwoord",
+            "Volume topzoekwoord", "Niet in crawl (alleen Ahrefs)",
         ])
         pages = (
             db.query(LaunchScanPage)
@@ -1311,6 +1352,7 @@ async def export_launch_scan(
             cwv = p.cwv or {}
             lab = cwv.get("lab") or {}
             field = cwv.get("field") or {}
+            ahrefs = p.ahrefs or {}
 
             def fv(name: str) -> str:
                 metric = field.get(name)
@@ -1329,6 +1371,9 @@ async def export_launch_scan(
                 _fmt(lab.get("performance_score")), _fmt(lab.get("lcp")), _fmt(lab.get("cls")),
                 _fmt(lab.get("tbt")), _fmt(lab.get("fcp")), fv("lcp"), fv("inp"), fv("cls"),
                 _fmt(p.error or cwv.get("error")),
+                _fmt(p.org_traffic), _fmt(p.refdomains), _fmt(ahrefs.get("top_keyword")),
+                _fmt(ahrefs.get("top_keyword_position")), _fmt(ahrefs.get("top_keyword_volume")),
+                _fmt(ahrefs.get("source") == "ahrefs") if ahrefs else "",
             ])
 
     customer = db.get(CustomerWebsite, scan.customer_website_id)

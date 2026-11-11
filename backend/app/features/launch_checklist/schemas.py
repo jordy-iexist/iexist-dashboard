@@ -45,6 +45,8 @@ class LaunchScanItem(BaseModel):
 
 class LaunchScanDetail(LaunchScanItem):
     ai_checks: Any = None
+    # Ahrefs-snapshot: {target, country, fetched_at, reused_from, units, domain, errors, ...}
+    ahrefs: Any = None
     ai_summary: str | None = None
     agent_trace: Any = None
 
@@ -65,6 +67,9 @@ class LaunchCustomerItem(BaseModel):
     checklist_progress: "ChecklistProgress | None" = None
     latest_content_scan: LaunchScanItem | None = None
     content_progress: "ChecklistProgress | None" = None
+    # Fase 2/3 gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende) fase-1-scan.
+    geo_outdated: bool = False
+    content_outdated: bool = False
 
 
 class LaunchCustomerListResponse(BaseModel):
@@ -112,6 +117,10 @@ class LaunchScanPageItem(BaseModel):
     click_depth: int | None = None
     inlinks: int | None = None
     schema_all: list[str] | None = None
+    # Ahrefs: organisch verkeer per maand, verwijzende domeinen en details (topzoekwoord, bron).
+    org_traffic: int | None = None
+    refdomains: int | None = None
+    ahrefs: Any = None
     issue_count: int = 0
 
 
@@ -295,6 +304,8 @@ class ContentPageItem(BaseModel):
     focus_keyword: str | None = None
     intent: str | None = None
     keyword_source: str | None = None
+    # Ahrefs: het zoekwoord waarop de pagina nu het meeste verkeer krijgt.
+    ahrefs_keyword: dict[str, Any] | None = None
     analyzed_at: datetime | None = None
     suggestions_open: int = 0
     suggestions_total: int = 0

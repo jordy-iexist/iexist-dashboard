@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from app.db.models import LaunchScanPage
+from app.features.launch_checklist.services.ahrefs_enrich import is_lost
 from app.features.launch_checklist.services.issues import final_status
 
 
@@ -59,6 +60,12 @@ def build_summary_stats(pages: list[LaunchScanPage], issues: list[dict[str, Any]
             "needs_improvement": cwv_counts.get("needs_improvement", 0),
             "poor": cwv_counts.get("poor", 0),
             "avg_performance_score": round(sum(perf_scores) / len(perf_scores)) if perf_scores else None,
+        },
+        "ahrefs": {
+            "pages_with_traffic": len([p for p in pages if (p.org_traffic or 0) > 0]),
+            "pages_with_backlinks": len([p for p in pages if (p.refdomains or 0) > 0]),
+            "extra_urls": len([p for p in pages if (p.ahrefs or {}).get("source") == "ahrefs"]),
+            "lost_value_urls": len([p for p in pages if is_lost(p)]),
         },
         "issues": {
             "total": len(issues),
