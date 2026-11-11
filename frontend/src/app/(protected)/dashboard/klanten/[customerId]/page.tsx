@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Pencil, Sheet } from "lucide-react"
+import { ListChecks, Pencil, Sheet } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { KlantHero } from "@/components/klanten/KlantHero"
@@ -98,6 +98,12 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
             <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
               <Sheet />
               Open spreadsheet
+            </Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link href={`/dashboard/livegang/${customer.id}`}>
+              <ListChecks />
+              Livegang checklist
             </Link>
           </Button>
           <Button asChild variant="secondary">

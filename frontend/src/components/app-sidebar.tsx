@@ -15,6 +15,7 @@ import {
   Search,
   ScanLine,
   Globe,
+  ListChecks,
 } from "lucide-react";
 
 import {
@@ -50,6 +51,11 @@ const menuItems = [
     title: "Klanten",
     url: "/dashboard/klanten",
     icon: Users,
+  },
+  {
+    title: "Livegang checklist",
+    url: "/dashboard/livegang",
+    icon: ListChecks,
   },
 ];
 
@@ -121,7 +127,10 @@ export function AppSidebar({ user }: { user: AuthUser }) {
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => {
-                const isActive = pathname === item.url;
+                const isActive =
+                  item.url === "/dashboard"
+                    ? pathname === item.url
+                    : pathname.startsWith(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton

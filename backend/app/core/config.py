@@ -183,6 +183,27 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_SEO_META_REASONING_EFFORT",
     )
 
+    pagespeed_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("PAGESPEED_API_KEY", "GOOGLE_PAGESPEED_API_KEY"),
+    )
+    launch_scan_openai_model: str = Field(
+        default="gpt-5.2",
+        validation_alias="LAUNCH_SCAN_OPENAI_MODEL",
+    )
+    launch_scan_http_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=50,
+        validation_alias="LAUNCH_SCAN_HTTP_CONCURRENCY",
+    )
+    launch_scan_psi_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        validation_alias="LAUNCH_SCAN_PSI_CONCURRENCY",
+    )
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

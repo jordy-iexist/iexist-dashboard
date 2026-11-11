@@ -828,6 +828,157 @@ class AuditIssue(Base):
     )
 
 
+class LaunchScan(Base):
+    __tablename__ = "launch_scans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    phase: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    discovery_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    total_urls: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    inventoried_urls: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    failed_urls: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    max_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("500")
+    )
+    vitals_max_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("100")
+    )
+    vitals_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    vitals_measured: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    ai_checks: Mapped[Any] = mapped_column(JSON, nullable=True)
+    summary_stats: Mapped[Any] = mapped_column(JSON, nullable=True)
+    ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    agent_trace: Mapped[Any] = mapped_column(JSON, nullable=True)
+    warnings: Mapped[Any] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class LaunchScanPage(Base):
+    __tablename__ = "launch_scan_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scan_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("launch_scans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    in_sitemap: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    final_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    redirect_chain: Mapped[Any] = mapped_column(JSON, nullable=True)
+    response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    http_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    indexable: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    indexability_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta_robots: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    meta_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta_description_length: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    h1: Mapped[Any] = mapped_column(JSON, nullable=True)
+    h1_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    h2: Mapped[Any] = mapped_column(JSON, nullable=True)
+    canonical: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    lang: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    hreflang: Mapped[Any] = mapped_column(JSON, nullable=True)
+    internal_links: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    external_links: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    broken_links: Mapped[Any] = mapped_column(JSON, nullable=True)
+    images_total: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    images_missing_alt: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    schema_types: Mapped[Any] = mapped_column(JSON, nullable=True)
+    open_graph: Mapped[Any] = mapped_column(JSON, nullable=True)
+    cwv: Mapped[Any] = mapped_column(JSON, nullable=True)
+    cwv_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchScanIssue(Base):
+    __tablename__ = "launch_scan_issues"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scan_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("launch_scans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    page_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("launch_scan_pages.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    issue_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details: Mapped[Any] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'")
+    )
+    external_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_item_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -852,6 +1003,9 @@ __all__ = [
     "WebsiteAudit",
     "AuditPage",
     "AuditIssue",
+    "LaunchScan",
+    "LaunchScanPage",
+    "LaunchScanIssue",
     "LandingPageUpload",
     "LandingPageRow",
     "LandingPage",

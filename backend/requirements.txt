@@ -8,7 +8,7 @@ python-multipart
 python-dotenv
 pydantic-settings
 cryptography
-httpx
+httpx[http2]
 google-search-results
 python-jose[cryptography]
 passlib[bcrypt]

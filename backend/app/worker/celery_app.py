@@ -39,6 +39,7 @@ celery_app.conf.update(
         "app.worker.tasks.scan_website_keywords_task": {"queue": "blog_generation"},
         "app.worker.tasks.run_website_meta_optimization_task": {"queue": "blog_generation"},
         "app.worker.tasks.run_website_audit_task": {"queue": "audit"},
+        "app.worker.tasks.run_launch_scan_task": {"queue": "audit"},
     },
 )
 
@@ -48,4 +49,5 @@ celery_app.autodiscover_tasks([
     "app.features.seo_tracker.worker",
     "app.features.seo_meta.worker",
     "app.features.website_audit.worker",
+    "app.features.launch_checklist.worker",
 ])
