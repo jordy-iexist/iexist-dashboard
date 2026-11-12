@@ -98,7 +98,7 @@ export const PHASES = [
   { number: 1, title: "Nulmeting & AI scan", description: "Inventaris, Core Web Vitals en AI-vindbaarheid", available: true },
   { number: 2, title: "GEO/SEO-checklist", description: "Schema, entiteit-signalen en AI-toegang", available: true },
   { number: 3, title: "Content & onpage", description: "Meta, koppen en herschrijfvoorstellen", available: true },
-  { number: 4, title: "Volgende fase", description: "Komt binnenkort beschikbaar", available: false },
+  { number: 4, title: "Kwartaal GEO", description: "Herhaalscan, vergelijking en rapportage per kwartaal", available: true },
 ]
 
 export function PhaseStepper({
@@ -246,6 +246,8 @@ export const PHASE1_STEPS: ScanStatus[] = ["discovering", "inventory", "vitals",
 export const GEO_STEPS: ScanStatus[] = ["fetching", "linking", "checking", "analyzing"]
 /** Fase 3: de scan zelf (zonder AI); de AI-analyse start de gebruiker daarna per selectie. */
 export const CONTENT_STEPS: ScanStatus[] = ["fetching", "linking", "checking"]
+/** Fase 4: herhaalscan, opnieuw ophalen voor schema, vergelijken en conceptrapport. */
+export const QUARTERLY_STEPS: ScanStatus[] = ["discovering", "inventory", "fetching", "checking", "analyzing"]
 
 export function isActive(status: ScanStatus) {
   return ACTIVE_STATUSES.includes(status)

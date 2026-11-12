@@ -5,11 +5,14 @@ groep per fase. Doorzetten is eenrichtingsverkeer en idempotent: een punt dat
 al een Monday-item heeft wordt overgeslagen. Een fase-2 checklistpunt en het
 bijbehorende `geo_<key>`-actiepunt delen één Monday-item.
 
-Actiepunten per pagina (fase 1 en fase 3) worden op onderwerp gegroepeerd: per
+Actiepunten per pagina (fase 1, 3 en 4) worden op onderwerp gegroepeerd: per
 issue_type één hoofditem (bijv. "Meta description ontbreekt"), met elk
 actiepunt als subitem. Sitebrede punten en fase-2 punten blijven losse items.
 Bij fase-3 actiepunten gaan de AI-voorstellen voor die pagina mee in de
 toelichting.
+
+Fase-4 checklistpunten horen bij een ronde (kwartaal): elke ronde krijgt eigen
+items, met de ronde in de naam.
 """
 from __future__ import annotations
 
@@ -34,10 +37,13 @@ from app.db.models import (
 from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo,
     latest_content_scan,
+    latest_quarterly_scan,
     merged_checklist,
     merged_content_checklist,
+    merged_quarterly_checklist,
 )
 from app.features.launch_checklist.services.geo_checklist import ITEMS
+from app.features.launch_checklist.services.quarterly_checklist import period_label
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
 from app.services.monday import client as monday
 from app.services.monday.client import MondayBoard, MondayServiceError
@@ -48,14 +54,16 @@ GROUP_TITLES = {
     1: "Fase 1 – Nulmeting",
     2: "Fase 2 – GEO/SEO-checklist",
     3: "Fase 3 – Content & onpage",
+    4: "Fase 4 – Kwartaal GEO-werkzaamheden",
 }
 PHASES = tuple(sorted(GROUP_TITLES))
 CHECKLIST_SOURCE = {
     2: "Livegang fase 2 – GEO/SEO-checklist",
     3: "Livegang fase 3 – Contentcreatie & onpage optimalisatie",
+    4: "Livegang fase 4 – Kwartaal GEO-werkzaamheden",
 }
 # Fases waarvan actiepunten per pagina onder een onderwerp (hoofditem) hangen.
-GROUPED_PHASES = {1, 3}
+GROUPED_PHASES = {1, 3, 4}
 MAX_SUGGESTIONS_IN_BODY = 10
 GEO_ISSUE_PREFIX = "geo_"
 MAX_ITEM_NAME = 250
@@ -296,7 +304,8 @@ def checklist_item_name(item: dict[str, Any]) -> str:
 
 
 def checklist_body(
-    item: dict[str, Any], section_label: str, customer: CustomerWebsite, phase: int = 2
+    item: dict[str, Any], section_label: str, customer: CustomerWebsite, phase: int = 2,
+    period: str = "",
 ) -> str:
     parts: list[str] = []
     if item.get("description"):
@@ -310,6 +319,8 @@ def checklist_body(
         parts.append(_p("Notitie", item["note"]))
     parts.append(_p("Prioriteit", item.get("priority") or "normaal"))
     parts.append(_p("Sectie", section_label))
+    if period:
+        parts.append(_p("Ronde", period_label(period)))
     parts.append(_p("Bron", CHECKLIST_SOURCE.get(phase, f"Livegang fase {phase}")))
     parts.append(_dashboard_link(customer))
     return "".join(p for p in parts if p)
@@ -392,12 +403,13 @@ def _create_grouped(
 
 # --- koppeling vastleggen --------------------------------------------------
 
-def _state_for(db: Session, customer_id: str, key: str) -> LaunchChecklistState | None:
+def _state_for(db: Session, customer_id: str, key: str, period: str = "") -> LaunchChecklistState | None:
     return (
         db.query(LaunchChecklistState)
         .filter(
             LaunchChecklistState.customer_website_id == customer_id,
             LaunchChecklistState.item_key == key,
+            LaunchChecklistState.period == period,
         )
         .first()
     )
@@ -405,12 +417,12 @@ def _state_for(db: Session, customer_id: str, key: str) -> LaunchChecklistState 
 
 def _link_state(
     db: Session, customer_id: str, key: str, *, item_id: str, url: str | None,
-    pushed_at: datetime, user_id: str | None,
+    pushed_at: datetime, user_id: str | None, period: str = "",
 ) -> None:
-    state = _state_for(db, customer_id, key)
+    state = _state_for(db, customer_id, key, period)
     if state is None:
         state = LaunchChecklistState(
-            id=str(uuid.uuid4()), customer_website_id=customer_id, item_key=key,
+            id=str(uuid.uuid4()), customer_website_id=customer_id, item_key=key, period=period,
             updated_by=user_id, updated_at=pushed_at,
         )
         db.add(state)
@@ -597,10 +609,21 @@ def push_issues(db: Session, issue_ids: list[str], user_id: str | None) -> PushR
 def push_checklist_items(
     db: Session, customer: CustomerWebsite, item_keys: list[str], user_id: str | None,
     phase: int = 2,
+    period: str = "",
 ) -> PushResult:
-    """Zet checklistpunten (fase 2 of 3) door naar de fasegroep van het klantbord."""
+    """Zet checklistpunten (fase 2, 3 of 4) door naar de fasegroep van het klantbord.
+
+    Voor fase 4 is `period` de ronde; elke ronde krijgt eigen Monday-items.
+    """
     keys = list(dict.fromkeys(item_keys))
-    if phase == 3:
+    if phase != 4:
+        period = ""
+    if phase == 4:
+        geo = None
+        merged = merged_quarterly_checklist(
+            db, customer.id, latest_quarterly_scan(db, customer.id, period), period
+        )
+    elif phase == 3:
         # Fase-3 actiepunten zijn per pagina; die delen geen item met het checklistpunt.
         geo = None
         merged = merged_content_checklist(db, customer.id, latest_content_scan(db, customer.id))
@@ -622,7 +645,7 @@ def push_checklist_items(
             outcomes.append(PushOutcome(key, "failed", "Onbekend checklistpunt."))
             continue
         item, section_label = entry
-        state = _state_for(db, customer.id, key)
+        state = _state_for(db, customer.id, key, period)
         if state is not None and state.external_item_id:
             outcomes.append(PushOutcome(key, "skipped", "Al doorgezet.", state.external_url))
             continue
@@ -636,10 +659,13 @@ def push_checklist_items(
             outcomes.append(PushOutcome(
                 key, "skipped", "Al doorgezet via de actiepunten.", issue.external_url))
             continue
+        name = checklist_item_name(item)
+        if period:
+            name = f"{name} ({period_label(period)})"[:MAX_ITEM_NAME]
         try:
             created, warning = _create(
-                board, _group_id(customer, phase), checklist_item_name(item),
-                checklist_body(item, section_label, customer, phase),
+                board, _group_id(customer, phase), name,
+                checklist_body(item, section_label, customer, phase, period),
             )
         except MondayServiceError as exc:
             db.rollback()
@@ -650,7 +676,7 @@ def push_checklist_items(
             continue
         pushed_at = _now()
         _link_state(db, customer.id, key, item_id=created.id, url=created.url,
-                    pushed_at=pushed_at, user_id=user_id)
+                    pushed_at=pushed_at, user_id=user_id, period=period)
         if issue is not None:
             _link_issue(issue, item_id=created.id, url=created.url, pushed_at=pushed_at)
         db.commit()

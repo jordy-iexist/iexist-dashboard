@@ -323,7 +323,8 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                     {issueDetailData(issue) !== null ? (
                       <CheckDetails itemKey={issue.issue_type} details={issueDetailData(issue)} />
                     ) : (
-                      issue.details != null && (
+                      // Fase 4: de omschrijving bevat de bevindingen al; geen ruwe JSON tonen.
+                      issue.details != null && !issue.issue_type.startsWith("c4_") && (
                         <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">{JSON.stringify(issue.details, null, 2)}</pre>
                       )
                     )}

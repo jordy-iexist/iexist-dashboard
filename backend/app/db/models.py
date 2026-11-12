@@ -316,6 +316,10 @@ class CustomerWebsite(Base):
     monday_group_fase1_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     monday_group_fase2_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     monday_group_fase3_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monday_group_fase4_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Handmatig gekozen Search Console-property (bijv. "sc-domain:example.nl").
+    # Leeg = automatisch zoeken op domein.
+    gsc_property: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
@@ -887,6 +891,10 @@ class LaunchScan(Base):
     warnings: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Ahrefs-snapshot van het domein (fase 1): baseline, verbruik en herkomst.
     ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Fase 4: Search Console-snapshot (prestaties, sitemaps, URL-inspectie).
+    search_console: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Fase 4: de ronde (kwartaal) waar de scan bij hoort, bijv. "2026-Q4".
+    period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -966,11 +974,16 @@ class LaunchScanPage(Base):
 
 
 class LaunchChecklistState(Base):
-    """Handmatige status per checklistpunt per klant (blijft over scans heen)."""
+    """Handmatige status per checklistpunt per klant (blijft over scans heen).
+
+    `period` is leeg voor fase 2 en 3; fase 4 bewaart de status per ronde (kwartaal).
+    """
 
     __tablename__ = "launch_checklist_states"
     __table_args__ = (
-        UniqueConstraint("customer_website_id", "item_key", name="uq_launch_checklist_state"),
+        UniqueConstraint(
+            "customer_website_id", "item_key", "period", name="uq_launch_checklist_state"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -981,6 +994,9 @@ class LaunchChecklistState(Base):
         index=True,
     )
     item_key: Mapped[str] = mapped_column(Text, nullable=False)
+    period: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     manual_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)

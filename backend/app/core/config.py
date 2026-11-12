@@ -275,6 +275,35 @@ class Settings(BaseSettings):
         default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
     )
 
+    # Google Search Console (livegang fase 4): één Google-account met alle klanten als
+    # property. Het refresh token komt uit scripts/gsc_authorize.py.
+    gsc_client_id: str = Field(default="", validation_alias="GSC_CLIENT_ID")
+    gsc_client_secret: str = Field(default="", validation_alias="GSC_CLIENT_SECRET")
+    gsc_refresh_token: str = Field(default="", validation_alias="GSC_REFRESH_TOKEN")
+    gsc_request_timeout_seconds: float = Field(
+        default=30.0, validation_alias="GSC_REQUEST_TIMEOUT_SECONDS"
+    )
+    # Lengte van de meetperiode; de vergelijking is de even lange periode ervoor.
+    gsc_period_days: int = Field(
+        default=90, ge=7, le=180, validation_alias="GSC_PERIOD_DAYS"
+    )
+    # Search Console loopt enkele dagen achter: de periode eindigt zoveel dagen terug.
+    gsc_data_lag_days: int = Field(
+        default=3, ge=0, le=14, validation_alias="GSC_DATA_LAG_DAYS"
+    )
+    # Rijen per rapport (zoekopdrachten en pagina's).
+    gsc_row_limit: int = Field(
+        default=250, ge=10, le=5000, validation_alias="GSC_ROW_LIMIT"
+    )
+    # URL-inspecties per scan (quotum: 2000 per dag per property).
+    gsc_inspect_max_urls: int = Field(
+        default=40, ge=0, le=500, validation_alias="GSC_INSPECT_MAX_URLS"
+    )
+    # Vanaf deze daling in klikken (%) geeft de checklist een waarschuwing.
+    gsc_clicks_drop_warn_pct: int = Field(
+        default=20, ge=1, le=100, validation_alias="GSC_CLICKS_DROP_WARN_PCT"
+    )
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

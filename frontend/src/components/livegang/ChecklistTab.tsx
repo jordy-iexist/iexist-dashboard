@@ -11,6 +11,7 @@ import {
   describeMondayPush,
   MANUAL_STATUS_LABELS,
   MODE_LABELS,
+  periodQuery,
   pushToMonday,
   type ChecklistItem,
   type ChecklistPath,
@@ -89,13 +90,17 @@ function ItemRow({
   item,
   customerId,
   path,
+  period,
   action,
+  details,
   onSaved,
 }: {
   item: ChecklistItem
   customerId: string
   path: ChecklistPath
+  period?: string
   action: ChecklistItemAction | null
+  details?: React.ReactNode
   onSaved: () => Promise<unknown>
 }) {
   const [note, setNote] = useState(item.note ?? "")
@@ -113,7 +118,7 @@ function ItemRow({
     setSaving(true)
     setError(null)
     try {
-      const summary = await pushToMonday({ kind: "checklist", customerId, path }, [item.key])
+      const summary = await pushToMonday({ kind: "checklist", customerId, path, period }, [item.key])
       if (summary.messages.length) setError(summary.messages.join(" "))
       await onSaved()
     } catch (err) {
@@ -127,7 +132,7 @@ function ItemRow({
     setSaving(true)
     setError(null)
     try {
-      await apiFetch(`/customers/${customerId}/${path}/${item.key}`, {
+      await apiFetch(`/customers/${customerId}/${path}/${item.key}${periodQuery(period)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -185,7 +190,7 @@ function ItemRow({
         <div className="space-y-3 border-t bg-muted/30 px-4 py-3 pl-13">
           {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
           {auto?.message && <p className="text-sm">{auto.message}</p>}
-          {auto?.evidence && <Evidence values={auto.evidence} />}
+          {details ?? (auto?.evidence && <Evidence values={auto.evidence} />)}
           {item.f1_issue_types.length > 0 && (
             <p className="text-xs text-muted-foreground">
               Details per pagina staan bij de actiepunten van fase 1 (nulmeting).
@@ -246,15 +251,21 @@ export function ChecklistTab({
   checklist,
   customerId,
   path = "checklist",
+  period,
   itemAction,
+  itemDetails,
   onChanged,
 }: {
   checklist: { sections: ChecklistSection[] }
   customerId: string
-  /** Fase 2 (standaard) of de fase-3 checklist. */
+  /** Fase 2 (standaard), de fase-3 of de fase-4 checklist. */
   path?: ChecklistPath
+  /** Fase 4: de ronde waar de handmatige status bij hoort. */
+  period?: string
   /** Optioneel: knop per punt die naar de bijbehorende details springt. */
   itemAction?: (item: ChecklistItem) => ChecklistItemAction | null
+  /** Optioneel: eigen weergave van de details van een punt (in plaats van de evidence-lijst). */
+  itemDetails?: (item: ChecklistItem) => React.ReactNode
   onChanged: () => Promise<unknown>
 }) {
   const [filter, setFilter] = useState<Filter>("all")
@@ -277,7 +288,7 @@ export function ChecklistTab({
     setNotice(null)
     setPushing(`0 / ${pushable.length}`)
     try {
-      const summary = await pushToMonday({ kind: "checklist", customerId, path }, pushable, (done, total) =>
+      const summary = await pushToMonday({ kind: "checklist", customerId, path, period }, pushable, (done, total) =>
         setPushing(`${done} / ${total}`)
       )
       setNotice({ text: describeMondayPush(summary), details: summary.messages, boardUrl: summary.board_url })
@@ -361,7 +372,15 @@ export function ChecklistTab({
                 <ul className="divide-y border-t">
                   {items.map((item) => (
                     <li key={item.key}>
-                      <ItemRow item={item} customerId={customerId} path={path} action={itemAction?.(item) ?? null} onSaved={onChanged} />
+                      <ItemRow
+                        item={item}
+                        customerId={customerId}
+                        path={path}
+                        period={period}
+                        action={itemAction?.(item) ?? null}
+                        details={itemDetails?.(item)}
+                        onSaved={onChanged}
+                      />
                     </li>
                   ))}
                 </ul>

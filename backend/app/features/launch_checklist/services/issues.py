@@ -665,3 +665,133 @@ def generate_content_issues(
         if result.get("status") in {"error", "warning"}:
             issues.append(content_issue(key, result, page_id=None, url=None, path=None))
     return issues
+
+
+# --- fase 4: kwartaal GEO-werkzaamheden -------------------------------------
+from app.features.launch_checklist.services.quarterly_checklist import (  # noqa: E402
+    ITEM_ISSUE_CATEGORY as _QUARTERLY_CATEGORY,
+    ITEMS as _QUARTERLY_ITEMS,
+)
+
+for _item in _QUARTERLY_ITEMS.values():
+    ISSUE_TYPES[_item.key] = {
+        "label": _item.label,
+        "category": _QUARTERLY_CATEGORY.get(_item.key, "techniek"),
+    }
+
+_QUARTERLY_RECOMMENDATIONS: dict[str, str] = {
+    "c4_ai_scan": "Bekijk welke AI-checks zijn verslechterd en herstel die (robots.txt, sitemap, schema, bereikbaarheid).",
+    "c4_new_pages": "Zorg dat de pagina bereikbaar is (200), indexeerbaar (geen noindex), een eigen canonical heeft en "
+                    "in de sitemap staat. Vraag daarna indexering aan in Search Console.",
+    "c4_schema_validation": "Herstel de JSON-LD (ongeldige JSON, ontbrekende verplichte eigenschappen) en controleer de "
+                            "pagina met de Rich Results Test van Google.",
+    "c4_search_console": "Bekijk de melding in Search Console (URL-inspectie, Sitemaps, Prestaties), los de oorzaak "
+                         "op en vraag waar nodig opnieuw indexering aan.",
+}
+
+
+def _quarterly_issue(
+    key: str, severity: str, *, page_id: str | None, url: str | None, title: str, description: str,
+    details: dict[str, Any],
+) -> Issue:
+    return {
+        "issue_type": key,
+        "category": _QUARTERLY_CATEGORY.get(key, "techniek"),
+        "severity": severity,
+        "page_id": page_id,
+        "url": url,
+        "title": title[:500],
+        "description": description,
+        "recommendation": _QUARTERLY_RECOMMENDATIONS.get(key),
+        "details": details,
+    }
+
+
+def generate_quarterly_issues(
+    items: dict[str, dict[str, Any]], manual_states: dict[str, str | None]
+) -> list[Issue]:
+    """Actiepunten van de fase-4 checklist.
+
+    Nieuwe pagina's en schemafouten krijgen een actiepunt per pagina; de
+    AI-vergelijking één actiepunt voor de site. Search Console geeft een actiepunt
+    per niet-geïndexeerde pagina en per sitemap met meldingen, plus één voor een
+    sterke daling in klikken. Punten die handmatig afgerond of
+    n.v.t. zijn, slaan we over. Kapotgegane bestaande pagina's leveren al een
+    4xx/5xx-actiepunt op via de fase 1-regels.
+    """
+    skip = {k for k, v in manual_states.items() if v in {"afgerond", "nvt"}}
+    issues: list[Issue] = []
+
+    ai = items.get("c4_ai_scan") or {}
+    if "c4_ai_scan" not in skip and ai.get("status") in {"error", "warning"}:
+        issues.append(_quarterly_issue(
+            "c4_ai_scan", "hoog" if ai["status"] == "error" else "middel", page_id=None, url=None,
+            title=f"AI-vindbaarheid verslechterd: {ai.get('message', '')}",
+            description=ai.get("message") or "",
+            details={"evidence": ai.get("evidence") or []},
+        ))
+
+    new_pages = items.get("c4_new_pages") or {}
+    if "c4_new_pages" not in skip:
+        for row in ((new_pages.get("details") or {}).get("new") or []):
+            if row.get("result") not in {"error", "warning"}:
+                continue
+            problems = ", ".join(row.get("problems") or [])
+            issues.append(_quarterly_issue(
+                "c4_new_pages", "hoog" if row["result"] == "error" else "middel",
+                page_id=row.get("page_id"), url=row.get("url"),
+                title=f"Nieuwe pagina {problems} – {row.get('path')}",
+                description=f"Nieuwe pagina sinds de vorige ronde: {problems}.",
+                details={"evidence": [], "data": row},
+            ))
+
+    schema = items.get("c4_schema_validation") or {}
+    if "c4_schema_validation" not in skip:
+        from app.features.launch_checklist.services.schema_validate import describe_problem
+
+        for row in ((schema.get("details") or {}).get("pages") or []):
+            parts = [describe_problem(p) for p in row.get("problems") or []]
+            if row.get("invalid_blocks"):
+                parts.insert(0, f"{row['invalid_blocks']}× ongeldige JSON-LD")
+            if row.get("lost_types"):
+                parts.append("schema-types verdwenen: " + ", ".join(row["lost_types"]))
+            issues.append(_quarterly_issue(
+                "c4_schema_validation", "hoog" if row.get("result") == "error" else "laag",
+                page_id=row.get("page_id"), url=row.get("url"),
+                title=f"Schema: {parts[0] if parts else 'controleren'} – {row.get('path')}",
+                description="; ".join(parts) + ".",
+                details={"evidence": parts, "data": row},
+            ))
+
+    search_console = items.get("c4_search_console") or {}
+    if "c4_search_console" not in skip:
+        gsc = search_console.get("details") or {}
+        for row in gsc.get("not_indexed") or []:
+            blocked = row.get("state") == "blocked"
+            issues.append(_quarterly_issue(
+                "c4_search_console", "hoog" if blocked else "middel", page_id=None, url=row.get("url"),
+                title=f"Niet geïndexeerd door Google: {row.get('reason')} – {row.get('url')}",
+                description=f"Volgens de URL-inspectie in Search Console is deze pagina niet opgenomen: "
+                            f"{row.get('reason')}.",
+                details={"evidence": [], "data": row},
+            ))
+        for row in gsc.get("sitemaps") or []:
+            errors, warnings = int(row.get("errors") or 0), int(row.get("warnings") or 0)
+            counts = (f"{errors} {'fout' if errors == 1 else 'fouten'}, "
+                      f"{warnings} {'waarschuwing' if warnings == 1 else 'waarschuwingen'}")
+            issues.append(_quarterly_issue(
+                "c4_search_console", "hoog" if row.get("errors") else "laag", page_id=None, url=row.get("path"),
+                title=f"Sitemap in Search Console: {counts} – {row.get('path')}",
+                description=f"Search Console meldt {counts} bij deze sitemap.",
+                details={"evidence": [], "data": row},
+            ))
+        if gsc.get("clicks_drop_pct") is not None:
+            drop = f"{abs(gsc['clicks_drop_pct']):g}%"
+            issues.append(_quarterly_issue(
+                "c4_search_console", "middel", page_id=None, url=None,
+                title=f"Klikken uit Google {drop} gedaald t.o.v. de vorige periode",
+                description=f"Search Console toont {drop} minder klikken dan in de periode ervoor. Bekijk bij "
+                            "Vergelijking welke zoekopdrachten en pagina's het meest zijn gedaald.",
+                details={"evidence": search_console.get("evidence") or []},
+            ))
+    return issues

@@ -193,17 +193,17 @@ def _page_entry(page: _Page) -> dict[str, Any]:
 
 
 def reuse_snapshot(db: Session, scan: LaunchScan) -> Snapshot | None:
-    """Recente, volledige snapshot van een eerdere nulmeting van dezelfde klant."""
+    """Recente, volledige snapshot van een eerdere nulmeting of fase 4-scan van dezelfde klant."""
     ttl_days = settings.ahrefs_snapshot_ttl_days
     if ttl_days <= 0:
         return None
-    # Alleen de laatste voltooide nulmeting telt: heeft die geen bruikbare snapshot,
-    # dan halen we de data opnieuw op.
+    # Alleen de laatste voltooide scan met eigen pagina's (fase 1 of 4) telt: heeft
+    # die geen bruikbare snapshot, dan halen we de data opnieuw op.
     previous = (
         db.query(LaunchScan)
         .filter(
             LaunchScan.customer_website_id == scan.customer_website_id,
-            LaunchScan.phase == 1,
+            LaunchScan.phase.in_((1, 4)),
             LaunchScan.id != scan.id,
             LaunchScan.status == "completed",
         )

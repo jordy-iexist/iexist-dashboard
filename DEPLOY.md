@@ -89,6 +89,7 @@ Pas daarin minimaal aan:
 | `WORDPRESS_CREDENTIALS_KEY` | Fernet-key: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `CELERY_QUEUES` | `default,blog_generation,image_generation,audit` — **let op:** het voorbeeld mist `audit`; zonder die queue draaien website-audits nooit |
 | `SERPAPI_API_KEY` | optioneel (SEO-tracker) |
+| `GSC_CLIENT_ID`, `GSC_CLIENT_SECRET`, `GSC_REFRESH_TOKEN` | optioneel (Search Console in livegang fase 4). Neem de drie waarden over uit de lokale `backend/.env`; het refresh token is niet aan een machine gebonden. Een nieuw token maak je met `docker compose -f docker-compose.prod.yml run --rm api python scripts/gsc_authorize.py` |
 
 `DATABASE_URL`, `REDIS_URL`, `MEDIA_BASE_URL` en `CORS_ALLOWED_ORIGINS` worden
 door `docker-compose.prod.yml` overschreven — wat er in `backend/.env` staat

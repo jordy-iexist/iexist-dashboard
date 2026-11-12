@@ -34,6 +34,8 @@ class LaunchScanItem(BaseModel):
     vitals_max_pages: int
     vitals_total: int
     vitals_measured: int
+    # Fase 4: ronde (kwartaal), bijv. "2026-Q4".
+    period: str | None = None
     summary_stats: Any = None
     warnings: Any = None
     error_message: str | None = None
@@ -70,6 +72,10 @@ class LaunchCustomerItem(BaseModel):
     # Fase 2/3 gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende) fase-1-scan.
     geo_outdated: bool = False
     content_outdated: bool = False
+    # Fase 4: laatste scan, en de voortgang van de ronde van die scan.
+    latest_quarterly_scan: LaunchScanItem | None = None
+    quarterly_progress: "ChecklistProgress | None" = None
+    quarterly_period: str | None = None
 
 
 class LaunchCustomerListResponse(BaseModel):
@@ -345,6 +351,35 @@ class SuggestionStatusUpdate(BaseModel):
     status: SuggestionStatus
 
 
+# --- Fase 4: kwartaal GEO-werkzaamheden -----------------------------------------
+
+class QuarterlyPeriodOption(BaseModel):
+    period: str
+    label: str
+    scanned: bool
+
+
+class QuarterlyChecklistResponse(BaseModel):
+    customer_id: str
+    customer_name: str
+    base_url: str
+    # De getoonde ronde en de huidige ronde (kwartaal van vandaag).
+    period: str
+    period_label: str
+    current_period: str
+    periods: list[QuarterlyPeriodOption]
+    scan: LaunchScanItem | None = None
+    generated_at: str | None = None
+    # Vergelijking met de vorige ronde of de nulmeting (zie quarterly_compare).
+    comparison: Any = None
+    sources: Any = None
+    summary: Any = None
+    sections: list[ChecklistSectionOut]
+    done: int
+    total: int
+    percent: int
+
+
 # --- Monday ----------------------------------------------------------------
 
 class MondaySettingsResponse(BaseModel):
@@ -383,6 +418,30 @@ class MondayPushResponse(BaseModel):
     skipped: int
     failed: int
     outcomes: list[MondayPushOutcome]
+
+
+class SearchConsoleProperty(BaseModel):
+    site_url: str
+    permission: str
+
+
+class SearchConsoleSettingsResponse(BaseModel):
+    # Of GSC_CLIENT_ID, GSC_CLIENT_SECRET en GSC_REFRESH_TOKEN zijn gezet.
+    configured: bool
+    # De property die de fase 4-scan gebruikt, en of die gekozen of automatisch gevonden is.
+    property: str | None = None
+    property_source: Literal["manual", "auto"] | None = None
+    # Properties die bij het domein van de klant passen, beste eerst.
+    candidates: list[str] = Field(default_factory=list)
+    # Alle properties waar het Google-account bij kan.
+    properties: list[SearchConsoleProperty] = Field(default_factory=list)
+    # Melding als de properties niet opgehaald konden worden of de gekozen property ontbreekt.
+    error: str | None = None
+
+
+class SearchConsolePropertyUpdate(BaseModel):
+    """Property kiezen (bijv. "sc-domain:example.nl"); None = weer automatisch op domein."""
+    property: str | None = Field(default=None, max_length=500)
 
 
 LaunchCustomerItem.model_rebuild()

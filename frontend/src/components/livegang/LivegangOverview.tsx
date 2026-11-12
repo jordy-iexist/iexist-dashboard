@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 
 import { Input } from "@/components/ui/input"
 import { isActive, Pill, ScanStatusBadge } from "@/components/livegang/shared"
-import { apiFetch, formatDateTime, type LaunchCustomer } from "@/lib/launch-checklist"
+import { apiFetch, formatDateTime, periodLabel, type LaunchCustomer } from "@/lib/launch-checklist"
 
 function OutdatedPill() {
   return (
@@ -69,6 +69,8 @@ export function LivegangOverview() {
             const progress = customer.checklist_progress
             const contentScan = customer.latest_content_scan
             const contentProgress = customer.content_progress
+            const quarterlyScan = customer.latest_quarterly_scan
+            const quarterlyProgress = customer.quarterly_progress
             return (
               <li key={customer.id}>
                 <Link
@@ -83,7 +85,19 @@ export function LivegangOverview() {
                     {scan ? `Laatste scan: ${formatDateTime(scan.created_at)}` : "Nog niet gescand"}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    {contentScan && isActive(contentScan.status) ? (
+                    {quarterlyScan && isActive(quarterlyScan.status) ? (
+                      <>
+                        <Pill tone="blue">Fase 4</Pill>
+                        <ScanStatusBadge status={quarterlyScan.status} />
+                      </>
+                    ) : quarterlyProgress ? (
+                      <>
+                        <Pill tone="blue">Fase 4 · {periodLabel(customer.quarterly_period)}</Pill>
+                        <Pill tone={quarterlyProgress.percent >= 80 ? "green" : quarterlyProgress.percent >= 50 ? "amber" : "red"}>
+                          {quarterlyProgress.percent}% checklist
+                        </Pill>
+                      </>
+                    ) : contentScan && isActive(contentScan.status) ? (
                       <>
                         <Pill tone="blue">Fase 3</Pill>
                         <ScanStatusBadge status={contentScan.status} />

@@ -1,9 +1,10 @@
-"""Livegang checklist — fase 1 (Nulmeting & AI scan), fase 2 (GEO/SEO-checklist)
-en fase 3 (Contentcreatie & Onpage optimalisatie)."""
+"""Livegang checklist — fase 1 (Nulmeting & AI scan), fase 2 (GEO/SEO-checklist),
+fase 3 (Contentcreatie & Onpage optimalisatie) en fase 4 (Kwartaal GEO-werkzaamheden)."""
 from __future__ import annotations
 
 import csv
 import io
+import time
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -58,7 +59,12 @@ from app.features.launch_checklist.schemas import (
     MondayPushOutcome,
     MondayPushResponse,
     MondaySettingsResponse,
+    SearchConsoleProperty,
+    SearchConsolePropertyUpdate,
+    SearchConsoleSettingsResponse,
     PageTypeUpdate,
+    QuarterlyChecklistResponse,
+    QuarterlyPeriodOption,
     WebshopUpdate,
     IssueBulkStatusUpdate,
     IssueGroup,
@@ -73,13 +79,24 @@ from app.features.launch_checklist.schemas import (
     LaunchScanPageListResponse,
 )
 from app.core.config import settings
-from app.features.launch_checklist.services import ahrefs_enrich, monday_push
+from app.features.launch_checklist.services import ahrefs_enrich, gsc_enrich, monday_push
 from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo as _latest_completed_geo,
+    latest_completed_scan,
     latest_content_scan as _latest_content_scan,
+    latest_quarterly_scan,
     merged_checklist,
     merged_content_checklist,
+    merged_quarterly_checklist,
+    quarterly_periods,
     resolve_is_webshop as _is_webshop,
+)
+from app.features.launch_checklist.services.quarterly_checklist import (
+    ITEMS as QUARTERLY_ITEMS,
+    is_period,
+    merge_quarterly_checklist,
+    period_label,
+    period_of,
 )
 from app.features.launch_checklist.services.geo_checklist import (
     ITEMS as CHECKLIST_ITEMS,
@@ -88,6 +105,8 @@ from app.features.launch_checklist.services.geo_checklist import (
 )
 from app.services.monday import client as monday_client
 from app.services.monday.client import MondayServiceError
+from app.services.search_console import client as gsc_client
+from app.services.search_console.client import SearchConsoleServiceError
 from app.features.launch_checklist.services.content_checklist import (
     ITEMS as CONTENT_ITEMS,
     merge_content_checklist,
@@ -138,7 +157,8 @@ def _latest_scans(db: Session, *, phase: int, completed_only: bool = False) -> d
 
 
 def _states_for(db: Session, customer_id: str | None = None) -> dict[str, dict[str, LaunchChecklistState]]:
-    query = db.query(LaunchChecklistState)
+    """Handmatige status van fase 2 en 3 (zonder ronde) per klant."""
+    query = db.query(LaunchChecklistState).filter(LaunchChecklistState.period == "")
     if customer_id:
         query = query.filter(LaunchChecklistState.customer_website_id == customer_id)
     out: dict[str, dict[str, LaunchChecklistState]] = {}
@@ -168,6 +188,12 @@ async def list_launch_customers(
     completed_geo = _latest_scans(db, phase=2, completed_only=True)
     latest_content = _latest_scans(db, phase=3)
     states = _states_for(db)
+    latest_quarterly = _latest_scans(db, phase=4)
+    completed_quarterly = _latest_scans(db, phase=4, completed_only=True)
+    # Fase 4: handmatige status per (klant, ronde).
+    quarterly_states: dict[tuple[str, str], dict[str, LaunchChecklistState]] = {}
+    for state in db.query(LaunchChecklistState).filter(LaunchChecklistState.period != "").all():
+        quarterly_states.setdefault((state.customer_website_id, state.period), {})[state.item_key] = state
 
     items: list[LaunchCustomerItem] = []
     for c in customers:
@@ -192,6 +218,13 @@ async def list_launch_customers(
             and p1 is not None
             and content.source_scan_id != p1.id
         )
+        quarterly_progress = None
+        quarterly = completed_quarterly.get(c.id)
+        if quarterly is not None and isinstance(quarterly.checklist, dict):
+            merged = merge_quarterly_checklist(
+                quarterly.checklist.get("items"), quarterly_states.get((c.id, quarterly.period or ""), {}))
+            quarterly_progress = ChecklistProgress(
+                done=merged["done"], total=merged["total"], percent=merged["percent"])
         items.append(LaunchCustomerItem(
             id=c.id,
             name=c.name,
@@ -205,6 +238,9 @@ async def list_launch_customers(
             content_progress=content_progress,
             geo_outdated=geo_outdated,
             content_outdated=content_outdated,
+            latest_quarterly_scan=to_scan_item(latest_quarterly[c.id]) if c.id in latest_quarterly else None,
+            quarterly_progress=quarterly_progress,
+            quarterly_period=quarterly.period if quarterly is not None else None,
         ))
     return LaunchCustomerListResponse(customers=items)
 
@@ -803,6 +839,84 @@ def push_checklist_to_monday(
     return _push_response(result)
 
 
+# --- Search Console (fase 4) ---------------------------------------------------
+
+_GSC_SITES_TTL_SECONDS = 600.0
+# (tijdstip, properties) van de laatste sites.list; het account is voor alle klanten hetzelfde.
+_gsc_sites_cache: tuple[float, list[dict[str, str]]] | None = None
+
+
+def _gsc_sites(*, refresh: bool = False) -> list[dict[str, str]]:
+    global _gsc_sites_cache
+    cached = _gsc_sites_cache
+    if not refresh and cached is not None and time.monotonic() - cached[0] < _GSC_SITES_TTL_SECONDS:
+        return cached[1]
+    sites = gsc_client.list_sites()
+    _gsc_sites_cache = (time.monotonic(), sites)
+    return sites
+
+
+def _search_console_settings(customer: CustomerWebsite, *, refresh: bool = False) -> SearchConsoleSettingsResponse:
+    response = SearchConsoleSettingsResponse(configured=gsc_client.is_configured())
+    manual = (customer.gsc_property or "").strip() or None
+    if manual:
+        response.property, response.property_source = manual, "manual"
+    if not response.configured:
+        return response
+    try:
+        sites = _gsc_sites(refresh=refresh)
+    except SearchConsoleServiceError as exc:
+        response.error = str(exc)
+        return response
+    response.properties = [SearchConsoleProperty(**site) for site in sites]
+    response.candidates = gsc_enrich.match_properties(customer.base_url, sites)
+    if manual:
+        if manual not in {site["site_url"] for site in sites}:
+            response.error = "Het Google-account heeft geen toegang (meer) tot de gekozen property."
+    else:
+        response.property, source = gsc_enrich.resolve_property(None, customer.base_url, sites)
+        response.property_source = "auto" if source else None
+    return response
+
+
+@router.get("/customers/{customer_id}/search-console", response_model=SearchConsoleSettingsResponse)
+def get_search_console_settings(
+    customer_id: str,
+    refresh: bool = Query(default=False),
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Welke Search Console-property de fase 4-scan voor deze klant gebruikt."""
+    return _search_console_settings(_get_customer(db, customer_id), refresh=refresh)
+
+
+@router.patch("/customers/{customer_id}/search-console", response_model=SearchConsoleSettingsResponse)
+def set_search_console_property(
+    customer_id: str,
+    payload: SearchConsolePropertyUpdate,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Kies de property van de klant, of zet hem met `property: null` terug op automatisch."""
+    customer = _get_customer(db, customer_id)
+    chosen = (payload.property or "").strip() or None
+    if chosen is not None:
+        try:
+            sites = _gsc_sites(refresh=True)
+        except SearchConsoleServiceError as exc:
+            status = 400 if exc.code == "not_configured" else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        if chosen not in {site["site_url"] for site in sites}:
+            raise HTTPException(
+                status_code=400,
+                detail="Het Google-account heeft geen toegang tot deze property. Kies er een uit de lijst.",
+            )
+    customer.gsc_property = chosen
+    customer.updated_at = _now()
+    db.commit()
+    return _search_console_settings(customer)
+
+
 @router.patch("/scans/{scan_id}/pages/{page_id}/page-type")
 async def update_page_type(
     scan_id: str,
@@ -1241,6 +1355,178 @@ async def update_content_suggestion(
     return to_suggestion_item(row, page.url if page else None)
 
 
+# --- fase 4: kwartaal GEO-werkzaamheden --------------------------------------
+
+def _period_param(period: str | None) -> str:
+    """Ronde uit de query; leeg = de huidige ronde (kwartaal van vandaag)."""
+    if not period:
+        return period_of()
+    if not is_period(period):
+        raise HTTPException(status_code=400, detail="Ongeldige ronde (verwacht bijv. 2026-Q4).")
+    return period
+
+
+def _build_quarterly_checklist(
+    db: Session, customer: CustomerWebsite, period: str, scan: LaunchScan | None = None
+) -> QuarterlyChecklistResponse:
+    """Fase-4 checklist van één ronde; zonder scan de laatste voltooide scan van die ronde."""
+    if scan is None:
+        scan = latest_quarterly_scan(db, customer.id, period)
+    payload = (scan.checklist if scan else None) or {}
+    merged = merged_quarterly_checklist(db, customer.id, scan, period)
+    current = period_of()
+    known = quarterly_periods(db, customer.id)
+    options = {p: scanned for p, scanned in known.items()}
+    options.setdefault(current, False)
+    options.setdefault(period, scan is not None)
+    return QuarterlyChecklistResponse(
+        customer_id=customer.id,
+        customer_name=customer.name,
+        base_url=customer.base_url,
+        period=period,
+        period_label=period_label(period),
+        current_period=current,
+        periods=[
+            QuarterlyPeriodOption(period=p, label=period_label(p), scanned=options[p])
+            for p in sorted(options, reverse=True)
+        ],
+        scan=to_scan_item(scan) if scan else None,
+        generated_at=payload.get("generated_at"),
+        comparison=payload.get("comparison"),
+        sources=payload.get("sources"),
+        summary=payload.get("summary"),
+        sections=merged["sections"],
+        done=merged["done"],
+        total=merged["total"],
+        percent=merged["percent"],
+    )
+
+
+@router.post("/customers/{customer_id}/quarterly-scans", response_model=LaunchScanDetail)
+async def start_quarterly_scan(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    from app.worker.tasks import run_quarterly_scan_task  # voorkom circulaire import
+
+    customer = _get_customer(db, customer_id)
+    if _latest_content_scan(db, customer.id) is None:
+        raise HTTPException(
+            status_code=400, detail="Voer eerst een voltooide fase-3 scan (content & onpage) uit.")
+    nulmeting = latest_completed_scan(db, customer.id, 1)
+    if nulmeting is None:
+        raise HTTPException(status_code=400, detail="Voer eerst een voltooide fase-1 scan (nulmeting) uit.")
+
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+
+    base_url = _normalize_base_url(customer.base_url or nulmeting.base_url)
+    try:
+        validate_external_url(base_url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    now = _now()
+    scan = LaunchScan(
+        id=str(uuid.uuid4()),
+        customer_website_id=customer.id,
+        phase=4,
+        period=period_of(now),
+        status="pending",
+        base_url=base_url,
+        total_urls=0,
+        inventoried_urls=0,
+        failed_urls=0,
+        max_pages=nulmeting.max_pages,
+        vitals_max_pages=0,
+        vitals_total=0,
+        vitals_measured=0,
+        created_by=user_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    run_quarterly_scan_task.delay(scan.id)
+    return to_scan_detail(scan)
+
+
+@router.get("/customers/{customer_id}/quarterly-checklist", response_model=QuarterlyChecklistResponse)
+async def get_quarterly_checklist(
+    customer_id: str,
+    period: str | None = Query(default=None, max_length=10),
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _build_quarterly_checklist(db, _get_customer(db, customer_id), _period_param(period))
+
+
+@router.patch("/customers/{customer_id}/quarterly-checklist/{item_key}", response_model=ChecklistItemOut)
+async def update_quarterly_checklist_item(
+    customer_id: str,
+    item_key: str,
+    payload: ChecklistStateUpdate,
+    period: str | None = Query(default=None, max_length=10),
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    if item_key not in QUARTERLY_ITEMS:
+        raise HTTPException(status_code=404, detail="Onbekend checklistpunt.")
+    round_ = _period_param(period)
+    state = (
+        db.query(LaunchChecklistState)
+        .filter(LaunchChecklistState.customer_website_id == customer.id,
+                LaunchChecklistState.item_key == item_key,
+                LaunchChecklistState.period == round_)
+        .first()
+    )
+    if state is None:
+        state = LaunchChecklistState(
+            id=str(uuid.uuid4()), customer_website_id=customer.id, item_key=item_key, period=round_)
+        db.add(state)
+    fields = payload.model_fields_set
+    if "manual_status" in fields:
+        state.manual_status = payload.manual_status
+    if "note" in fields:
+        state.note = (payload.note or "").strip() or None
+    state.updated_by = user_id
+    state.updated_at = _now()
+    db.commit()
+
+    response = _build_quarterly_checklist(db, customer, round_)
+    for section in response.sections:
+        for item in section.items:
+            if item.key == item_key:
+                return item
+    raise HTTPException(status_code=500, detail="Checklistpunt niet gevonden na opslaan.")
+
+
+@router.post("/customers/{customer_id}/quarterly-checklist/push-monday", response_model=MondayPushResponse)
+def push_quarterly_checklist_to_monday(
+    customer_id: str,
+    payload: MondayPushChecklistRequest,
+    period: str | None = Query(default=None, max_length=10),
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    try:
+        result = monday_push.push_checklist_items(
+            db, customer, payload.item_keys, user_id, phase=4, period=_period_param(period))
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    return _push_response(result)
+
+
 # --- export ---------------------------------------------------------------
 
 def _fmt(value: Any) -> str:
@@ -1289,9 +1575,15 @@ async def export_launch_scan(
                 (row.details or {}).get("ref", "") if isinstance(row.details, dict) else "",
                 row.agent, row.status,
             ])
-    elif kind == "checklist" and scan.phase == 3:
+    elif kind == "checklist" and scan.phase in (3, 4):
         customer = _get_customer(db, scan.customer_website_id)
-        checklist = _build_content_checklist(db, customer, scan if scan.checklist else None)
+        if scan.phase == 4:
+            checklist = _build_quarterly_checklist(
+                db, customer, scan.period or period_of(scan.created_at),
+                scan if scan.status == "completed" else None,
+            )
+        else:
+            checklist = _build_content_checklist(db, customer, scan if scan.checklist else None)
         status_labels = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
         writer.writerow(["Hoofditem", "Subitem", "Type", "Prioriteit", "Auto-status", "Melding",
                          "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
@@ -1378,7 +1670,9 @@ async def export_launch_scan(
 
     customer = db.get(CustomerWebsite, scan.customer_website_id)
     slug = (customer.domain if customer else "scan").replace("/", "-")
-    prefix = {2: "geo-seo-checklist", 3: "content-onpage"}.get(scan.phase, "nulmeting")
+    prefix = {
+        2: "geo-seo-checklist", 3: "content-onpage", 4: f"kwartaal-geo-{scan.period or ''}".rstrip("-"),
+    }.get(scan.phase, "nulmeting")
     filename = f"{prefix}-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import CustomerWebsite, LaunchChecklistState, LaunchScan
 from app.features.launch_checklist.services.content_checklist import merge_content_checklist
 from app.features.launch_checklist.services.geo_checklist import merge_checklist
+from app.features.launch_checklist.services.quarterly_checklist import merge_quarterly_checklist
 
 
 def latest_completed_scan(db: Session, customer_id: str, phase: int) -> LaunchScan | None:
@@ -46,10 +47,16 @@ def latest_content_scan(db: Session, customer_id: str) -> LaunchScan | None:
     )
 
 
-def states_for_customer(db: Session, customer_id: str) -> dict[str, LaunchChecklistState]:
+def states_for_customer(
+    db: Session, customer_id: str, period: str = ""
+) -> dict[str, LaunchChecklistState]:
+    """Handmatige status per punt. `period` is leeg voor fase 2/3, een ronde voor fase 4."""
     rows = (
         db.query(LaunchChecklistState)
-        .filter(LaunchChecklistState.customer_website_id == customer_id)
+        .filter(
+            LaunchChecklistState.customer_website_id == customer_id,
+            LaunchChecklistState.period == period,
+        )
         .all()
     )
     return {row.item_key: row for row in rows}
@@ -93,3 +100,74 @@ def merged_content_checklist(
     if states is None:
         states = states_for_customer(db, customer_id)
     return merge_content_checklist(payload.get("items"), states)
+
+
+# --- fase 4: kwartaal GEO-werkzaamheden --------------------------------------
+
+def latest_quarterly_scan(db: Session, customer_id: str, period: str | None = None) -> LaunchScan | None:
+    """Laatste voltooide fase 4-scan, optioneel binnen één ronde."""
+    query = db.query(LaunchScan).filter(
+        LaunchScan.customer_website_id == customer_id,
+        LaunchScan.phase == 4,
+        LaunchScan.status == "completed",
+    )
+    if period is not None:
+        query = query.filter(LaunchScan.period == period)
+    return query.order_by(LaunchScan.created_at.desc()).first()
+
+
+def quarterly_periods(db: Session, customer_id: str) -> dict[str, bool]:
+    """Rondes met een voltooide fase 4-scan of handmatige status, nieuwste eerst.
+
+    Waarde: of de ronde een voltooide scan heeft.
+    """
+    scanned = {
+        row[0]
+        for row in db.query(LaunchScan.period).filter(
+            LaunchScan.customer_website_id == customer_id,
+            LaunchScan.phase == 4,
+            LaunchScan.status == "completed",
+            LaunchScan.period.isnot(None),
+        )
+    }
+    stated = {
+        row[0]
+        for row in db.query(LaunchChecklistState.period).filter(
+            LaunchChecklistState.customer_website_id == customer_id,
+            LaunchChecklistState.period != "",
+        )
+    }
+    return {period: period in scanned for period in sorted(scanned | stated, reverse=True)}
+
+
+def comparison_base(db: Session, scan: LaunchScan) -> LaunchScan | None:
+    """Vergelijkingsbasis: de laatste fase 4-scan uit een eerdere ronde, anders de nulmeting."""
+    previous = (
+        db.query(LaunchScan)
+        .filter(
+            LaunchScan.customer_website_id == scan.customer_website_id,
+            LaunchScan.phase == 4,
+            LaunchScan.status == "completed",
+            LaunchScan.id != scan.id,
+            LaunchScan.period != scan.period,
+            LaunchScan.created_at < scan.created_at,
+        )
+        .order_by(LaunchScan.created_at.desc())
+        .first()
+    )
+    return previous or latest_completed_scan(db, scan.customer_website_id, 1)
+
+
+def merged_quarterly_checklist(
+    db: Session,
+    customer_id: str,
+    scan: LaunchScan | None,
+    period: str,
+    *,
+    states: dict[str, LaunchChecklistState] | None = None,
+) -> dict[str, Any]:
+    """Samengevoegde fase-4 checklist van één ronde (scan None = nog niet gescand)."""
+    payload = (scan.checklist if scan else None) or {}
+    if states is None:
+        states = states_for_customer(db, customer_id, period)
+    return merge_quarterly_checklist(payload.get("items"), states)

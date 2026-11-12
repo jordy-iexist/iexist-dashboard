@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { EffectiveIcon } from "@/components/livegang/ChecklistTab"
 import { AutoStatusBadge, PercentRing } from "@/components/livegang/shared"
-import { apiFetch, formatDateTime, MANUAL_STATUS_LABELS, type Checklist } from "@/lib/launch-checklist"
+import { apiFetch, formatDateTime, MANUAL_STATUS_LABELS, periodQuery, type Checklist } from "@/lib/launch-checklist"
 
 // Verberg de dashboard-chrome (sidebar, header) bij afdrukken.
 const PRINT_CSS = `
@@ -19,15 +19,37 @@ const PRINT_CSS = `
 }
 `
 
-export function ChecklistPrint({ customerId, phase = 2 }: { customerId: string; phase?: 2 | 3 }) {
-  const [checklist, setChecklist] = useState<Checklist | null>(null)
+const PHASE_TITLES: Record<2 | 3 | 4, string> = {
+  2: "Livegang fase 2 · GEO/SEO-checklist",
+  3: "Livegang fase 3 · Contentcreatie & onpage optimalisatie",
+  4: "Livegang fase 4 · Kwartaal GEO-werkzaamheden",
+}
+
+export function ChecklistPrint({
+  customerId,
+  phase = 2,
+  period,
+}: {
+  customerId: string
+  phase?: 2 | 3 | 4
+  /** Fase 4: de ronde (leeg = huidige ronde). */
+  period?: string
+}) {
+  // Fase 4 heeft geen webshop-velden; die zijn dan leeg.
+  const [checklist, setChecklist] = useState<(Checklist & { period_label?: string }) | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    apiFetch<Checklist>(`/customers/${customerId}/${phase === 3 ? "content-checklist" : "checklist"}`)
+    const path =
+      phase === 4
+        ? `quarterly-checklist${periodQuery(period)}`
+        : phase === 3
+          ? "content-checklist"
+          : "checklist"
+    apiFetch<Checklist & { period_label?: string }>(`/customers/${customerId}/${path}`)
       .then(setChecklist)
       .catch((err: Error) => setError(err.message))
-  }, [customerId, phase])
+  }, [customerId, phase, period])
 
   if (error) return <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>
   if (!checklist) return <p className="text-sm text-muted-foreground">Checklist laden…</p>
@@ -39,7 +61,8 @@ export function ChecklistPrint({ customerId, phase = 2 }: { customerId: string; 
       <header className="flex flex-wrap items-start gap-4 border-b pb-4">
         <div className="min-w-0 flex-1">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {phase === 3 ? "Livegang fase 3 · Contentcreatie & onpage optimalisatie" : "Livegang fase 2 · GEO/SEO-checklist"}
+            {PHASE_TITLES[phase]}
+            {checklist.period_label ? ` · Ronde ${checklist.period_label}` : ""}
           </p>
           <h1 className="text-2xl font-bold text-primary">{checklist.customer_name}</h1>
           <p className="text-sm text-muted-foreground">{checklist.base_url}</p>

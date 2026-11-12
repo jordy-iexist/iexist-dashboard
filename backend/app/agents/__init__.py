@@ -17,6 +17,7 @@ from app.agents.content_text.agent import build_content_text_agent
 from app.agents.content_trust.agent import build_content_trust_agent
 from app.agents.geo.agent import build_geo_agent
 from app.agents.nulmeting.agent import build_nulmeting_agent
+from app.agents.quarterly_report.agent import build_quarterly_report_agent
 from app.agents.tools import Tool, tool
 
 AGENTS: dict[str, Callable[[], Agent]] = {
@@ -29,6 +30,8 @@ AGENTS: dict[str, Callable[[], Agent]] = {
     "content_links": build_content_links_agent,
     "content_gap": build_content_gap_agent,
     "content_report": build_content_report_agent,
+    # Fase 4 (kwartaal GEO-werkzaamheden): conceptrapport.
+    "quarterly_report": build_quarterly_report_agent,
 }
 
 __all__ = ["AGENTS", "Agent", "AgentRunResult", "Tool", "run_agent", "tool"]

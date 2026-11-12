@@ -71,6 +71,8 @@ export type LaunchScan = {
   vitals_max_pages: number
   vitals_total: number
   vitals_measured: number
+  /** Fase 4: ronde (kwartaal), bijv. "2026-Q4". */
+  period?: string | null
   summary_stats: SummaryStats | null
   warnings: string[] | null
   error_message: string | null
@@ -185,6 +187,10 @@ export type LaunchCustomer = {
   /** Fase 2/3 gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende). */
   geo_outdated?: boolean
   content_outdated?: boolean
+  /** Fase 4: laatste scan en de voortgang van de ronde van die scan. */
+  latest_quarterly_scan?: LaunchScan | null
+  quarterly_progress?: ChecklistProgress | null
+  quarterly_period?: string | null
 }
 
 export type CwvMetric = { value: number | null; rating: CwvRating | null }
@@ -407,8 +413,8 @@ export type Checklist = ChecklistProgress & {
 
 // --- Fase 3: content & onpage ------------------------------------------------
 
-/** Welke checklist: fase 2 (GEO/SEO) of fase 3 (content & onpage). */
-export type ChecklistPath = "checklist" | "content-checklist"
+/** Welke checklist: fase 2 (GEO/SEO), fase 3 (content & onpage) of fase 4 (kwartaal). */
+export type ChecklistPath = "checklist" | "content-checklist" | "quarterly-checklist"
 
 export type ContentSummary = {
   pages_fetched: number
@@ -642,7 +648,7 @@ export type MondayPushSummary = {
 
 export type MondayPushTarget =
   | { kind: "issues" }
-  | { kind: "checklist"; customerId: string; path?: ChecklistPath }
+  | { kind: "checklist"; customerId: string; path?: ChecklistPath; period?: string }
 
 /** De backend accepteert maximaal dit aantal punten per request. */
 const MONDAY_BATCH_SIZE = 25
@@ -674,6 +680,34 @@ export async function linkMondayBoard(customerId: string, board: string | null) 
   })
   notifyMondayChanged()
   return result
+}
+
+// --- Search Console ---------------------------------------------------------
+
+export type SearchConsoleSettings = {
+  /** Of de GSC_*-instellingen in de backend zijn gezet. */
+  configured: boolean
+  /** De property die de fase 4-scan gebruikt. */
+  property: string | null
+  property_source: "manual" | "auto" | null
+  /** Properties die bij het domein passen, beste eerst. */
+  candidates: string[]
+  /** Alle properties waar het Google-account bij kan. */
+  properties: { site_url: string; permission: string }[]
+  error: string | null
+}
+
+export function fetchSearchConsoleSettings(customerId: string, refresh = false) {
+  return apiFetch<SearchConsoleSettings>(`/customers/${customerId}/search-console${refresh ? "?refresh=true" : ""}`)
+}
+
+/** Kies de property van de klant; null = weer automatisch op domein. */
+export function setSearchConsoleProperty(customerId: string, property: string | null) {
+  return apiFetch<SearchConsoleSettings>(`/customers/${customerId}/search-console`, {
+    method: "PATCH",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ property }),
+  })
 }
 
 /**
@@ -708,7 +742,7 @@ export async function pushToMonday(
   const path =
     target.kind === "issues"
       ? "/issues/push-monday"
-      : `/customers/${target.customerId}/${target.path ?? "checklist"}/push-monday`
+      : `/customers/${target.customerId}/${target.path ?? "checklist"}/push-monday${periodQuery(target.period)}`
   const bodyKey = target.kind === "issues" ? "issue_ids" : "item_keys"
   try {
     for (let start = 0; start < refs.length; start += MONDAY_BATCH_SIZE) {
@@ -746,4 +780,213 @@ export function describeMondayPush(summary: MondayPushSummary): string {
   if (summary.skipped) parts.push(`${summary.skipped} al doorgezet`)
   if (summary.failed) parts.push(`${summary.failed} mislukt`)
   return `Monday: ${parts.join(" · ")}.`
+}
+
+// --- Fase 4: kwartaal GEO-werkzaamheden ----------------------------------------
+
+/** Query-deel voor een ronde (leeg = huidige ronde, die kiest de backend). */
+export function periodQuery(period: string | null | undefined): string {
+  return period ? `?period=${encodeURIComponent(period)}` : ""
+}
+
+export type QuarterlyPeriodOption = { period: string; label: string; scanned: boolean }
+
+export type AiCheckChange = {
+  key: string
+  label: string
+  before: AiCheck["status"] | null
+  after: AiCheck["status"]
+  message: string | null
+  change: "better" | "worse" | "same" | "new"
+}
+
+export type IssueChange = {
+  issue_type: string
+  label: string
+  category: string
+  before: number
+  after: number
+  delta: number
+}
+
+export type AhrefsMetricChange = {
+  key: string
+  label: string
+  before: number | null
+  after: number | null
+  delta: number | null
+}
+
+export type RankingRow = {
+  keyword: string
+  before: number | null
+  after: number | null
+  /** Positief = gestegen. */
+  delta: number | null
+  url: string | null
+  checked_at: string | null
+}
+
+export type QuarterlyComparison = {
+  base: { scan_id: string; phase: number; period: string | null; label: string; completed_at: string | null } | null
+  ai: { before: number | null; after: number | null; checks: AiCheckChange[]; improved: number; worsened: number }
+  issues: { before: number; after: number; rows: IssueChange[] }
+  pages: { before: number; after: number; new: number; removed: number; broken: number; new_examples: string[] }
+  ahrefs: {
+    metrics: AhrefsMetricChange[]
+    fetched_before: string | null
+    fetched_after: string | null
+    /** Zelfde Ahrefs-meting als de basis (hergebruikt binnen de bewaartermijn). */
+    same_snapshot?: boolean
+    lost_value_urls: number | null
+  } | null
+  rankings: {
+    keywords: number
+    top3: number
+    top10: number
+    improved: number
+    declined: number
+    compared: number
+    last_checked_at: string | null
+    rows: RankingRow[]
+  } | null
+  /** Search Console: meetperiode t.o.v. de periode ervoor. null = niet gekoppeld of geen data. */
+  search_console?: QuarterlySearchConsole | null
+}
+
+export type GscSpan = { start: string; end: string; days: number }
+
+export type GscMetricChange = {
+  key: "clicks" | "impressions" | "ctr" | "position"
+  label: string
+  /** Periode ervoor. */
+  before: number | null
+  /** Meetperiode. */
+  after: number | null
+  delta: number | null
+  pct: number | null
+  last_year: number | null
+  pct_last_year: number | null
+}
+
+/** Zoekopdracht of pagina; `key` is de zoekopdracht of de URL. Vorige waarden zijn null als ze onbekend zijn. */
+export type GscRow = {
+  key: string
+  clicks: number | null
+  impressions: number | null
+  ctr: number | null
+  position: number | null
+  clicks_prev: number | null
+  impressions_prev: number | null
+  position_prev: number | null
+  delta?: number
+}
+
+export type GscMovers = { total: number; top: GscRow[]; risers: GscRow[]; fallers: GscRow[] }
+
+export type GscSitemap = {
+  path: string
+  last_submitted: string | null
+  last_downloaded: string | null
+  is_pending: boolean
+  is_index: boolean
+  errors: number
+  warnings: number
+  submitted: number
+}
+
+export type GscNotIndexed = {
+  url: string
+  /** "blocked": door iets op de site; "not_indexed": (nog) niet opgenomen zonder harde oorzaak. */
+  state: "blocked" | "not_indexed"
+  reason: string | null
+  last_crawl_time: string | null
+  google_canonical: string | null
+  link: string | null
+}
+
+export type QuarterlySearchConsole = {
+  property: string
+  property_source: "manual" | "auto" | null
+  period: GscSpan
+  previous: GscSpan
+  last_year: GscSpan
+  has_performance: boolean
+  metrics: GscMetricChange[]
+  queries: GscMovers
+  pages: GscMovers
+  sitemaps: { total: number; with_errors: number; with_warnings: number; rows: GscSitemap[] } | null
+  inspection: { requested: number; checked: number; indexed: number; not_indexed: GscNotIndexed[] } | null
+  fetched_at: string | null
+}
+
+export type QuarterlySources = {
+  ahrefs: boolean
+  seo_tracker: boolean
+  search_console: boolean | null
+  ga4: boolean | null
+  bing_webmaster: boolean | null
+}
+
+export type QuarterlyChecklist = ChecklistProgress & {
+  customer_id: string
+  customer_name: string
+  base_url: string
+  period: string
+  period_label: string
+  current_period: string
+  periods: QuarterlyPeriodOption[]
+  scan: LaunchScan | null
+  generated_at: string | null
+  comparison: QuarterlyComparison | null
+  sources: QuarterlySources | null
+  summary: { auto_status: Record<string, number>; pages: number; new_pages: number; broken_pages: number } | null
+  sections: ChecklistSection[]
+}
+
+/** Nieuwe pagina (`c4_new_pages`). */
+export type NewPageRow = {
+  page_id: string
+  url: string
+  path: string
+  status_code: number | null
+  indexable: boolean | null
+  in_sitemap: boolean
+  result: "ok" | "warning" | "error"
+  problems: string[]
+  /** Indexstatus volgens de URL-inspectie van Search Console; null = niet geïnspecteerd. */
+  google?: { state: "indexed" | "blocked" | "not_indexed"; reason: string | null } | null
+}
+
+export type NewPagesDetails = {
+  new_total: number
+  new: NewPageRow[]
+  broken_total: number
+  broken: { page_id: string; url: string; path: string; before: number | null; status_code: number | null }[]
+  removed_total: number
+  removed: string[]
+}
+
+export type SchemaProblem = { type: string; severity: "error" | "warning"; missing: string[]; problems: string[] }
+
+/** Schema-validatie (`c4_schema_validation`). */
+export type SchemaValidationDetails = {
+  checked: number
+  with_schema: number
+  error_pages: number
+  warning_pages: number
+  pages: {
+    page_id: string
+    url: string
+    path: string
+    result: "error" | "warning"
+    invalid_blocks: number
+    problems: SchemaProblem[]
+    lost_types: string[]
+  }[]
+}
+
+export function periodLabel(period: string | null | undefined): string {
+  const match = /^(\d{4})-Q([1-4])$/.exec(period ?? "")
+  return match ? `Q${match[2]} ${match[1]}` : period ?? ""
 }

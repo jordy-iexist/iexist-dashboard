@@ -12,6 +12,7 @@ import { InventoryTab } from "@/components/livegang/InventoryTab"
 import { IssuesTab } from "@/components/livegang/IssuesTab"
 import { MondayBoardSetting } from "@/components/livegang/MondayBoardSetting"
 import { OverviewTab } from "@/components/livegang/OverviewTab"
+import { QuarterlyWorkspace } from "@/components/livegang/QuarterlyWorkspace"
 import {
   isActive,
   PanelRow,
@@ -46,14 +47,16 @@ const TAB_KEYS = TABS.map((t) => t.key)
 
 async function fetchPhaseState(customerId: string) {
   const query = `customer_website_id=${encodeURIComponent(customerId)}&limit=20`
-  const [p1, p2, p3] = await Promise.all([
+  const [p1, p2, p3, p4] = await Promise.all([
     apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=1`),
     apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=2`),
     apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=3`),
+    apiFetch<{ items: LaunchScan[] }>(`/scans?${query}&phase=4`),
   ])
   const phase1 = p1.items.filter((s) => (s.phase ?? 1) === 1)
   const phase2 = p2.items.filter((s) => s.phase === 2)
   const phase3 = p3.items.filter((s) => s.phase === 3)
+  const phase4 = p4.items.filter((s) => s.phase === 4)
   // Lijsten zijn gesorteerd op created_at desc: find() geeft de nieuwste.
   const latest1 = phase1.find((s) => s.status === "completed")
   const latest2 = phase2.find((s) => s.status === "completed")
@@ -69,6 +72,8 @@ async function fetchPhaseState(customerId: string) {
       1: !!latest1,
       2: !!latest2,
       3: !!latest3,
+      // Fase 4 is terugkerend: afgerond zodra er een voltooide kwartaalscan is.
+      4: phase4.some((s) => s.status === "completed"),
     } as Record<number, boolean>,
     outdated: {
       2: isOutdated(latest2),
@@ -76,6 +81,7 @@ async function fetchPhaseState(customerId: string) {
     } as Record<number, boolean>,
     hasGeoScans: phase2.length > 0,
     hasContentScans: phase3.length > 0,
+    hasQuarterlyScans: phase4.length > 0,
   }
 }
 
@@ -94,7 +100,14 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
         // De fase uit de URL (?fase=) gaat voor, zodat een refresh op dezelfde fase
         // blijft. Zonder keuze: fase 2 openen als die al eerder gestart is.
         const fromUrl = readUrlParam("fase")
-        const fallback = state.done[2] && state.hasContentScans ? 3 : state.done[1] && state.hasGeoScans ? 2 : 1
+        const fallback =
+          state.done[3] && state.hasQuarterlyScans
+            ? 4
+            : state.done[2] && state.hasContentScans
+              ? 3
+              : state.done[1] && state.hasGeoScans
+                ? 2
+                : 1
         const initial =
           fromUrl === "1"
             ? 1
@@ -102,7 +115,9 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
               ? 2
               : fromUrl === "3" && state.done[2]
                 ? 3
-                : fallback
+                : fromUrl === "4" && state.done[3]
+                  ? 4
+                  : fallback
         setPhase((current) => current ?? initial)
       })
       .catch(() => {
@@ -132,11 +147,12 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
           locked={{
             2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
             3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
+            4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
           }}
           onSelect={(next) => {
             setPhase(next)
-            // Tabbladen verschillen per fase: het tabblad begint opnieuw.
-            writeUrlParams({ fase: String(next), tab: null })
+            // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
+            writeUrlParams({ fase: String(next), tab: null, ronde: null })
           }}
         />
         <MondayBoardSetting customerId={customerId} />
@@ -144,6 +160,7 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
       {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
+      {phase === 4 && <QuarterlyWorkspace customerId={customerId} onChange={refreshPhases} />}
     </div>
   )
 }

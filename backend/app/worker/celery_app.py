@@ -43,6 +43,7 @@ celery_app.conf.update(
         "app.worker.tasks.run_geo_scan_task": {"queue": "audit"},
         "app.worker.tasks.run_content_scan_task": {"queue": "audit"},
         "app.worker.tasks.run_content_analysis_task": {"queue": "audit"},
+        "app.worker.tasks.run_quarterly_scan_task": {"queue": "audit"},
     },
 )
 
