@@ -117,79 +117,71 @@ export function PhaseStepper({
 }) {
   return (
     <nav aria-label="Fases">
-      <ol className="grid gap-1 p-2 sm:grid-cols-4">
-        {PHASES.map((phase, index) => {
+      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {PHASES.map((phase) => {
           const isActive = phase.number === active
           const isDone = completed[phase.number] ?? false
           const isOutdated = isDone && (outdated[phase.number] ?? false)
           const lockReason = phase.available ? locked[phase.number] : undefined
           const clickable = phase.available && !lockReason && !!onSelect
-          const isLast = index === PHASES.length - 1
           const outdatedHint = isOutdated ? "Gebaseerd op een oudere nulmeting — scan opnieuw." : undefined
-          const status: { label: string; tone: Tone } = !phase.available
-            ? { label: "Binnenkort", tone: "muted" }
+          const statusLabel = !phase.available
+            ? "Binnenkort"
             : isOutdated
-              ? { label: "Verouderd", tone: "amber" }
+              ? "Verouderd"
               : isDone
-                ? { label: "Afgerond", tone: "green" }
+                ? "Afgerond"
                 : lockReason
-                  ? { label: "Vergrendeld", tone: "muted" }
+                  ? "Vergrendeld"
                   : isActive
-                    ? { label: "Bezig", tone: "blue" }
-                    : { label: "Open", tone: "muted" }
+                    ? "Bezig"
+                    : "Open"
           return (
             <li key={phase.number} className="min-w-0">
               <button
                 type="button"
                 disabled={!clickable}
                 onClick={() => onSelect?.(phase.number)}
-                title={lockReason ?? outdatedHint}
+                title={`${phase.title} — ${lockReason ?? outdatedHint ?? phase.description}`}
                 aria-current={isActive ? "step" : undefined}
                 className={cn(
-                  "relative flex h-full w-full gap-3 rounded-md p-3 text-left transition-colors sm:flex-col sm:gap-3",
-                  isActive ? "bg-primary/5" : clickable ? "hover:bg-muted/60" : "cursor-default",
+                  "flex h-full w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors sm:w-40",
+                  isActive
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : clickable
+                      ? "hover:bg-muted/60"
+                      : "cursor-default",
                   !phase.available || lockReason ? "opacity-60" : undefined
                 )}
               >
-                <span className="flex items-center sm:w-full">
+                <span className="flex items-center gap-1.5">
                   <span
                     className={cn(
-                      "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-4 ring-card",
+                      "flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
                       isOutdated && "bg-amber-500 text-white",
                       isDone && !isOutdated && "bg-green-600 text-white",
                       !isDone && isActive && "bg-primary text-primary-foreground",
-                      !isDone && !isActive && "border bg-muted text-muted-foreground"
+                      !isDone && !isActive && "bg-muted text-muted-foreground"
                     )}
                   >
                     {isOutdated ? (
-                      <RefreshCw className="size-4" />
+                      <RefreshCw className="size-2.5" strokeWidth={3} />
                     ) : isDone ? (
-                      <Check className="size-4" />
+                      <Check className="size-2.5" strokeWidth={3} />
                     ) : lockReason || !phase.available ? (
-                      <Lock className="size-3.5" />
+                      <Lock className="size-2.5" strokeWidth={3} />
                     ) : (
                       phase.number
                     )}
                   </span>
-                  {!isLast && (
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "ml-3 hidden h-0.5 flex-1 rounded-full sm:block",
-                        isOutdated ? "bg-amber-500/70" : isDone ? "bg-green-600/70" : "bg-border"
-                      )}
-                    />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1 space-y-1">
-                  <span className="flex items-center gap-2">
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Fase {phase.number}</span>
-                    <Pill tone={status.tone}>{status.label}</Pill>
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Fase {phase.number}
                   </span>
-                  <span className={cn("block text-sm leading-snug", isActive ? "font-semibold" : "font-medium")}>{phase.title}</span>
-                  <span className="block text-xs leading-snug text-muted-foreground">{lockReason ?? outdatedHint ?? phase.description}</span>
+                  <span className="sr-only">: {statusLabel}</span>
                 </span>
-                {isActive && <span aria-hidden className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary" />}
+                <span className={cn("block truncate text-sm leading-snug", isActive ? "font-semibold" : "font-medium")}>
+                  {phase.title}
+                </span>
               </button>
             </li>
           )
@@ -342,7 +334,7 @@ export function PhasePanel({
   children?: React.ReactNode
 }) {
   return (
-    <section className="space-y-4">
+    <section className="space-y-4 rounded-lg border bg-card p-4 shadow-xs sm:p-5">
       <div className="flex flex-wrap items-start gap-4">
         <div className="min-w-0 flex-1 space-y-1">
           <h2 className="text-lg font-bold tracking-wide text-primary">{title}</h2>

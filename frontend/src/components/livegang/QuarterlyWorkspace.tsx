@@ -319,15 +319,15 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
         )}
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
-
-        {checklist && !running && (
-          <PanelTabs
-            tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !completedScan }))}
-            active={tab}
-            onSelect={setTab}
-          />
-        )}
       </PhasePanel>
+
+      {checklist && !running && (
+        <PanelTabs
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !completedScan }))}
+          active={tab}
+          onSelect={setTab}
+        />
+      )}
 
       {/* Tijdens een nieuwe scan horen de resultaten van de vorige scan niet in beeld. */}
       {running && (

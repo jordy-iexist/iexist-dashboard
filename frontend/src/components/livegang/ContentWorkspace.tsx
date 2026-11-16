@@ -336,15 +336,15 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
         )}
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
-
-        {checklist && !scanning && (
-          <PanelTabs
-            tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !scan }))}
-            active={tab}
-            onSelect={setTab}
-          />
-        )}
       </PhasePanel>
+
+      {checklist && !scanning && (
+        <PanelTabs
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !scan }))}
+          active={tab}
+          onSelect={setTab}
+        />
+      )}
 
       {/* Tijdens een nieuwe scan horen de resultaten van de vorige scan niet in beeld. */}
       {scanning && (

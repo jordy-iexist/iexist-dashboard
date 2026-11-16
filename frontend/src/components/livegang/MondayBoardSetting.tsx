@@ -13,12 +13,15 @@ import {
   MONDAY_CHANGED_EVENT,
   type MondaySettings,
 } from "@/lib/launch-checklist"
+import { cn } from "@/lib/utils"
 
 /**
  * Monday-bord van de klant: tonen, aanmaken in de map, of een bestaand bord koppelen.
- * Wordt als strook onderin de fasekaart getoond.
+ * Slanke regel: onder de fase-cards in de klantheader (SEO/GEO-scan) en als eigen card bij de livegang.
  */
-export function MondayBoardSetting({ customerId }: { customerId: string }) {
+export function MondayBoardSetting({ customerId, align = "start" }: { customerId: string; align?: "start" | "end" }) {
+  // "end": rechts uitlijnen op brede schermen (onder de fase-cards in de klantheader).
+  const justify = align === "end" ? "lg:justify-end" : undefined
   const [settings, setSettings] = useState<MondaySettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -56,15 +59,15 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
   }
 
   const label = (
-    <span className="flex items-center gap-2 font-medium">
-      <KanbanSquare className="size-4 text-muted-foreground" />
+    <span className="flex items-center gap-1.5 font-medium">
+      <KanbanSquare className="size-3.5 text-muted-foreground" />
       Monday
     </span>
   )
 
   if (!settings) {
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t bg-muted/30 px-4 py-3 text-sm sm:px-5">
+      <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-xs", justify)}>
         {label}
         {error ? (
           <span className="text-red-700 dark:text-red-400">{error}</span>
@@ -81,8 +84,8 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
   const boardName = settings.board_name ?? `Bord ${settings.board_id}`
 
   return (
-    <div className="space-y-3 border-t bg-muted/30 px-4 py-3 text-sm sm:px-5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="space-y-2 text-xs">
+      <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1", justify)}>
         {label}
         {!settings.token_configured ? (
           <>
@@ -108,7 +111,7 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
             <Button
               size="sm"
               variant="ghost"
-              className="ml-auto"
+              className="h-7 px-2 text-xs"
               disabled={busy}
               onClick={() => {
                 if (window.confirm("Bord ontkoppelen? Het bord en de items in Monday blijven bestaan.")) {
@@ -125,11 +128,11 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
             <span className="text-muted-foreground">
               Wordt aangemaakt in map “{settings.folder_name}” zodra je punten doorzet.
             </span>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => createMondayBoard(customerId))}>
+            <div className="flex flex-wrap gap-1">
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void run(() => createMondayBoard(customerId))}>
                 {busy && !linking ? <Loader2 className="animate-spin" /> : null} Bord nu aanmaken
               </Button>
-              <Button size="sm" variant={linking ? "secondary" : "ghost"} disabled={busy} onClick={() => setLinking((v) => !v)}>
+              <Button size="sm" variant={linking ? "secondary" : "ghost"} className="h-7 px-2 text-xs" disabled={busy} onClick={() => setLinking((v) => !v)}>
                 Bestaand bord koppelen
               </Button>
             </div>
@@ -139,7 +142,7 @@ export function MondayBoardSetting({ customerId }: { customerId: string }) {
 
       {linking && !hasBoard && (
         <form
-          className="flex flex-wrap items-center gap-2"
+          className={cn("flex flex-wrap items-center gap-2", justify)}
           onSubmit={(e) => {
             e.preventDefault()
             if (boardInput.trim()) void run(() => linkMondayBoard(customerId, boardInput.trim()))

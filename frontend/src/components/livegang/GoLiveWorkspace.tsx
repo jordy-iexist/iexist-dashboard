@@ -174,7 +174,7 @@ export function GoLiveWorkspace({ customerId }: { customerId: string }) {
   return (
     <div className="space-y-4">
       {/* Zelfde bord als de SEO/GEO-scan; de livegangchecklist heeft er een eigen groep op. */}
-      <section className="overflow-hidden rounded-lg border bg-card [&>div]:border-t-0">
+      <section className="rounded-lg border bg-card px-4 py-3 shadow-xs sm:px-5">
         <MondayBoardSetting customerId={customerId} />
       </section>
 
@@ -274,15 +274,15 @@ export function GoLiveWorkspace({ customerId }: { customerId: string }) {
         )}
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
-
-        {checklist && (
-          <PanelTabs
-            tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !completedScan }))}
-            active={tab}
-            onSelect={setTab}
-          />
-        )}
       </PhasePanel>
+
+      {checklist && (
+        <PanelTabs
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, disabled: t.key !== "checklist" && !completedScan }))}
+          active={tab}
+          onSelect={setTab}
+        />
+      )}
 
       {checklist && (
         <section className="space-y-4">

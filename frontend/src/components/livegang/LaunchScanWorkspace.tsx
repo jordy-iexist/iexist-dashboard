@@ -86,7 +86,7 @@ async function fetchPhaseState(customerId: string) {
   }
 }
 
-export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
+export function LaunchScanWorkspace({ customerId, header }: { customerId: string; header: React.ReactNode }) {
   const [phase, setPhase] = useState<number | null>(null)
   const [done, setDone] = useState<Record<number, boolean>>({})
   const [outdated, setOutdated] = useState<Record<number, boolean>>({})
@@ -154,42 +154,48 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
 
   if (phase === null && loadError) {
     return (
-      <PanelRow tone="error" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1">
-          De fases van deze klant konden niet worden geladen, dus we weten niet welke fase klaar is. ({loadError})
-        </span>
-        <Button size="sm" variant="outline" onClick={retryLoad}>
-          <RefreshCw /> Opnieuw proberen
-        </Button>
-      </PanelRow>
+      <div className="space-y-6">
+        <header className="space-y-2">{header}</header>
+        <PanelRow tone="error" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="min-w-0 flex-1">
+            De fases van deze klant konden niet worden geladen, dus we weten niet welke fase klaar is. ({loadError})
+          </span>
+          <Button size="sm" variant="outline" onClick={retryLoad}>
+            <RefreshCw /> Opnieuw proberen
+          </Button>
+        </PanelRow>
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-lg border bg-card">
-        <PhaseStepper
-          active={phase ?? 1}
-          completed={done}
-          outdated={outdated}
-          locked={{
-            2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
-            3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
-            4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
-          }}
-          onSelect={(next) => {
-            setPhase(next)
-            // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
-            writeUrlParams({ fase: String(next), tab: null, ronde: null })
-          }}
-        />
-        {refreshError && (
-          <p className="border-t px-4 py-2 text-xs text-amber-800 sm:px-5 dark:text-amber-300">
-            De fasestatus kon niet worden ververst; de stappen hierboven kunnen verouderd zijn.
-          </p>
-        )}
-        <MondayBoardSetting customerId={customerId} />
-      </section>
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 space-y-2">{header}</div>
+        <div className="space-y-2 lg:shrink-0">
+          <PhaseStepper
+            active={phase ?? 1}
+            completed={done}
+            outdated={outdated}
+            locked={{
+              2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
+              3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
+              4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
+            }}
+            onSelect={(next) => {
+              setPhase(next)
+              // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
+              writeUrlParams({ fase: String(next), tab: null, ronde: null })
+            }}
+          />
+          {refreshError && (
+            <p className="text-xs text-amber-800 lg:text-right dark:text-amber-300">
+              De fasestatus kon niet worden ververst; de fases hierboven kunnen verouderd zijn.
+            </p>
+          )}
+          <MondayBoardSetting customerId={customerId} align="end" />
+        </div>
+      </header>
       {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
@@ -401,19 +407,19 @@ function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onCh
         </PanelRow>
 
         {error && <PanelRow tone="error">{error}</PanelRow>}
-
-        {hasResults && (
-          <PanelTabs
-            tabs={TABS.map((t) => ({
-              key: t.key,
-              label:
-                t.key === "issues" && scan.summary_stats?.issues ? `${t.label} (${scan.summary_stats.issues.total})` : t.label,
-            }))}
-            active={tab}
-            onSelect={setTab}
-          />
-        )}
       </PhasePanel>
+
+      {hasResults && (
+        <PanelTabs
+          tabs={TABS.map((t) => ({
+            key: t.key,
+            label:
+              t.key === "issues" && scan.summary_stats?.issues ? `${t.label} (${scan.summary_stats.issues.total})` : t.label,
+          }))}
+          active={tab}
+          onSelect={setTab}
+        />
+      )}
 
       {scan && hasResults && (
         <>
