@@ -89,6 +89,9 @@ from app.features.launch_checklist.schemas import (
 from app.core.config import settings
 from app.features.launch_checklist.services import ahrefs_enrich, bing_enrich, gsc_enrich, monday_push
 from app.features.launch_checklist.services.checklist_view import (
+    checklist_progress,
+    latest_scans_by_customer as _latest_scans,
+    manual_states_by_customer as _states_for,
     latest_completed_geo as _latest_completed_geo,
     latest_completed_scan,
     latest_content_scan as _latest_content_scan,
@@ -99,7 +102,6 @@ from app.features.launch_checklist.services.checklist_view import (
     merged_golive_checklist,
     merged_quarterly_checklist,
     quarterly_periods,
-    resolve_is_webshop as _is_webshop,
 )
 from app.features.launch_checklist.services.quarterly_checklist import (
     ITEMS as QUARTERLY_ITEMS,
@@ -111,7 +113,6 @@ from app.features.launch_checklist.services.quarterly_checklist import (
 from app.features.launch_checklist.services.geo_checklist import (
     ITEMS as CHECKLIST_ITEMS,
     SECTION_LABELS,
-    merge_checklist,
 )
 from app.services.monday import client as monday_client
 from app.services.monday.client import MondayServiceError
@@ -123,12 +124,10 @@ from app.services.search_console import client as gsc_client
 from app.services.search_console.client import SearchConsoleServiceError
 from app.features.launch_checklist.services.content_checklist import (
     ITEMS as CONTENT_ITEMS,
-    merge_content_checklist,
 )
 from app.features.launch_checklist.services.golive_checklist import (
     ITEMS as GOLIVE_ITEMS,
     PHASE as GOLIVE_PHASE,
-    merge_golive_checklist,
 )
 from app.features.launch_checklist.services.content_rebuild import (
     rebuild_content_checklist,
@@ -165,17 +164,6 @@ def _normalize_base_url(raw: str) -> str:
 
 # --- klanten ---------------------------------------------------------------
 
-def _latest_scans(db: Session, *, phase: int, completed_only: bool = False) -> dict[str, LaunchScan]:
-    """Laatste scan per klant voor een fase."""
-    base = db.query(LaunchScan).filter(LaunchScan.phase == phase)
-    if completed_only:
-        base = base.filter(LaunchScan.status == "completed")
-    latest: dict[str, LaunchScan] = {}
-    for row in base.order_by(LaunchScan.created_at.asc()).all():
-        latest[row.customer_website_id] = row
-    return latest
-
-
 def _recover_stale_scans(db: Session, customer_id: str) -> None:
     """Herstel vastgelopen actieve scans van de klant, zodat ze een nieuwe scan niet blokkeren."""
     active = (
@@ -185,17 +173,6 @@ def _recover_stale_scans(db: Session, customer_id: str) -> None:
     )
     for scan in active:
         recover_stale_analysis(db, scan) or recover_stale_scan(db, scan)
-
-
-def _states_for(db: Session, customer_id: str | None = None) -> dict[str, dict[str, LaunchChecklistState]]:
-    """Handmatige status van fase 2, 3 en livegang (zonder ronde) per klant."""
-    query = db.query(LaunchChecklistState).filter(LaunchChecklistState.period == "")
-    if customer_id:
-        query = query.filter(LaunchChecklistState.customer_website_id == customer_id)
-    out: dict[str, dict[str, LaunchChecklistState]] = {}
-    for state in query.all():
-        out.setdefault(state.customer_website_id, {})[state.item_key] = state
-    return out
 
 
 @router.get("/customers", response_model=LaunchCustomerListResponse)
@@ -231,27 +208,14 @@ async def list_launch_customers(
 
     items: list[LaunchCustomerItem] = []
     for c in customers:
-        customer_states = states.get(c.id, {})
-        progress = None
         geo = completed_geo.get(c.id)
-        # Alleen fase-2 punten tellen: een afgevinkt livegangpunt start fase 2 niet.
-        if geo is not None or any(key in CHECKLIST_ITEMS for key in customer_states):
-            payload = (geo.checklist if geo else None) or {}
-            merged = merge_checklist(payload.get("items"), customer_states, is_webshop=_is_webshop(c, payload))
-            progress = ChecklistProgress(done=merged["done"], total=merged["total"], percent=merged["percent"])
-        golive_progress = None
-        golive = completed_golive.get(c.id)
-        if golive is not None or any(key in GOLIVE_ITEMS for key in customer_states):
-            merged = merge_golive_checklist(
-                (golive.checklist or {}).get("items") if golive is not None else None, customer_states)
-            golive_progress = ChecklistProgress(
-                done=merged["done"], total=merged["total"], percent=merged["percent"])
-        content_progress = None
         content = latest_content.get(c.id)
-        if content is not None and isinstance(content.checklist, dict):
-            merged = merge_content_checklist(content.checklist.get("items"), states.get(c.id, {}))
-            content_progress = ChecklistProgress(
-                done=merged["done"], total=merged["total"], percent=merged["percent"])
+        merged_progress = checklist_progress(
+            db, c, states.get(c.id, {}), geo=geo, content=content, golive=completed_golive.get(c.id))
+        progress, content_progress, golive_progress = (
+            ChecklistProgress(done=m["done"], total=m["total"], percent=m["percent"]) if m is not None else None
+            for m in (merged_progress["geo"], merged_progress["content"], merged_progress["golive"])
+        )
         # Verouderd: gebaseerd op een oudere nulmeting dan de nieuwste (ook lopende).
         p1 = newest_p1.get(c.id)
         geo_outdated = geo is not None and p1 is not None and geo.source_scan_id != p1.id

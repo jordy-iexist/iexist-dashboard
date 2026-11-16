@@ -5,16 +5,70 @@ handmatige status per klant, inclusief de webshop-override van de klant.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
 from app.db.models import CustomerWebsite, LaunchChecklistState, LaunchScan
 from app.features.launch_checklist.services.content_checklist import merge_content_checklist
+from app.features.launch_checklist.services.geo_checklist import ITEMS as GEO_ITEMS
 from app.features.launch_checklist.services.geo_checklist import merge_checklist
+from app.features.launch_checklist.services.golive_checklist import ITEMS as GOLIVE_ITEMS
 from app.features.launch_checklist.services.golive_checklist import PHASE as GOLIVE_PHASE
 from app.features.launch_checklist.services.golive_checklist import merge_golive_checklist
 from app.features.launch_checklist.services.quarterly_checklist import merge_quarterly_checklist
+
+
+def latest_scans_by_customer(
+    db: Session, *, phase: int, completed_only: bool = False, options: Iterable[Any] = ()
+) -> dict[str, LaunchScan]:
+    """Laatste scan per klant voor een fase. `options` bijv. `load_only(...)` om kolommen te beperken."""
+    base = db.query(LaunchScan).options(*options).filter(LaunchScan.phase == phase)
+    if completed_only:
+        base = base.filter(LaunchScan.status == "completed")
+    latest: dict[str, LaunchScan] = {}
+    for row in base.order_by(LaunchScan.created_at.asc()).all():
+        latest[row.customer_website_id] = row
+    return latest
+
+
+def manual_states_by_customer(
+    db: Session, customer_id: str | None = None
+) -> dict[str, dict[str, LaunchChecklistState]]:
+    """Handmatige status van fase 2, 3 en livegang (zonder ronde) per klant."""
+    query = db.query(LaunchChecklistState).filter(LaunchChecklistState.period == "")
+    if customer_id:
+        query = query.filter(LaunchChecklistState.customer_website_id == customer_id)
+    out: dict[str, dict[str, LaunchChecklistState]] = {}
+    for state in query.all():
+        out.setdefault(state.customer_website_id, {})[state.item_key] = state
+    return out
+
+
+def checklist_progress(
+    db: Session,
+    customer: CustomerWebsite,
+    states: dict[str, LaunchChecklistState],
+    *,
+    geo: LaunchScan | None,
+    content: LaunchScan | None,
+    golive: LaunchScan | None,
+) -> dict[str, dict[str, Any] | None]:
+    """Voortgang van fase 2, fase 3 en livegang zoals het klantenoverzicht die toont.
+
+    `geo` en `golive` = laatste voltooide scan, `content` = laatste fase 3-scan
+    (elke status). Per fase de samengevoegde checklist (met `done`, `total`,
+    `percent`), of None als de fase nog niet begonnen is.
+    """
+    out: dict[str, dict[str, Any] | None] = {"geo": None, "content": None, "golive": None}
+    # Alleen fase-2 punten tellen: een afgevinkt livegangpunt start fase 2 niet.
+    if geo is not None or any(key in GEO_ITEMS for key in states):
+        out["geo"] = merged_checklist(db, customer, geo, states=states)
+    if content is not None and isinstance(content.checklist, dict):
+        out["content"] = merged_content_checklist(db, customer.id, content, states=states)
+    if golive is not None or any(key in GOLIVE_ITEMS for key in states):
+        out["golive"] = merged_golive_checklist(db, customer.id, golive, states=states)
+    return out
 
 
 def latest_completed_scan(db: Session, customer_id: str, phase: int) -> LaunchScan | None:

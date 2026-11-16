@@ -59,6 +59,7 @@ const menuItems = [
 const LIVEGANG_URL = "/dashboard/livegang";
 const SEO_GEO_URL = "/dashboard/livegang/seo-geo";
 const GOLIVE_URL = "/dashboard/livegang/oplevering";
+const ANALYTICS_URL = "/dashboard/livegang/analytics";
 
 const blogItems = [
   {
@@ -228,6 +229,18 @@ export function AppSidebar({
                           <Link href={GOLIVE_URL}>
                             <ListChecks />
                             <span>Livegang</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname.startsWith(ANALYTICS_URL)}
+                          className={subClass}
+                        >
+                          <Link href={ANALYTICS_URL}>
+                            <BarChart3 />
+                            <span>Analytics</span>
                           </Link>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>

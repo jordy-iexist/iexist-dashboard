@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from sqlalchemy.orm import Session
 
@@ -137,9 +137,23 @@ def compare_ai(before: dict[str, Any] | None, after: dict[str, Any] | None) -> d
 _NOT_COMPARED_PREFIXES = (KEY_PREFIX, "cwv_")
 
 
+def is_compared_type(issue_type: str) -> bool:
+    """Of een actiepunttype tussen scans vergeleken wordt (geen `c4_`- of `cwv_`-punt)."""
+    return not issue_type.startswith(_NOT_COMPARED_PREFIXES)
+
+
 def count_issue_types(issue_types: Iterable[str]) -> Counter[str]:
     """Telling per type, zonder types die fase 4 niet meet of vergelijkt."""
-    return Counter(t for t in issue_types if not t.startswith(_NOT_COMPARED_PREFIXES))
+    return Counter(t for t in issue_types if is_compared_type(t))
+
+
+def count_issues_by_type(by_type: Mapping[str, Any]) -> Counter[str]:
+    """Zoals `count_issue_types`, maar vanuit een telling per type (`summary_stats["issues"]["by_type"]`)."""
+    out: Counter[str] = Counter()
+    for issue_type, count in by_type.items():
+        if is_compared_type(issue_type) and isinstance(count, int) and count:
+            out[issue_type] += count
+    return out
 
 
 def scan_ruleset(scan: Any) -> int:
@@ -467,9 +481,14 @@ def compare_bing_webmaster(
 
 # --- posities (SEO-tracker) ----------------------------------------------------------
 
-def compare_rankings(db: Session, customer_id: str, since: datetime | None) -> dict[str, Any] | None:
-    """Laatste positie per zoekwoord nu en rond de basisdatum. None zonder metingen."""
-    rows = (
+def compare_rankings(
+    db: Session, customer_id: str, since: datetime | None, *, until: datetime | None = None
+) -> dict[str, Any] | None:
+    """Laatste positie per zoekwoord nu en rond de basisdatum. None zonder metingen.
+
+    Met `until` telt "nu" als de stand op dat moment: latere metingen doen niet mee.
+    """
+    query = (
         db.query(
             SerpScanResult.keyword_id,
             SerpScanResult.keyword,
@@ -478,9 +497,10 @@ def compare_rankings(db: Session, customer_id: str, since: datetime | None) -> d
             SerpScanResult.created_at,
         )
         .filter(SerpScanResult.website_id == customer_id, SerpScanResult.error_message.is_(None))
-        .order_by(SerpScanResult.created_at.asc())
-        .all()
     )
+    if until is not None:
+        query = query.filter(SerpScanResult.created_at <= until)
+    rows = query.order_by(SerpScanResult.created_at.asc()).all()
     if not rows:
         return None
     latest: dict[str, Any] = {}
