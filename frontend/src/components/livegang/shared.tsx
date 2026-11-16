@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock, RefreshCw } from "lucide-react"
+import { Check, Loader2, Lock, RefreshCw, WifiOff } from "lucide-react"
 
 import {
   ACTIVE_STATUSES,
@@ -248,6 +248,8 @@ export const GEO_STEPS: ScanStatus[] = ["fetching", "linking", "checking", "anal
 export const CONTENT_STEPS: ScanStatus[] = ["fetching", "linking", "checking"]
 /** Fase 4: herhaalscan, opnieuw ophalen voor schema, vergelijken en conceptrapport. */
 export const QUARTERLY_STEPS: ScanStatus[] = ["discovering", "inventory", "fetching", "checking", "analyzing"]
+/** Livegang: sitemap, volledige inventaris, daarna probes en de checklist. */
+export const GOLIVE_STEPS: ScanStatus[] = ["discovering", "inventory", "checking"]
 
 export function isActive(status: ScanStatus) {
   return ACTIVE_STATUSES.includes(status)
@@ -307,6 +309,23 @@ export function ScanProgress({
         ))}
       </ol>
     </div>
+  )
+}
+
+/** Melding als het pollen herhaaldelijk mislukt: de getoonde status is mogelijk verouderd. */
+export function PollingFailedNotice({ failing, className }: { failing: boolean; className?: string }) {
+  if (!failing) return null
+  return (
+    <p
+      role="status"
+      className={cn("flex items-start gap-2 text-sm", ROW_TONES.warning, className)}
+    >
+      <WifiOff className="mt-0.5 size-4 shrink-0" />
+      <span>
+        De status wordt niet meer bijgewerkt: de server reageert niet. We blijven het op de achtergrond proberen; wat
+        hier staat, kan verouderd zijn.
+      </span>
+    </p>
   )
 }
 

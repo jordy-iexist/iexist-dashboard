@@ -1,6 +1,6 @@
 "use client"
 
-import { Download, Loader2, Play, Square, Trash2 } from "lucide-react"
+import { Download, Loader2, Play, RefreshCw, Square, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,7 @@ import {
   PanelTabs,
   PhasePanel,
   PhaseStepper,
+  PollingFailedNotice,
   ScanProgress,
   ScanStatusBadge,
 } from "@/components/livegang/shared"
@@ -89,6 +90,12 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
   const [phase, setPhase] = useState<number | null>(null)
   const [done, setDone] = useState<Record<number, boolean>>({})
   const [outdated, setOutdated] = useState<Record<number, boolean>>({})
+  // Eerste keer laden mislukt: geen fase tonen (die zou ten onrechte "vergrendeld" lijken).
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Verversen na de eerste keer laden mislukt: de vorige fasestatus blijft staan.
+  const [refreshError, setRefreshError] = useState(false)
+  // Ophogen = de fasestatus opnieuw laden (knop "Opnieuw proberen").
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -97,6 +104,8 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
         if (cancelled) return
         setDone(state.done)
         setOutdated(state.outdated)
+        setLoadError(null)
+        setRefreshError(false)
         // De fase uit de URL (?fase=) gaat voor, zodat een refresh op dezelfde fase
         // blijft. Zonder keuze: fase 2 openen als die al eerder gestart is.
         const fromUrl = readUrlParam("fase")
@@ -120,22 +129,41 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
                   : fallback
         setPhase((current) => current ?? initial)
       })
-      .catch(() => {
-        if (!cancelled) setPhase((current) => current ?? (readUrlParam("fase") === "2" ? 2 : 1))
+      .catch((err: Error) => {
+        if (!cancelled) setLoadError(err.message || "Onbekende fout")
       })
     return () => {
       cancelled = true
     }
-  }, [customerId])
+  }, [customerId, loadAttempt])
 
   const refreshPhases = useCallback(() => {
     fetchPhaseState(customerId)
       .then((state) => {
         setDone(state.done)
         setOutdated(state.outdated)
+        setRefreshError(false)
       })
-      .catch(() => {})
+      .catch(() => setRefreshError(true))
   }, [customerId])
+
+  function retryLoad() {
+    setLoadError(null)
+    setLoadAttempt((n) => n + 1)
+  }
+
+  if (phase === null && loadError) {
+    return (
+      <PanelRow tone="error" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1">
+          De fases van deze klant konden niet worden geladen, dus we weten niet welke fase klaar is. ({loadError})
+        </span>
+        <Button size="sm" variant="outline" onClick={retryLoad}>
+          <RefreshCw /> Opnieuw proberen
+        </Button>
+      </PanelRow>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -155,6 +183,11 @@ export function LaunchScanWorkspace({ customerId }: { customerId: string }) {
             writeUrlParams({ fase: String(next), tab: null, ronde: null })
           }}
         />
+        {refreshError && (
+          <p className="border-t px-4 py-2 text-xs text-amber-800 sm:px-5 dark:text-amber-300">
+            De fasestatus kon niet worden ververst; de stappen hierboven kunnen verouderd zijn.
+          </p>
+        )}
         <MondayBoardSetting customerId={customerId} />
       </section>
       {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
@@ -212,7 +245,7 @@ function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onCh
   }, [selectedId, loadScan])
 
   // Pollen zolang de geselecteerde scan loopt; daarna de scanlijst verversen.
-  usePolling(
+  const { failing: pollingFailed } = usePolling(
     async () => {
       if (!selectedId) return
       const next = await loadScan(selectedId)
@@ -343,6 +376,7 @@ function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onCh
               </div>
             </div>
             {running && <ScanProgress scan={scan} bare />}
+            <PollingFailedNotice failing={pollingFailed} />
             {scan.status === "failed" && (
               <p className="text-red-700 dark:text-red-400">Scan mislukt: {scan.error_message ?? "onbekende fout"}</p>
             )}

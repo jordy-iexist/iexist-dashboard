@@ -191,6 +191,27 @@ class Settings(BaseSettings):
         default="gpt-5.2",
         validation_alias="LAUNCH_SCAN_OPENAI_MODEL",
     )
+    # Grens per OpenAI-aanroep in de livegang-scans (agentstappen en paginatype-classificatie).
+    # De SDK-standaard is 600 s per poging met 2 herhalingen: ~30 min zonder levensteken,
+    # precies de grens waarop de herstelcheck een scan als vastgelopen afbreekt
+    # (scan_recovery.STALE_SCAN_AFTER). Met deze waarden duurt één aanroep hooguit
+    # ~(1 + retries) × timeout = 10 min, ruim daaronder.
+    # Niet lager: de aanroepen streamen niet, dus de read-timeout is de hele generatietijd,
+    # en de grootste rapportagent schrijft tot 9.000 tokens plus reasoning. Een rapport van
+    # iets meer dan 3 min zou bij 180 s twee keer afbreken en dan helemaal ontbreken.
+    # Blog- en landingspaginageneratie houden de SDK-standaard.
+    launch_scan_openai_timeout_seconds: float = Field(
+        default=300.0,
+        ge=30,
+        le=600,
+        validation_alias="LAUNCH_SCAN_OPENAI_TIMEOUT_SECONDS",
+    )
+    launch_scan_openai_max_retries: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        validation_alias="LAUNCH_SCAN_OPENAI_MAX_RETRIES",
+    )
     launch_scan_http_concurrency: int = Field(
         default=4,
         ge=1,
@@ -202,6 +223,13 @@ class Settings(BaseSettings):
         ge=1,
         le=10,
         validation_alias="LAUNCH_SCAN_PSI_CONCURRENCY",
+    )
+    # Livegangscan: eigen testdomeinen van het bureau, komma-gescheiden (bijv.
+    # "iexist-dev.nl,klanten.iexist.nl"). Een verwijzing naar zo'n domein of een
+    # subdomein ervan geldt als restant van de testomgeving (gl_staging_refs).
+    launch_golive_test_domains: str = Field(
+        default="",
+        validation_alias="LAUNCH_GOLIVE_TEST_DOMAINS",
     )
 
     # Livegang fase 3 (content & onpage): AI-analyse per geselecteerde pagina.
@@ -337,6 +365,14 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def launch_golive_test_domain_list(self) -> list[str]:
+        return [
+            item.strip().lower().lstrip(".")
+            for item in self.launch_golive_test_domains.split(",")
+            if item.strip()
+        ]
 
     @property
     def cors_origin_list(self) -> list[str]:

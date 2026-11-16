@@ -17,6 +17,7 @@ import {
   PercentRing,
   PhasePanel,
   Pill,
+  PollingFailedNotice,
   ScanProgress,
   ScanStatusBadge,
 } from "@/components/livegang/shared"
@@ -98,7 +99,7 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
   }, [customerId, loadChecklist])
 
   // Pollen zolang de laatste scan loopt; daarna checklist en fasestatus verversen.
-  usePolling(
+  const { failing: pollingFailed } = usePolling(
     async () => {
       const next = await loadLatest()
       if (!next || !isActive(next.status)) {
@@ -235,7 +236,7 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
               )}
               {!running && (
                 <Button size="sm" variant="outline" asChild>
-                  <Link href={`/dashboard/livegang/${customerId}/checklist/print`} target="_blank">
+                  <Link href={`/dashboard/livegang/seo-geo/${customerId}/checklist/print`} target="_blank">
                     <Printer /> Printversie / PDF
                   </Link>
                 </Button>
@@ -243,6 +244,7 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
             </div>
           </div>
           {latest && running && <ScanProgress scan={latest} steps={GEO_STEPS} bare />}
+          <PollingFailedNotice failing={pollingFailed} />
           {latest?.status === "failed" && (
             <p className="text-red-700 dark:text-red-400">Scan mislukt: {latest.error_message ?? "onbekende fout"}</p>
           )}

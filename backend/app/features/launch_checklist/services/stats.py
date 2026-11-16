@@ -6,10 +6,11 @@ from typing import Any
 
 from app.db.models import LaunchScanPage
 from app.features.launch_checklist.services.ahrefs_enrich import is_lost
-from app.features.launch_checklist.services.issues import final_status
+from app.features.launch_checklist.services.issues import RULESET_VERSION, final_status
 
 
 def build_summary_stats(pages: list[LaunchScanPage], issues: list[dict[str, Any]]) -> dict[str, Any]:
+    """Cijfers van een fase 1- of fase 4-scan; `ruleset` = de regelset waarmee de actiepunten zijn gemaakt."""
     status_buckets: Counter[str] = Counter()
     for p in pages:
         if p.status_code is None:
@@ -38,6 +39,7 @@ def build_summary_stats(pages: list[LaunchScanPage], issues: list[dict[str, Any]
     by_type: Counter[str] = Counter(i["issue_type"] for i in issues)
 
     return {
+        "ruleset": RULESET_VERSION,
         "total_urls": len(pages),
         "status": dict(status_buckets),
         "html_pages": len(html_ok),

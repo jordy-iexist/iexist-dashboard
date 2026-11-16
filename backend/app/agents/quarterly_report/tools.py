@@ -46,7 +46,9 @@ def get_overview(ctx: QuarterlyContext) -> dict[str, Any]:
         "base": comparison.get("base"),
         "ai_score": {"before": ai.get("before"), "after": ai.get("after"),
                      "improved": ai.get("improved"), "worsened": ai.get("worsened")},
-        "issues_total": {"before": issues.get("before"), "after": issues.get("after")},
+        # Zonder actiepunten van nieuwe controles (not_compared): die kon de basis-scan nog niet vinden.
+        "issues_total": {"before": issues.get("before"), "after": issues.get("after"),
+                         "not_compared": issues.get("not_compared") or 0},
         "pages": comparison.get("pages"),
         "ahrefs": comparison.get("ahrefs"),
         "sources": _payload(ctx).get("sources"),
@@ -91,11 +93,17 @@ def get_ai_checks(ctx: QuarterlyContext) -> dict[str, Any]:
 
 @tool(
     "get_issue_changes",
-    "Actiepunten per type: aantal voor en na en het verschil, gesorteerd op grootste verandering.",
+    "Actiepunten per type: in rows het aantal voor en na en het verschil, gesorteerd op grootste verandering. "
+    "new_checks (comparable=false, before en delta null) zijn nieuwe controles die de basis-scan nog niet deed (of anders mat): "
+    "geen verslechtering, alleen het huidige aantal.",
 )
 def get_issue_changes(ctx: QuarterlyContext) -> dict[str, Any]:
     issues = _comparison(ctx).get("issues") or {}
-    return {"rows": (issues.get("rows") or [])[:MAX_ROWS]}
+    rows = issues.get("rows") or []
+    # Oudere scans hebben geen 'comparable': die rijen zijn allemaal vergelijkbaar.
+    compared = [r for r in rows if r.get("comparable", True)]
+    new_checks = [r for r in rows if not r.get("comparable", True)]
+    return {"rows": compared[:MAX_ROWS], "new_checks": new_checks[:MAX_ROWS]}
 
 
 @tool(

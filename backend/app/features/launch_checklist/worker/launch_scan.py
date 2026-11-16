@@ -25,6 +25,7 @@ from app.features.launch_checklist.services.issue_state import (
 )
 from app.features.launch_checklist.services.issues import generate_issues
 from app.features.launch_checklist.services.pagespeed import measure_vitals
+from app.features.launch_checklist.services.scan_recovery import heartbeat
 from app.features.launch_checklist.services.stats import build_summary_stats
 from app.services.ahrefs import is_configured as ahrefs_is_configured
 from app.worker.celery_app import celery_app
@@ -82,6 +83,11 @@ def _enrich_with_ahrefs(scan_id: str, records: list[PageRecord], warnings: list[
 
     unknown = ahrefs_enrich.merge_into_records(records, snapshot)
     if unknown and not _is_stopped(scan_id):
+        # Tot 300 extra URL's: levensteken per batch, anders lijkt de scan vastgelopen (scan_recovery).
+        def on_extra(_batch: list[PageRecord]) -> bool:
+            _update(scan_id)
+            return not _is_stopped(scan_id)
+
         extra = asyncio.run(
             run_inventory(
                 seed_urls=unknown,
@@ -89,7 +95,8 @@ def _enrich_with_ahrefs(scan_id: str, records: list[PageRecord], warnings: list[
                 follow_links=False,
                 max_pages=len(unknown),
                 concurrency=settings.launch_scan_http_concurrency,
-                on_batch=lambda _batch: not _is_stopped(scan_id),
+                on_batch=on_extra,
+                on_progress=heartbeat(lambda: _update(scan_id)),
             )
         )
         ahrefs_enrich.mark_extra_records(extra, snapshot)
@@ -119,7 +126,9 @@ def run_launch_scan_task(self, scan_id: str) -> None:
     warnings: list[str] = []
     with SessionLocal() as db:
         scan = db.get(LaunchScan, scan_id)
-        if scan is None or str(scan.status).lower() in STOPPED_STATUSES:
+        # 'failed' vóór de start: de scan is als vastgelopen hersteld terwijl de taak nog in de
+        # wachtrij stond (scan_recovery); dan niet alsnog beginnen.
+        if scan is None or str(scan.status).lower() in STOPPED_STATUSES | {"failed"}:
             logger.info("Launch scan %s niet gevonden of geannuleerd.", scan_id)
             return
         customer = db.get(CustomerWebsite, scan.customer_website_id)
@@ -132,7 +141,9 @@ def run_launch_scan_task(self, scan_id: str) -> None:
     try:
         # 1. Discovery
         _update(scan_id, status="discovering")
-        discovery = discover_from_sitemaps(base_url, max_urls=max_pages)
+        discovery = discover_from_sitemaps(
+            base_url, max_urls=max_pages, on_progress=heartbeat(lambda: _update(scan_id))
+        )
         if discovery.urls:
             source, seeds, follow = "sitemap", discovery.urls, False
             if discovery.skipped_due_to_limit:
@@ -169,6 +180,7 @@ def run_launch_scan_task(self, scan_id: str) -> None:
                 max_pages=max_pages,
                 concurrency=settings.launch_scan_http_concurrency,
                 on_batch=on_batch,
+                on_progress=heartbeat(lambda: _update(scan_id)),
             )
         )
         if _is_stopped(scan_id):
@@ -194,6 +206,8 @@ def run_launch_scan_task(self, scan_id: str) -> None:
         ahrefs_summary: dict[str, Any] | None = None
         try:
             ahrefs_summary = _enrich_with_ahrefs(scan_id, records, warnings)
+        except SoftTimeLimitExceeded:  # time-out niet inslikken: de buitenste handler rondt af
+            raise
         except Exception as exc:  # Ahrefs is een verrijking: de scan gaat zonder door
             logger.warning("Ahrefs-verrijking faalde voor scan %s: %s", scan_id, exc)
             warnings.append(f"Ahrefs-data niet opgehaald: {exc}")
@@ -285,9 +299,12 @@ def run_launch_scan_task(self, scan_id: str) -> None:
                     user_id=user_id,
                     input=f"Schrijf de nulmeting voor {customer_name} ({base_url}).",
                     context=NulmetingContext(db=db, scan_id=scan_id, customer_name=customer_name),
+                    on_step=lambda: _update(scan_id),  # levensteken: het rapport kan lang duren
                 )
                 ai_summary = result.output or None
                 agent_trace = result.to_trace()
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as exc:  # geen key / API-fout: scan zelf is wel klaar
             logger.warning("Nulmeting-agent faalde voor scan %s: %s", scan_id, exc)
             warnings.append(f"AI-rapport niet gegenereerd: {exc}")

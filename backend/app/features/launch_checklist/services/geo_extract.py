@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.features.launch_checklist.services.discovery import clean_url, is_internal, url_key
 from app.features.launch_checklist.services.html_extract import _SeoParser, _clean
 
@@ -292,6 +294,8 @@ def extract_geo(html: str, page_url: str, root_domain: str) -> GeoExtract:
     try:
         parser.feed(html)
         parser.close()
+    except SoftTimeLimitExceeded:  # time-out van de taak, geen kapotte HTML
+        raise
     except Exception:  # kapotte HTML: neem wat we hebben
         pass
     parser.result()

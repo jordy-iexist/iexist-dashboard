@@ -7,6 +7,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.core.config import settings
 from app.features.launch_checklist.services.geo_extract import all_types
 
@@ -127,7 +129,7 @@ def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str,
     """items: [{id, url, title, h1}] → {id: type}. Faalt stil (lege dict)."""
     if not items:
         return {}
-    from app.services.openai.client import create_response, response_output_text
+    from app.services.openai.client import _build_openai_client, response_output_text
 
     out: dict[str, str] = {}
     for start in range(0, len(items), 150):
@@ -138,8 +140,12 @@ def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str,
             for i in chunk
         ]
         try:
-            response = create_response(
-                user_id=user_id,
+            # Begrensd per aanroep (zie settings.launch_scan_openai_timeout_seconds).
+            client = _build_openai_client(user_id).with_options(
+                timeout=settings.launch_scan_openai_timeout_seconds,
+                max_retries=settings.launch_scan_openai_max_retries,
+            )
+            response = client.responses.create(
                 model=settings.launch_scan_openai_model,
                 instructions=_LLM_INSTRUCTIONS,
                 input="\n".join(lines),
@@ -148,6 +154,8 @@ def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str,
             text = response_output_text(response)
             match = re.search(r"\{.*\}", text, re.DOTALL)
             data = json.loads(match.group(0)) if match else {}
+        except SoftTimeLimitExceeded:  # time-out van de taak: niet inslikken
+            raise
         except Exception as exc:  # geen key / API-fout / kapotte JSON
             logger.warning("Paginatype-classificatie via LLM mislukt: %s", exc)
             continue

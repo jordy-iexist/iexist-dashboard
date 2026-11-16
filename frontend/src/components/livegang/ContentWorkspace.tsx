@@ -18,6 +18,7 @@ import {
   PercentRing,
   PhasePanel,
   Pill,
+  PollingFailedNotice,
   ScanProgress,
   ScanStatusBadge,
 } from "@/components/livegang/shared"
@@ -106,7 +107,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
   }, [customerId, loadChecklist])
 
   // Pollen zolang de scan of de AI-analyse loopt; daarna alles verversen.
-  usePolling(
+  const { failing: pollingFailed } = usePolling(
     async () => {
       const next = await loadLatest()
       if (!next || !isActive(next.status)) {
@@ -292,7 +293,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
               )}
               {!scanning && (
                 <Button size="sm" variant="outline" asChild>
-                  <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=3`} target="_blank">
+                  <Link href={`/dashboard/livegang/seo-geo/${customerId}/checklist/print?fase=3`} target="_blank">
                     <Printer /> Printversie / PDF
                   </Link>
                 </Button>
@@ -302,6 +303,7 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
           {latest && running && (
             <ScanProgress scan={latest} steps={analysing ? ANALYSIS_STEPS : CONTENT_STEPS} bare />
           )}
+          <PollingFailedNotice failing={pollingFailed} />
           {latest?.status === "failed" && (
             <p className="text-red-700 dark:text-red-400">Scan mislukt: {latest.error_message ?? "onbekende fout"}</p>
           )}

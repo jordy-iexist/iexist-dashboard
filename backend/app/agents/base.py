@@ -14,9 +14,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
+
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.agents.tools import Tool
+from app.core.config import settings
 from app.services.openai.client import _build_openai_client, model_supports_reasoning
 
 logger = logging.getLogger(__name__)
@@ -86,9 +89,20 @@ def image_part(url: str, detail: str = "low") -> dict[str, Any]:
 
 
 def run_agent(
-    agent: Agent, *, user_id: str, input: str | list[dict[str, Any]], context: Any
+    agent: Agent,
+    *,
+    user_id: str,
+    input: str | list[dict[str, Any]],
+    context: Any,
+    on_step: Callable[[], Any] | None = None,
 ) -> AgentRunResult:
-    client = _build_openai_client(user_id)
+    """`on_step` wordt na elk antwoord van het model aangeroepen (bijv. een levensteken voor de scan)."""
+    # Eén modelaanroep begrenzen: tussen twee levenstekens (on_step) mag niet de
+    # SDK-standaard van ~30 min zitten, anders ziet de herstelcheck de scan als vastgelopen.
+    client = _build_openai_client(user_id).with_options(
+        timeout=settings.launch_scan_openai_timeout_seconds,
+        max_retries=settings.launch_scan_openai_max_retries,
+    )
     tools_by_name = {t.name: t for t in agent.tools}
     result = AgentRunResult(output="", model=agent.model)
     items: list[Any] = [{"role": "user", "content": input}]
@@ -116,6 +130,8 @@ def run_agent(
             }}
 
         response = client.responses.create(**payload)
+        if on_step is not None:
+            on_step()
         usage = getattr(response, "usage", None)
         if usage is not None:
             result.input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
@@ -140,6 +156,8 @@ def run_agent(
             else:
                 try:
                     output = tool.run(context, arguments)
+                except SoftTimeLimitExceeded:  # time-out van de Celery-taak: niet aan het model teruggeven
+                    raise
                 except Exception as exc:  # tool-fout terug naar het model
                     logger.warning("Agent %s tool %s faalde: %s", agent.name, call.name, exc)
                     output = {"error": str(exc)}

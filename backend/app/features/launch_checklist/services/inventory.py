@@ -59,6 +59,7 @@ class PageRecord:
     h2: list[str] = field(default_factory=list)
     canonical: str | None = None
     word_count: int | None = None
+    main_word_count: int | None = None
     lang: str | None = None
     hreflang: list[dict[str, str]] = field(default_factory=list)
     internal_links: int | None = None
@@ -76,6 +77,9 @@ class PageRecord:
     final_status: int | None = None
     # Niet opgeslagen: interne linkdoelen voor crawl + broken-link-check.
     internal_targets: list[str] = field(default_factory=list)
+    # Niet opgeslagen: extra signalen van een `page_hook` (bijv. de livegangscan).
+    # `_record_to_row` neemt alleen kolommen van LaunchScanPage over.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_html(self) -> bool:
@@ -119,8 +123,17 @@ def _determine_indexability(rec: PageRecord, x_robots: str) -> None:
     rec.indexable, rec.indexability_reason = True, None
 
 
+# Wordt per pagina aangeroepen zodra de HTML geparsed is: (record, html, response).
+PageHook = Callable[[PageRecord, str, httpx.Response], None]
+
+
 async def fetch_page(
-    client: httpx.AsyncClient, url: str, *, in_sitemap: bool, root_domain: str
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    in_sitemap: bool,
+    root_domain: str,
+    page_hook: PageHook | None = None,
 ) -> PageRecord:
     rec = PageRecord(url=url, path=_path_of(url), in_sitemap=in_sitemap)
     current = url
@@ -187,6 +200,7 @@ async def fetch_page(
         rec.h1_count = len(page.h1)
         rec.h2 = page.h2[:30]
         rec.word_count = page.word_count
+        rec.main_word_count = page.main_word_count
         rec.images_total = page.images_total
         rec.images_missing_alt = page.images_missing_alt
         rec.schema_types = page.schema_types
@@ -211,6 +225,8 @@ async def fetch_page(
         rec.internal_links = len(internal)
         rec.external_links = external
         rec.internal_targets = internal
+        if page_hook is not None:
+            page_hook(rec, html, response)
 
     _determine_indexability(rec, response.headers.get("x-robots-tag", ""))
     return rec
@@ -235,11 +251,16 @@ async def run_inventory(
     concurrency: int,
     on_batch: Callable[[list[PageRecord]], bool],
     timeout_seconds: float = 20.0,
+    on_progress: Callable[[], Any] | None = None,
+    page_hook: PageHook | None = None,
 ) -> list[PageRecord]:
     """Haal alle URL's op. Met follow_links=True wordt het een BFS-crawl.
 
     `on_batch` krijgt elke batch resultaten en geeft False terug om te stoppen
-    (bijv. als de scan geannuleerd is).
+    (bijv. als de scan geannuleerd is). `on_progress` wordt aangeroepen na elk
+    verzoek in de stappen zonder batches (timeouts opnieuw, kapotte links), als
+    levensteken voor de scan. `page_hook` krijgt elke geparste HTML-pagina
+    (zonder extra verzoek); zonder hook verandert er niets.
     """
     if not seed_urls:
         return []
@@ -255,14 +276,17 @@ async def run_inventory(
 
         async def _one(url: str) -> PageRecord:
             async with sem:
-                rec = await fetch_page(client, url, in_sitemap=in_sitemap, root_domain=root_domain)
+                rec = await fetch_page(
+                    client, url, in_sitemap=in_sitemap, root_domain=root_domain, page_hook=page_hook)
                 if rec.final_status == 429:
                     await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
-                    rec = await fetch_page(client, url, in_sitemap=in_sitemap, root_domain=root_domain)
+                    rec = await fetch_page(
+                        client, url, in_sitemap=in_sitemap, root_domain=root_domain, page_hook=page_hook)
                 # Sommige bot-protecties (o.a. Shopify) weigeren HTTP/2-clients
                 # met een onbekende user-agent, maar staan HTTP/1.1 wel toe.
                 if rec.final_status == 403 and (rec.http_version or "").upper() == "HTTP/2":
-                    retry = await fetch_page(h1_client, url, in_sitemap=in_sitemap, root_domain=root_domain)
+                    retry = await fetch_page(
+                        h1_client, url, in_sitemap=in_sitemap, root_domain=root_domain, page_hook=page_hook)
                     if retry.final_status != 403:
                         return retry
                 return rec
@@ -297,14 +321,17 @@ async def run_inventory(
                 async with retry_sem:
                     old = records[index]
                     fresh = await fetch_page(
-                        h1_client, old.url, in_sitemap=old.in_sitemap, root_domain=root_domain
+                        h1_client, old.url, in_sitemap=old.in_sitemap, root_domain=root_domain,
+                        page_hook=page_hook,
                     )
                     if fresh.error != "Timeout":
                         records[index] = fresh
+                if on_progress is not None:
+                    on_progress()
 
             await asyncio.gather(*(_retry(i) for i in timed_out))
 
-        await _check_broken_links(h1_client, records)
+        await _check_broken_links(h1_client, records, on_progress)
 
     return records
 
@@ -313,7 +340,9 @@ def _is_broken(status: int | None) -> bool:
     return status is not None and status >= 400 and status not in _INCONCLUSIVE_STATUSES
 
 
-async def _check_broken_links(client: httpx.AsyncClient, records: list[PageRecord]) -> None:
+async def _check_broken_links(
+    client: httpx.AsyncClient, records: list[PageRecord], on_progress: Callable[[], Any] | None = None
+) -> None:
     """Markeer interne links die naar 4xx/5xx/onbereikbare doelen wijzen."""
     known: dict[str, int | None] = {}
     for rec in records:
@@ -339,7 +368,7 @@ async def _check_broken_links(client: httpx.AsyncClient, records: list[PageRecor
             resp = await client.get(url, follow_redirects=True)
         return resp.status_code
 
-    async def _status(url: str) -> tuple[str, int | None]:
+    async def _check(url: str) -> tuple[str, int | None]:
         if not is_safe_external_url(url):
             return url, None
         async with sem:
@@ -351,6 +380,12 @@ async def _check_broken_links(client: httpx.AsyncClient, records: list[PageRecor
                 return url, status
             except httpx.HTTPError:
                 return url, None
+
+    async def _status(url: str) -> tuple[str, int | None]:
+        result = await _check(url)
+        if on_progress is not None:
+            on_progress()
+        return result
 
     for url, status in await asyncio.gather(*(_status(u) for u in to_check)):
         known[url_key(url)] = status

@@ -1,5 +1,7 @@
 """Livegang checklist — fase 1 (Nulmeting & AI scan), fase 2 (GEO/SEO-checklist),
-fase 3 (Contentcreatie & Onpage optimalisatie) en fase 4 (Kwartaal GEO-werkzaamheden)."""
+fase 3 (Contentcreatie & Onpage optimalisatie) en fase 4 (Kwartaal GEO-werkzaamheden).
+
+Los daarvan: de livegangchecklist (fase 5) voor de oplevering van een nieuwe website."""
 from __future__ import annotations
 
 import csv
@@ -57,6 +59,8 @@ from app.features.launch_checklist.schemas import (
     ContentSuggestionListResponse,
     SuggestionStatusUpdate,
     GeoScanCreateRequest,
+    GoLiveChecklistResponse,
+    GoLiveScanCreateRequest,
     MondayBoardLink,
     MondayPushChecklistRequest,
     MondayPushIssuesRequest,
@@ -88,9 +92,11 @@ from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo as _latest_completed_geo,
     latest_completed_scan,
     latest_content_scan as _latest_content_scan,
+    latest_golive_scan,
     latest_quarterly_scan,
     merged_checklist,
     merged_content_checklist,
+    merged_golive_checklist,
     merged_quarterly_checklist,
     quarterly_periods,
     resolve_is_webshop as _is_webshop,
@@ -119,6 +125,11 @@ from app.features.launch_checklist.services.content_checklist import (
     ITEMS as CONTENT_ITEMS,
     merge_content_checklist,
 )
+from app.features.launch_checklist.services.golive_checklist import (
+    ITEMS as GOLIVE_ITEMS,
+    PHASE as GOLIVE_PHASE,
+    merge_golive_checklist,
+)
 from app.features.launch_checklist.services.content_rebuild import (
     rebuild_content_checklist,
     recover_stale_analysis,
@@ -127,6 +138,7 @@ from app.features.launch_checklist.services.content_rebuild import (
 from app.features.launch_checklist.services.geo_rebuild import rebuild_checklist
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
 from app.features.launch_checklist.services.page_types import PAGE_TYPES
+from app.features.launch_checklist.services.scan_recovery import recover_stale_scan
 
 router = APIRouter(prefix="/api/launch-checklist", tags=["launch-checklist"])
 
@@ -164,8 +176,19 @@ def _latest_scans(db: Session, *, phase: int, completed_only: bool = False) -> d
     return latest
 
 
+def _recover_stale_scans(db: Session, customer_id: str) -> None:
+    """Herstel vastgelopen actieve scans van de klant, zodat ze een nieuwe scan niet blokkeren."""
+    active = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer_id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .all()
+    )
+    for scan in active:
+        recover_stale_analysis(db, scan) or recover_stale_scan(db, scan)
+
+
 def _states_for(db: Session, customer_id: str | None = None) -> dict[str, dict[str, LaunchChecklistState]]:
-    """Handmatige status van fase 2 en 3 (zonder ronde) per klant."""
+    """Handmatige status van fase 2, 3 en livegang (zonder ronde) per klant."""
     query = db.query(LaunchChecklistState).filter(LaunchChecklistState.period == "")
     if customer_id:
         query = query.filter(LaunchChecklistState.customer_website_id == customer_id)
@@ -202,15 +225,27 @@ async def list_launch_customers(
     quarterly_states: dict[tuple[str, str], dict[str, LaunchChecklistState]] = {}
     for state in db.query(LaunchChecklistState).filter(LaunchChecklistState.period != "").all():
         quarterly_states.setdefault((state.customer_website_id, state.period), {})[state.item_key] = state
+    # Livegang (fase 5): staat los van fase 1-4.
+    latest_golive = _latest_scans(db, phase=GOLIVE_PHASE)
+    completed_golive = _latest_scans(db, phase=GOLIVE_PHASE, completed_only=True)
 
     items: list[LaunchCustomerItem] = []
     for c in customers:
+        customer_states = states.get(c.id, {})
         progress = None
         geo = completed_geo.get(c.id)
-        if geo is not None or c.id in states:
+        # Alleen fase-2 punten tellen: een afgevinkt livegangpunt start fase 2 niet.
+        if geo is not None or any(key in CHECKLIST_ITEMS for key in customer_states):
             payload = (geo.checklist if geo else None) or {}
-            merged = merge_checklist(payload.get("items"), states.get(c.id, {}), is_webshop=_is_webshop(c, payload))
+            merged = merge_checklist(payload.get("items"), customer_states, is_webshop=_is_webshop(c, payload))
             progress = ChecklistProgress(done=merged["done"], total=merged["total"], percent=merged["percent"])
+        golive_progress = None
+        golive = completed_golive.get(c.id)
+        if golive is not None or any(key in GOLIVE_ITEMS for key in customer_states):
+            merged = merge_golive_checklist(
+                (golive.checklist or {}).get("items") if golive is not None else None, customer_states)
+            golive_progress = ChecklistProgress(
+                done=merged["done"], total=merged["total"], percent=merged["percent"])
         content_progress = None
         content = latest_content.get(c.id)
         if content is not None and isinstance(content.checklist, dict):
@@ -249,6 +284,8 @@ async def list_launch_customers(
             latest_quarterly_scan=to_scan_item(latest_quarterly[c.id]) if c.id in latest_quarterly else None,
             quarterly_progress=quarterly_progress,
             quarterly_period=quarterly.period if quarterly is not None else None,
+            latest_golive_scan=to_scan_item(latest_golive[c.id]) if c.id in latest_golive else None,
+            golive_progress=golive_progress,
         ))
     return LaunchCustomerListResponse(customers=items)
 
@@ -269,6 +306,7 @@ async def start_launch_scan(
     if not customer.base_url:
         raise HTTPException(status_code=400, detail="Deze klant heeft geen website-URL.")
 
+    _recover_stale_scans(db, customer.id)
     running = (
         db.query(LaunchScan)
         .filter(
@@ -315,7 +353,8 @@ async def start_launch_scan(
 @router.get("/scans", response_model=LaunchScanListResponse)
 async def list_launch_scans(
     customer_website_id: str | None = Query(default=None),
-    phase: int | None = Query(default=None, ge=1, le=4),
+    # 1-4: SEO/GEO-scan; 5: livegang. Zonder fase: alle scans van alle fases.
+    phase: int | None = Query(default=None, ge=1, le=GOLIVE_PHASE),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     _user_id: str = Depends(require_user_id),
@@ -338,8 +377,8 @@ async def get_launch_scan(
     db: Session = Depends(get_db),
 ):
     scan = _get_scan(db, scan_id)
-    # De UI pollt deze endpoint tijdens een analyse: hier herstellen we een vastgelopen analyse.
-    recover_stale_analysis(db, scan)
+    # De UI pollt deze endpoint tijdens een scan of analyse: hier herstellen we een vastgelopen scan.
+    recover_stale_analysis(db, scan) or recover_stale_scan(db, scan)
     return to_scan_detail(scan)
 
 
@@ -607,6 +646,7 @@ async def start_geo_scan(
     if source is None:
         raise HTTPException(status_code=400, detail="Voer eerst een voltooide fase-1 scan (nulmeting) uit.")
 
+    _recover_stale_scans(db, customer.id)
     running = (
         db.query(LaunchScan)
         .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
@@ -1139,6 +1179,7 @@ async def start_content_scan(
         raise HTTPException(
             status_code=400, detail="Voer eerst een voltooide fase-2 scan (GEO/SEO-checklist) uit.")
 
+    _recover_stale_scans(db, customer.id)
     running = (
         db.query(LaunchScan)
         .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
@@ -1376,6 +1417,7 @@ async def start_content_analysis(
     limit = settings.launch_content_max_pages_per_analysis
     if len(page_ids) > limit:
         raise HTTPException(status_code=400, detail=f"Selecteer maximaal {limit} pagina's per analyse.")
+    _recover_stale_scans(db, scan.customer_website_id)
     running = (
         db.query(LaunchScan)
         .filter(LaunchScan.customer_website_id == scan.customer_website_id,
@@ -1521,6 +1563,7 @@ async def start_quarterly_scan(
     if nulmeting is None:
         raise HTTPException(status_code=400, detail="Voer eerst een voltooide fase-1 scan (nulmeting) uit.")
 
+    _recover_stale_scans(db, customer.id)
     running = (
         db.query(LaunchScan)
         .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
@@ -1630,7 +1673,207 @@ def push_quarterly_checklist_to_monday(
     return _push_response(result)
 
 
+# --- livegang (fase 5): oplevering van een nieuwe website ----------------------
+# Werkt ook zonder enige scan: dan zijn alle punten open en met de hand af te vinken.
+
+@router.post("/customers/{customer_id}/golive-scans", response_model=LaunchScanDetail)
+async def start_golive_scan(
+    customer_id: str,
+    payload: GoLiveScanCreateRequest | None = None,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Start een livegangscan op het live domein; geen eerdere fase nodig."""
+    from app.worker.tasks import run_golive_scan_task  # voorkom circulaire import
+
+    customer = _get_customer(db, customer_id)
+    if not customer.base_url:
+        raise HTTPException(status_code=400, detail="Deze klant heeft geen website-URL.")
+
+    _recover_stale_scans(db, customer.id)
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+
+    base_url = _normalize_base_url(customer.base_url)
+    try:
+        validate_external_url(base_url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    now = _now()
+    scan = LaunchScan(
+        id=str(uuid.uuid4()),
+        customer_website_id=customer.id,
+        phase=GOLIVE_PHASE,
+        status="pending",
+        base_url=base_url,
+        total_urls=0,
+        inventoried_urls=0,
+        failed_urls=0,
+        max_pages=(payload or GoLiveScanCreateRequest()).max_pages,
+        vitals_max_pages=0,
+        vitals_total=0,
+        vitals_measured=0,
+        created_by=user_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    run_golive_scan_task.delay(scan.id)
+    return to_scan_detail(scan)
+
+
+def _build_golive_checklist(
+    db: Session, customer: CustomerWebsite, scan: LaunchScan | None = None
+) -> GoLiveChecklistResponse:
+    """Livegangchecklist voor `scan`; zonder scan de laatste voltooide livegangscan."""
+    if scan is None:
+        scan = latest_golive_scan(db, customer.id)
+    payload = (scan.checklist if scan else None) or {}
+    merged = merged_golive_checklist(db, customer.id, scan)
+    return GoLiveChecklistResponse(
+        customer_id=customer.id,
+        customer_name=customer.name,
+        base_url=customer.base_url,
+        scan=to_scan_item(scan) if scan else None,
+        generated_at=payload.get("generated_at"),
+        summary=payload.get("summary"),
+        sections=merged["sections"],
+        done=merged["done"],
+        total=merged["total"],
+        percent=merged["percent"],
+    )
+
+
+@router.get("/customers/{customer_id}/golive-checklist", response_model=GoLiveChecklistResponse)
+async def get_golive_checklist(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _build_golive_checklist(db, _get_customer(db, customer_id))
+
+
+@router.patch("/customers/{customer_id}/golive-checklist/{item_key}", response_model=ChecklistItemOut)
+async def update_golive_checklist_item(
+    customer_id: str,
+    item_key: str,
+    payload: ChecklistStateUpdate,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    if item_key not in GOLIVE_ITEMS:
+        raise HTTPException(status_code=404, detail="Onbekend checklistpunt.")
+    state = (
+        db.query(LaunchChecklistState)
+        .filter(LaunchChecklistState.customer_website_id == customer.id,
+                LaunchChecklistState.item_key == item_key,
+                LaunchChecklistState.period == "")
+        .first()
+    )
+    if state is None:
+        state = LaunchChecklistState(
+            id=str(uuid.uuid4()), customer_website_id=customer.id, item_key=item_key, period="")
+        db.add(state)
+    fields = payload.model_fields_set
+    if "manual_status" in fields:
+        state.manual_status = payload.manual_status
+    if "note" in fields:
+        state.note = (payload.note or "").strip() or None
+    state.updated_by = user_id
+    state.updated_at = _now()
+    db.commit()
+
+    response = _build_golive_checklist(db, customer)
+    for section in response.sections:
+        for item in section.items:
+            if item.key == item_key:
+                return item
+    raise HTTPException(status_code=500, detail="Checklistpunt niet gevonden na opslaan.")
+
+
+@router.post("/customers/{customer_id}/golive-checklist/push-monday", response_model=MondayPushResponse)
+def push_golive_checklist_to_monday(
+    customer_id: str,
+    payload: MondayPushChecklistRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    try:
+        result = monday_push.push_checklist_items(db, customer, payload.item_keys, user_id, phase=GOLIVE_PHASE)
+    except MondayServiceError as exc:
+        raise _monday_http_error(exc) from exc
+    return _push_response(result)
+
+
+@router.get("/customers/{customer_id}/golive-checklist/export")
+async def export_golive_checklist(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """CSV van de livegangchecklist zoals in beeld: laatste voltooide scan, of alleen de handmatige status.
+
+    Per klant in plaats van per scan, omdat de checklist ook zonder scan bestaat.
+    """
+    customer = _get_customer(db, customer_id)
+    checklist = _build_golive_checklist(db, customer)
+    buffer, writer = _csv_writer()
+    _write_checklist(writer, checklist.sections, ("Sectie", "Punt"))
+    stamp = checklist.scan.created_at if checklist.scan else _now()
+    return _csv_response(buffer, f"livegang-{_export_slug(customer)}-checklist-{stamp:%Y%m%d}.csv")
+
+
 # --- export ---------------------------------------------------------------
+
+_CHECKLIST_STATUS_LABELS = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
+
+
+def _csv_writer() -> tuple[io.StringIO, Any]:
+    buffer = io.StringIO()
+    buffer.write("\ufeff")  # BOM zodat Excel UTF-8 herkent
+    return buffer, csv.writer(buffer, delimiter=";")
+
+
+def _csv_response(buffer: io.StringIO, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _export_slug(customer: CustomerWebsite | None) -> str:
+    return (customer.domain if customer else "scan").replace("/", "-")
+
+
+def _write_checklist(
+    writer: Any, sections: list[Any], first_columns: tuple[str, str], section_label: Any = None
+) -> None:
+    """Checklist als CSV: één regel per punt, dezelfde kolommen voor elke checklist."""
+    writer.writerow([*first_columns, "Type", "Prioriteit", "Auto-status", "Melding",
+                     "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
+    for section in sections:
+        label = section_label(section) if section_label else section.label
+        for item in section.items:
+            auto = item.auto or {}
+            writer.writerow([
+                label, item.label, item.mode, item.priority,
+                auto.get("status", ""), auto.get("message", ""), item.manual_status or "",
+                item.note or "", _CHECKLIST_STATUS_LABELS.get(item.effective, item.effective),
+                _fmt([str(e) for e in (auto.get("evidence") or [])[:10]]),
+            ])
+
 
 def _fmt(value: Any) -> str:
     if value is None:
@@ -1652,9 +1895,7 @@ async def export_launch_scan(
     db: Session = Depends(get_db),
 ):
     scan = _get_scan(db, scan_id)
-    buffer = io.StringIO()
-    buffer.write("﻿")  # BOM zodat Excel UTF-8 herkent
-    writer = csv.writer(buffer, delimiter=";")
+    buffer, writer = _csv_writer()
 
     if kind == "suggestions":
         urls = {
@@ -1687,35 +1928,19 @@ async def export_launch_scan(
             )
         else:
             checklist = _build_content_checklist(db, customer, scan if scan.checklist else None)
-        status_labels = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
-        writer.writerow(["Hoofditem", "Subitem", "Type", "Prioriteit", "Auto-status", "Melding",
-                         "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
-        for section in checklist.sections:
-            for item in section.items:
-                auto = item.auto or {}
-                writer.writerow([
-                    section.label, item.label, item.mode, item.priority,
-                    auto.get("status", ""), auto.get("message", ""), item.manual_status or "",
-                    item.note or "", status_labels.get(item.effective, item.effective),
-                    _fmt([str(e) for e in (auto.get("evidence") or [])[:10]]),
-                ])
+        _write_checklist(writer, checklist.sections, ("Hoofditem", "Subitem"))
+    elif kind == "checklist" and scan.phase == GOLIVE_PHASE:
+        customer = _get_customer(db, scan.customer_website_id)
+        # De gevraagde livegangscan; een niet-voltooide scan heeft geen resultaten (alleen handmatige status).
+        golive = _build_golive_checklist(db, customer, scan if scan.status == "completed" else None)
+        _write_checklist(writer, golive.sections, ("Sectie", "Punt"))
     elif kind == "checklist":
         customer = _get_customer(db, scan.customer_website_id)
         # De gevraagde fase-2 scan; bij een fase-1 scan de laatste checklist.
         geo = scan if scan.phase == 2 and scan.status == "completed" else None
         checklist = _build_checklist(db, customer, geo)
-        status_labels = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
-        writer.writerow(["Sectie", "Punt", "Type", "Prioriteit", "Auto-status", "Melding",
-                         "Handmatige status", "Notitie", "Eindstatus", "Evidence"])
-        for section in checklist.sections:
-            for item in section.items:
-                auto = item.auto or {}
-                writer.writerow([
-                    SECTION_LABELS.get(section.key, section.key), item.label, item.mode, item.priority,
-                    auto.get("status", ""), auto.get("message", ""), item.manual_status or "",
-                    item.note or "", status_labels.get(item.effective, item.effective),
-                    _fmt([str(e) for e in (auto.get("evidence") or [])[:10]]),
-                ])
+        _write_checklist(writer, checklist.sections, ("Sectie", "Punt"),
+                         lambda section: SECTION_LABELS.get(section.key, section.key))
     elif kind == "issues":
         writer.writerow(["Ernst", "Categorie", "Type", "Titel", "URL", "Beschrijving", "Aanbeveling", "Status"])
         rows = db.query(LaunchScanIssue).filter(LaunchScanIssue.scan_id == scan_id).all()
@@ -1730,7 +1955,7 @@ async def export_launch_scan(
             "URL", "In sitemap", "Statuscode", "Eind-URL", "Redirects", "Responstijd (ms)", "Content-type",
             "Grootte (bytes)", "HTTP-versie", "Indexeerbaar", "Reden niet indexeerbaar", "Meta robots",
             "Title", "Title lengte", "Meta description", "Meta description lengte", "H1 aantal", "H1",
-            "H2", "Canonical", "Woorden", "Lang", "Hreflang", "Interne links", "Externe links",
+            "H2", "Canonical", "Woorden", "Woorden hoofdinhoud", "Lang", "Hreflang", "Interne links", "Externe links",
             "Kapotte links", "Afbeeldingen", "Zonder alt", "Schema types", "Open Graph",
             "CWV status", "CWV bron", "Performance score", "LCP (ms)", "CLS", "TBT (ms)", "FCP (ms)",
             "Veld LCP", "Veld INP", "Veld CLS", "Fout",
@@ -1760,7 +1985,7 @@ async def export_launch_scan(
                 _fmt(p.indexable), _fmt(p.indexability_reason), _fmt(p.meta_robots),
                 _fmt(p.title), _fmt(p.title_length), _fmt(p.meta_description), _fmt(p.meta_description_length),
                 _fmt(p.h1_count), _fmt(p.h1), _fmt((p.h2 or [])[:10]), _fmt(p.canonical), _fmt(p.word_count),
-                _fmt(p.lang), _fmt([h.get("lang") for h in (p.hreflang or [])]), _fmt(p.internal_links),
+                _fmt(p.main_word_count), _fmt(p.lang), _fmt([h.get("lang") for h in (p.hreflang or [])]), _fmt(p.internal_links),
                 _fmt(p.external_links), _fmt(p.broken_links), _fmt(p.images_total), _fmt(p.images_missing_alt),
                 _fmt(p.schema_types), _fmt(p.open_graph), _fmt(p.cwv_status), _fmt(cwv.get("source")),
                 _fmt(lab.get("performance_score")), _fmt(lab.get("lcp")), _fmt(lab.get("cls")),
@@ -1772,13 +1997,9 @@ async def export_launch_scan(
             ])
 
     customer = db.get(CustomerWebsite, scan.customer_website_id)
-    slug = (customer.domain if customer else "scan").replace("/", "-")
+    slug = _export_slug(customer)
     prefix = {
         2: "geo-seo-checklist", 3: "content-onpage", 4: f"kwartaal-geo-{scan.period or ''}".rstrip("-"),
+        GOLIVE_PHASE: "livegang",
     }.get(scan.phase, "nulmeting")
-    filename = f"{prefix}-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv"
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _csv_response(buffer, f"{prefix}-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv")

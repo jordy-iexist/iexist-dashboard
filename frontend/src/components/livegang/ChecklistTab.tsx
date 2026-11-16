@@ -258,7 +258,7 @@ export function ChecklistTab({
 }: {
   checklist: { sections: ChecklistSection[] }
   customerId: string
-  /** Fase 2 (standaard), de fase-3 of de fase-4 checklist. */
+  /** Fase 2 (standaard), de fase-3, de fase-4 of de livegangchecklist. */
   path?: ChecklistPath
   /** Fase 4: de ronde waar de handmatige status bij hoort. */
   period?: string

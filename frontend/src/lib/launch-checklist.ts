@@ -191,6 +191,9 @@ export type LaunchCustomer = {
   latest_quarterly_scan?: LaunchScan | null
   quarterly_progress?: ChecklistProgress | null
   quarterly_period?: string | null
+  /** Livegang (fase 5): laatste scan en voortgang; null = nog niet gescand en niets afgevinkt. */
+  latest_golive_scan?: LaunchScan | null
+  golive_progress?: ChecklistProgress | null
 }
 
 export type CwvMetric = { value: number | null; rating: CwvRating | null }
@@ -203,6 +206,8 @@ export type CwvData = {
     fcp: number | null
     si: number | null
     ttfb: number | null
+    /** Totale overdrachtsgrootte in bytes (Lighthouse total-byte-weight); ontbreekt bij oudere metingen. */
+    total_byte_weight?: number | null
     performance_score: number | null
   }
   field?: ({ origin_fallback: boolean; overall: CwvRating | null } & Partial<
@@ -237,6 +242,8 @@ export type LaunchScanPage = {
   h2: string[] | null
   canonical: string | null
   word_count: number | null
+  /** Woorden buiten nav/header/footer/aside; null = geen paginastructuur herkend (of oudere scan). */
+  main_word_count: number | null
   lang: string | null
   hreflang: { lang: string; href: string }[] | null
   internal_links: number | null
@@ -413,8 +420,8 @@ export type Checklist = ChecklistProgress & {
 
 // --- Fase 3: content & onpage ------------------------------------------------
 
-/** Welke checklist: fase 2 (GEO/SEO), fase 3 (content & onpage) of fase 4 (kwartaal). */
-export type ChecklistPath = "checklist" | "content-checklist" | "quarterly-checklist"
+/** Welke checklist: fase 2 (GEO/SEO), fase 3 (content & onpage), fase 4 (kwartaal) of livegang. */
+export type ChecklistPath = "checklist" | "content-checklist" | "quarterly-checklist" | "golive-checklist"
 
 export type ContentSummary = {
   pages_fetched: number
@@ -838,9 +845,12 @@ export type IssueChange = {
   issue_type: string
   label: string
   category: string
-  before: number
+  /** null bij een nieuwe controle die de basis-scan nog niet deed (comparable false). */
+  before: number | null
   after: number
-  delta: number
+  delta: number | null
+  /** Ontbreekt bij scans van vóór de regelset-versie: dan altijd vergelijkbaar. */
+  comparable?: boolean
 }
 
 export type AhrefsMetricChange = {
@@ -864,7 +874,8 @@ export type RankingRow = {
 export type QuarterlyComparison = {
   base: { scan_id: string; phase: number; period: string | null; label: string; completed_at: string | null } | null
   ai: { before: number | null; after: number | null; checks: AiCheckChange[]; improved: number; worsened: number }
-  issues: { before: number; after: number; rows: IssueChange[] }
+  /** Totalen zonder nieuwe controles; `not_compared` = hun aantal actiepunten in deze ronde. */
+  issues: { before: number; after: number; not_compared?: number; rows: IssueChange[] }
   pages: { before: number; after: number; new: number; removed: number; broken: number; new_examples: string[] }
   ahrefs: {
     metrics: AhrefsMetricChange[]
@@ -964,10 +975,13 @@ export type QuarterlyBingWebmaster = {
   sitemaps?: { total: number; with_errors: number; pending: number; rows: BingSitemap[] } | null
 }
 
-/** Details van het checklistpunt `c4_bing_webmaster`. */
+/**
+ * Details van het checklistpunt `c4_bing_webmaster`. Alleen bij `state: "ok"` zijn de overige
+ * velden gevuld; zonder koppeling ontbreekt ook `site`. `sitemaps` bevat alleen sitemaps met een fout.
+ */
 export type BingWebmasterDetails = {
   state: BingState | "no_data"
-  site: string | null
+  site?: string | null
   index_drop_pct?: number | null
   clicks_drop_pct?: number | null
   malware?: number
@@ -1146,4 +1160,98 @@ export type SchemaValidationDetails = {
 export function periodLabel(period: string | null | undefined): string {
   const match = /^(\d{4})-Q([1-4])$/.exec(period ?? "")
   return match ? `Q${match[2]} ${match[1]}` : period ?? ""
+}
+
+// --- Livegang (fase 5): oplevering van een nieuwe website ----------------------
+
+export type GoLiveChecklist = ChecklistProgress & {
+  customer_id: string
+  customer_name: string
+  base_url: string
+  /** Laatste voltooide livegangscan; null = nog niet gescand (alles handmatig af te vinken). */
+  scan: LaunchScan | null
+  generated_at: string | null
+  summary: GoLiveSummary | null
+  sections: ChecklistSection[]
+}
+
+export type GoLiveSummary = {
+  auto_status: Record<string, number>
+  pages: number
+  pages_parsed: number
+  blocked_pages: number
+  discovery_source: "sitemap" | "crawl"
+  origin: string | null
+}
+
+/** Details per livegangpunt (`auto.details`); lijsten zijn gecapt, `*_total` is het echte aantal. */
+export type GoLiveHop = { url: string; status: number; location: string | null }
+
+export type GoLiveVariant = {
+  start: string
+  status: AutoStatus
+  note: string
+  chain: GoLiveHop[]
+  final_url: string | null
+  final_status: number | null
+  error: string | null
+}
+
+export type GoLiveUrlRow = {
+  page: string
+  url: string
+  tag?: string
+  kind?: string
+  issue?: string
+  type?: string
+  host?: string
+  level?: "error" | "warning"
+  reason?: string
+}
+
+export type GoLiveDetails = {
+  // gl_https
+  variant?: { start: string; chain: GoLiveHop[]; final_url: string | null; final_status: number | null; error: string | null }
+  hsts?: string | null
+  // gl_http_redirect / gl_host_variants
+  variants?: GoLiveVariant[]
+  target?: string | null
+  // gl_mixed_content
+  active?: GoLiveUrlRow[]
+  active_total?: number
+  passive?: GoLiveUrlRow[]
+  passive_total?: number
+  // gl_internal_urls / gl_staging_refs
+  urls?: GoLiveUrlRow[] | number
+  total?: number
+  hosts?: { host: string; level: "error" | "warning"; reason: string; pages: number; types: string[]; refs: number }[]
+  refs?: GoLiveUrlRow[]
+  // gl_robots_open
+  blocked?: { url: string; rule: string | null }[]
+  blocked_total?: number
+  // gl_noindex / gl_forms_tested
+  pages?: { url: string; reason?: string; in_sitemap?: boolean; forms?: number; actions?: string[] }[]
+  pages_total?: number
+  // gl_sitemap
+  foreign?: string[]
+  foreign_total?: number
+  wrong_host?: string[]
+  wrong_host_total?: number
+  not_ok?: { url: string; status: number | null; error: string | null }[]
+  not_ok_total?: number
+  // gl_pages_ok
+  failing?: { url: string; status: number | null; error: string | null }[]
+  failing_total?: number
+  broken?: { page: string; url: string; status: number | null }[]
+  broken_total?: number
+  // gl_tracking_installed / gl_viewport
+  ids?: { id: string; kind: "gtm" | "ga4"; pages: number }[]
+  ua?: string[]
+  other?: string[]
+  missing?: (string | { url: string; viewport: string | null })[]
+  missing_total?: number
+  pages_checked?: number
+  // gl_404 / gl_favicon
+  probes?: { url: string; status: AutoStatus; note: string; chain: GoLiveHop[]; final_url: string | null; final_status: number | null }[]
+  candidates?: { url: string; final_url: string | null; status: number | null; content_type: string | null; error: string | null; ok: boolean }[]
 }

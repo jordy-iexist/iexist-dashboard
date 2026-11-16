@@ -29,6 +29,7 @@ from app.features.launch_checklist.services.content_checks import (
     recheck_meta,
 )
 from app.features.launch_checklist.services.issues import content_issue
+from app.features.launch_checklist.services.scan_recovery import is_older_than
 
 
 def content_pages(db: Session, scan_id: str) -> list[LaunchContentPage]:
@@ -192,10 +193,7 @@ def recover_stale_analysis(db: Session, scan: LaunchScan, *, force: bool = False
     """
     if scan.phase != 3 or scan.status != "analyzing":
         return False
-    updated = scan.updated_at
-    if updated is not None and updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
-    if not force and updated is not None and datetime.now(timezone.utc) - updated < STALE_ANALYSIS_AFTER:
+    if not force and scan.updated_at is not None and not is_older_than(scan.updated_at, STALE_ANALYSIS_AFTER):
         return False
     reset_unfinished_analysis(db, scan.id)
     db.flush()

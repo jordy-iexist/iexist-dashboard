@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ListChecks, Pencil, Sheet } from "lucide-react"
+import { ListChecks, Pencil, Rocket, Sheet } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { KlantHero } from "@/components/klanten/KlantHero"
@@ -101,9 +101,15 @@ export default async function KlantDetailPage({ params }: KlantDetailPageProps) 
             </Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link href={`/dashboard/livegang/${customer.id}`}>
+            <Link href={`/dashboard/livegang/seo-geo/${customer.id}`}>
               <ListChecks />
-              Livegang checklist
+              SEO/GEO-scan
+            </Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link href={`/dashboard/livegang/oplevering/${customer.id}`}>
+              <Rocket />
+              Livegang
             </Link>
           </Button>
           <Button asChild variant="secondary">

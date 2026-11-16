@@ -121,7 +121,9 @@ def run_geo_scan_task(self, scan_id: str) -> None:
     warnings: list[str] = []
     with SessionLocal() as db:
         scan = db.get(LaunchScan, scan_id)
-        if scan is None or str(scan.status).lower() in STOPPED_STATUSES:
+        # 'failed' vóór de start: de scan is als vastgelopen hersteld terwijl de taak nog in de
+        # wachtrij stond (scan_recovery); dan niet alsnog beginnen.
+        if scan is None or str(scan.status).lower() in STOPPED_STATUSES | {"failed"}:
             return
         source = db.get(LaunchScan, scan.source_scan_id) if scan.source_scan_id else None
         if source is None:
@@ -209,9 +211,12 @@ def run_geo_scan_task(self, scan_id: str) -> None:
                     user_id=user_id,
                     input=f"Schrijf het GEO/SEO-rapport (fase 2) voor {customer_name} ({base_url}).",
                     context=GeoContext(db=db, scan_id=scan_id, source_scan_id=source_id, customer_name=customer_name),
+                    on_step=lambda: _update(scan_id),  # levensteken: het rapport kan lang duren
                 )
                 ai_summary = result.output or None
                 agent_trace = result.to_trace()
+        except SoftTimeLimitExceeded:  # time-out niet inslikken: de buitenste handler rondt af
+            raise
         except Exception as exc:  # geen key / API-fout: checklist zelf is wel klaar
             logger.warning("GEO-agent faalde voor scan %s: %s", scan_id, exc)
             warnings.append(f"AI-rapport niet gegenereerd: {exc}")

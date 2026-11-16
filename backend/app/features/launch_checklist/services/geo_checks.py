@@ -21,11 +21,16 @@ from app.features.launch_checklist.services.discovery import USER_AGENT, url_key
 from app.features.launch_checklist.services.geo_checklist import ITEMS, PROFILE_PLATFORMS
 from app.features.launch_checklist.services.geo_extract import all_types, platform_of, types_of
 from app.features.launch_checklist.services.issues import (
+    PAGE_WEIGHT_POOR_BYTES,
+    PAGE_WEIGHT_WARN_BYTES,
     THIN_CONTENT_WORDS,
+    THIN_MAIN_WORDS,
     _is_indexable_html,
     _is_ok_html,
     final_status,
     redirect_hops,
+    robots_blocked_in_sitemap,
+    thin_content_check,
 )
 from app.features.launch_checklist.services.page_types import PAGE_TYPES, is_pagination
 
@@ -79,6 +84,11 @@ def _urls(pages: Iterable[LaunchScanPage]) -> list[str]:
 
 def _sig(p: LaunchScanPage) -> dict[str, Any]:
     return p.signals or {}
+
+
+def _thin_words(p: LaunchScanPage) -> str:
+    _, words, measure = thin_content_check(p)
+    return f"{words} w hoofdinhoud" if measure == "main" else f"{words} w totaal"
 
 
 # --- extras (worker haalt dit één keer op) ---------------------------------
@@ -374,7 +384,9 @@ def evaluate_checklist(
             out[f"sameas_{key}"] = _r("error" if org_nodes else "warning",
                                       f"De site linkt naar {label}, maar het profiel staat niet in sameAs.", on_site)
         else:
-            out[f"sameas_{key}"] = _r("warning", f"Geen {label}-profiel gevonden in sameAs of op de site. Zet op n.v.t. als de klant dit profiel niet heeft.")
+            # Geen spoor van een profiel: waarschijnlijk heeft de klant er geen. 'info' houdt het
+            # punt open in de checklist, maar maakt er geen actiepunt van.
+            out[f"sameas_{key}"] = _r("info", f"Geen {label}-profiel gevonden in sameAs of op de site. Zet op n.v.t. als de klant dit profiel niet heeft.")
     other_links = same_as.get("other") or []
     out["sameas_other"] = (
         _r("ok", f"{len(other_links)} overige profielen in sameAs.", other_links)
@@ -477,6 +489,8 @@ def evaluate_checklist(
             "tag-/auteursarchief": [p for p in sitemap_pages if re.search(r"/(tag|tags|author|auteur)/", p.path.lower())],
             "paginatie": [p for p in sitemap_pages if is_pagination(p.url)],
             "verlopen vacature": [p for p in sitemap_pages if _expired_job(p, now)],
+            # Zelfde selectie als het fase 1-actiepunt robots_blocked_in_sitemap.
+            "geblokkeerd door robots.txt": [p for p, _ in robots_blocked_in_sitemap(pages, ai_checks)],
         }
         bad = {k: v for k, v in groups.items() if v}
         if not bad:
@@ -508,13 +522,24 @@ def evaluate_checklist(
     )
 
     measured = [p for p in pages if p.cwv_status]
+    # Paginagewicht uit PageSpeed (zelfde grenzen als het fase 1-actiepunt cwv_page_weight).
+    weights = {p.id: ((p.cwv or {}).get("lab") or {}).get("total_byte_weight") for p in pages}
+    heavy = [p for p in pages if isinstance(weights[p.id], (int, float)) and weights[p.id] > PAGE_WEIGHT_WARN_BYTES]
+    too_heavy = [p for p in heavy if weights[p.id] > PAGE_WEIGHT_POOR_BYTES]
     if not measured:
         out["core_web_vitals"] = _r("unknown", "Core Web Vitals zijn in fase 1 niet gemeten (PageSpeed-key ontbreekt of geen pagina's).")
     else:
         counts = Counter(p.cwv_status for p in measured)
         msg = f"{len(measured)} pagina's gemeten: {counts.get('good', 0)} goed, {counts.get('needs_improvement', 0)} verbeteren, {counts.get('poor', 0)} slecht."
         status = "error" if counts.get("poor") else "warning" if counts.get("needs_improvement") else "ok"
-        out["core_web_vitals"] = _r(status, msg, _urls(p for p in measured if p.cwv_status != "good"), dict(counts))
+        details: dict[str, Any] = dict(counts)
+        if heavy:
+            msg += f" {len(heavy)} pagina('s) te zwaar (meer dan {PAGE_WEIGHT_WARN_BYTES // 1024} KiB)."
+            status = "error" if too_heavy or status == "error" else "warning"
+            details["te_zwaar"] = len(heavy)
+        flagged = [p for p in measured if p.cwv_status != "good"]
+        flagged += [p for p in heavy if p not in flagged]
+        out["core_web_vitals"] = _r(status, msg, _urls(flagged), details)
 
     has_graph = any(p.click_depth is not None for p in pages)
     targets = [p for p in indexable if p.page_type in {"dienst", "product", "categorie"}]
@@ -570,7 +595,7 @@ def evaluate_checklist(
             if orphans else _r("ok", "Geen verweesde pagina's gevonden.")
         )
 
-    thin = [p for p in indexable if (p.word_count or 0) < THIN_CONTENT_WORDS and p.page_type not in EXCLUDED_THIN_TYPES
+    thin = [p for p in indexable if thin_content_check(p)[0] and p.page_type not in EXCLUDED_THIN_TYPES
             and not is_home_page(p)]
     hashes: dict[str, list[LaunchScanPage]] = defaultdict(list)
     for p in indexable:
@@ -588,12 +613,15 @@ def evaluate_checklist(
     else:
         parts = []
         if thin:
-            parts.append(f"{len(thin)} dunne pagina's (< {THIN_CONTENT_WORDS} woorden)")
+            parts.append(
+                f"{len(thin)} dunne pagina's (< {THIN_MAIN_WORDS} woorden in de hoofdinhoud, of "
+                f"< {THIN_CONTENT_WORDS} in de hele HTML als menu en inhoud niet te onderscheiden zijn)"
+            )
         if dup_groups:
             parts.append(f"{sum(len(g) for g in dup_groups)} pagina's met identieke content in {len(dup_groups)} groepen")
         if dup_titles:
             parts.append(f"{len(dup_titles)} dubbele titles")
-        evidence = [f"dun: {p.url} ({p.word_count} w)" for p in thin[:6]]
+        evidence = [f"dun: {p.url} ({_thin_words(p)})" for p in thin[:6]]
         evidence += [f"dubbel: {' = '.join(p.url for p in g[:3])}" for g in dup_groups[:5]]
         evidence += [f"zelfde title: {' = '.join(p.url for p in g[:3])}" for g in dup_titles[:4]]
         out["thin_duplicate"] = _r("warning", "; ".join(parts) + ".", evidence)
@@ -610,7 +638,11 @@ def evaluate_checklist(
     from_ai("ai_access_robots", "ai_bots_blocked", "AI-bottoegang niet gecontroleerd in fase 1.")
     if "ai_access_robots" in out:
         bots = (ai_checks or {}).get("bots") or []
-        out["ai_access_robots"]["evidence"] = [f"{b['bot']}: {'toegestaan' if b.get('allowed') else 'GEBLOKKEERD'}" for b in bots]
+        if (out["ai_access_robots"]["details"] or {}).get("fetched") is False:
+            # robots.txt niet opgehaald: 'toegestaan' per bot zou een niet-gecontroleerde aanname zijn.
+            out["ai_access_robots"]["evidence"] = [f"{b['bot']}: niet gecontroleerd" for b in bots]
+        else:
+            out["ai_access_robots"]["evidence"] = [f"{b['bot']}: {'toegestaan' if b.get('allowed') else 'GEBLOKKEERD'}" for b in bots]
     from_ai("llms_txt", "llms_txt", "llms.txt niet gecontroleerd in fase 1.")
     if out["llms_txt"]["status"] == "warning":
         out["llms_txt"]["message"] += " (Lage prioriteit.)"

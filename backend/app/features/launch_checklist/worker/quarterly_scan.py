@@ -73,8 +73,10 @@ from app.features.launch_checklist.services.quarterly_compare import (
     is_working,
     lost_schema_types,
     page_key,
+    scan_ruleset,
 )
 from app.features.launch_checklist.services.quarterly_checklist import period_label
+from app.features.launch_checklist.services.scan_recovery import heartbeat
 from app.features.launch_checklist.services.schema_validate import validate_html
 from app.features.launch_checklist.services.stats import build_summary_stats
 from app.features.launch_checklist.worker.launch_scan import _enrich_with_ahrefs, _record_to_row
@@ -234,11 +236,19 @@ def _enrich_with_search_console(
         return snapshot
     urls, eligible = _inspection_urls(scan_id, base_url)
     if urls:
+        # De inspectie mag tot GSC_INSPECT_MAX_SECONDS (max. 30 min) duren: geef tussendoor een
+        # levensteken, anders ziet scan_recovery de scan als vastgelopen.
+        touch = heartbeat(lambda: _update(scan_id))
+
+        def should_continue() -> bool:
+            touch()
+            return not _is_stopped(scan_id)
+
         inspection = gsc_enrich.inspect_pages(
             site_url,
             urls,
             service=service,
-            should_continue=lambda: not _is_stopped(scan_id),
+            should_continue=should_continue,
             workers=settings.gsc_inspect_workers,
             max_seconds=settings.gsc_inspect_max_seconds,
         )
@@ -289,7 +299,12 @@ def _comparison_payload(
     return {
         "base": base_info(base) if base is not None else None,
         "ai": compare_ai(base.ai_checks if base else None, ai_checks),
-        "issues": compare_issues(count_issue_types(base_issue_types), count_issue_types(issue_types)),
+        # Types die nieuwer zijn dan de regelset van de basis-scan tellen niet als 'nieuw probleem'.
+        "issues": compare_issues(
+            count_issue_types(base_issue_types),
+            count_issue_types(issue_types),
+            base_ruleset=scan_ruleset(base) if base is not None else None,
+        ),
         "pages": {
             "before": pages_diff["before"],
             "after": pages_diff["after"],
@@ -317,7 +332,9 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
     warnings: list[str] = []
     with SessionLocal() as db:
         scan = db.get(LaunchScan, scan_id)
-        if scan is None or str(scan.status).lower() in STOPPED_STATUSES:
+        # 'failed' vóór de start: de scan is als vastgelopen hersteld terwijl de taak nog in de
+        # wachtrij stond (scan_recovery); dan niet alsnog beginnen.
+        if scan is None or str(scan.status).lower() in STOPPED_STATUSES | {"failed"}:
             logger.info("Fase 4-scan %s niet gevonden of geannuleerd.", scan_id)
             return
         customer = db.get(CustomerWebsite, scan.customer_website_id)
@@ -332,7 +349,9 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
     try:
         # 1. Discovery
         _update(scan_id, status="discovering")
-        discovery = discover_from_sitemaps(base_url, max_urls=max_pages)
+        discovery = discover_from_sitemaps(
+            base_url, max_urls=max_pages, on_progress=heartbeat(lambda: _update(scan_id))
+        )
         if discovery.urls:
             source, seeds, follow = "sitemap", discovery.urls, False
             if discovery.skipped_due_to_limit:
@@ -369,6 +388,7 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
                 max_pages=max_pages,
                 concurrency=settings.launch_scan_http_concurrency,
                 on_batch=on_inventory,
+                on_progress=heartbeat(lambda: _update(scan_id)),
             )
         )
         if _is_stopped(scan_id):
@@ -390,6 +410,8 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
         ahrefs_summary: dict[str, Any] | None = None
         try:
             ahrefs_summary = _enrich_with_ahrefs(scan_id, records, warnings)
+        except SoftTimeLimitExceeded:  # time-out niet inslikken: de buitenste handler rondt af
+            raise
         except Exception as exc:  # Ahrefs is een verrijking: de scan gaat zonder door
             logger.warning("Ahrefs-verrijking faalde voor fase 4-scan %s: %s", scan_id, exc)
             warnings.append(f"Ahrefs-data niet opgehaald: {exc}")
@@ -437,6 +459,8 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
         gsc_snapshot: dict[str, Any] | None = None
         try:
             gsc_snapshot = _enrich_with_search_console(scan_id, gsc_property, base_url, warnings)
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as exc:  # Search Console is een verrijking: de scan gaat zonder door
             logger.warning("Search Console-verrijking faalde voor fase 4-scan %s: %s", scan_id, exc)
             warnings.append(f"Search Console-data niet opgehaald: {exc}")
@@ -449,6 +473,8 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
         bing_snapshot: dict[str, Any]
         try:
             bing_snapshot = _enrich_with_bing_webmaster(base_url, warnings)
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as exc:  # Bing Webmaster is een verrijking: de scan gaat zonder door
             logger.warning("Bing Webmaster-verrijking faalde voor fase 4-scan %s: %s", scan_id, exc)
             warnings.append(f"Bing Webmaster-data niet opgehaald: {exc}")
@@ -559,9 +585,12 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
                         f"{customer_name} ({base_url})."
                     ),
                     context=QuarterlyContext(db=db, scan_id=scan_id, customer_name=customer_name, period=period),
+                    on_step=lambda: _update(scan_id),  # levensteken: tot 16 stappen
                 )
                 ai_summary = result.output or None
                 agent_trace = result.to_trace()
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as exc:  # geen key / API-fout: de checklist zelf is wel klaar
             logger.warning("Kwartaalrapport-agent faalde voor scan %s: %s", scan_id, exc)
             warnings.append(f"Conceptrapport niet gegenereerd: {exc}")

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.features.launch_checklist.services.discovery import clean_url, is_internal, url_key
 from app.features.launch_checklist.services.geo_extract import _GeoParser, all_types
 from app.features.launch_checklist.services.html_extract import _WORD_RE, _clean
@@ -23,8 +25,6 @@ MAX_IMAGES = 80
 MAX_LINKS = 300
 FIRST_PARAGRAPH_MIN_CHARS = 60
 
-_CHROME_TAGS = {"nav", "aside", "header", "footer"}
-_MAIN_TAGS = {"main", "article"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _BLOCK_TAGS = _HEADING_TAGS | {
     "p", "li", "div", "section", "article", "main", "td", "th", "tr", "ul", "ol", "table",
@@ -37,9 +37,6 @@ _CTA_RE = re.compile(
     r"boek |download|probeer|start nu|kennismak|terugbel)",
     re.IGNORECASE,
 )
-
-
-_SKIP_LINK_RE = re.compile(r"skip-link|skip-to|screen-reader-text|sr-only|visually-hidden", re.IGNORECASE)
 
 
 @dataclass
@@ -58,8 +55,7 @@ class ContentExtract:
 class _ContentParser(_GeoParser):
     def __init__(self) -> None:
         super().__init__()
-        self._chrome: list[str] = []
-        self._main_depth = 0
+        # Wat paginachrome is (en `in_content`) houdt de basisparser in html_extract bij.
         self.blocks: list[tuple[str, str]] = []
         self._kind = "p"
         self._buf: list[str] = []
@@ -73,10 +69,6 @@ class _ContentParser(_GeoParser):
         self.cta_texts: list[str] = []
         self._button: list[str] | None = None
 
-    @property
-    def in_content(self) -> bool:
-        return not self._chrome and self._skip_depth == 0
-
     def _flush(self) -> None:
         text = _clean("".join(self._buf))
         self._buf = []
@@ -87,18 +79,6 @@ class _ContentParser(_GeoParser):
         super().handle_starttag(tag, attrs)
         tag = tag.lower()
         a = {k.lower(): (v or "") for k, v in attrs}
-
-        if tag in _MAIN_TAGS:
-            self._main_depth += 1
-        if tag in _CHROME_TAGS:
-            # <header>/<footer> binnen <main>/<article> horen bij de inhoud.
-            always = tag in {"nav", "aside"}
-            if self._chrome or always or self._main_depth == 0:
-                self._chrome.append(tag)
-        elif a.get("role", "").lower() == "navigation" and tag in {"div", "ul", "section"}:
-            self._chrome.append(tag)
-        elif tag == "a" and _SKIP_LINK_RE.search(a.get("class", "")):
-            self._chrome.append(tag)  # "Ga naar de inhoud"
 
         if tag in _BLOCK_TAGS:
             self._flush()
@@ -169,10 +149,6 @@ class _ContentParser(_GeoParser):
             if text and not self._chrome and _CTA_RE.search(text):
                 self.cta_texts.append(text[:80])
             self._button = None
-        if tag in _MAIN_TAGS:
-            self._main_depth = max(0, self._main_depth - 1)
-        if self._chrome and self._chrome[-1] == tag:
-            self._chrome.pop()
 
     def handle_data(self, data: str) -> None:
         super().handle_data(data)
@@ -226,6 +202,8 @@ def extract_content(html: str, page_url: str, root_domain: str) -> ContentExtrac
     try:
         parser.feed(html)
         parser.close()
+    except SoftTimeLimitExceeded:  # time-out van de taak, geen kapotte HTML
+        raise
     except Exception:  # kapotte HTML: neem wat we hebben
         pass
     parser._flush()

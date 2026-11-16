@@ -13,6 +13,10 @@ toelichting.
 
 Fase-4 checklistpunten horen bij een ronde (kwartaal): elke ronde krijgt eigen
 items, met de ronde in de naam.
+
+De livegangchecklist (oplevering van een nieuwe website, scans met phase = 5)
+heeft een eigen groep op hetzelfde bord. Die scan levert geen actiepunten op,
+alleen checklistpunten; de bevindingen staan in het automatische resultaat.
 """
 from __future__ import annotations
 
@@ -37,12 +41,15 @@ from app.db.models import (
 from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo,
     latest_content_scan,
+    latest_golive_scan,
     latest_quarterly_scan,
     merged_checklist,
     merged_content_checklist,
+    merged_golive_checklist,
     merged_quarterly_checklist,
 )
 from app.features.launch_checklist.services.geo_checklist import ITEMS
+from app.features.launch_checklist.services.golive_checklist import PHASE as GOLIVE_PHASE
 from app.features.launch_checklist.services.quarterly_checklist import period_label
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
 from app.services.monday import client as monday
@@ -55,13 +62,17 @@ GROUP_TITLES = {
     2: "Fase 2 – GEO/SEO-checklist",
     3: "Fase 3 – Content & onpage",
     4: "Fase 4 – Kwartaal GEO-werkzaamheden",
+    GOLIVE_PHASE: "Livegang – Oplevering nieuwe website",
 }
 PHASES = tuple(sorted(GROUP_TITLES))
 CHECKLIST_SOURCE = {
     2: "Livegang fase 2 – GEO/SEO-checklist",
     3: "Livegang fase 3 – Contentcreatie & onpage optimalisatie",
     4: "Livegang fase 4 – Kwartaal GEO-werkzaamheden",
+    GOLIVE_PHASE: "Livegangchecklist – oplevering nieuwe website",
 }
+# Fases met actiepunten (LaunchScanIssue); de livegangscan maakt die niet aan.
+ISSUE_PHASES = frozenset(PHASES) - {GOLIVE_PHASE}
 # Fases waarvan actiepunten per pagina onder een onderwerp (hoofditem) hangen.
 GROUPED_PHASES = {1, 3, 4}
 MAX_SUGGESTIONS_IN_BODY = 10
@@ -215,11 +226,13 @@ def _evidence_html(evidence: list[Any]) -> str:
     return f"<p><b>Bevindingen:</b></p><ul>{rows}</ul>"
 
 
-def _dashboard_link(customer: CustomerWebsite) -> str:
+def _dashboard_link(customer: CustomerWebsite, phase: int) -> str:
+    """Link terug naar de klant in het dashboard: livegangchecklist of SEO/GEO-scan."""
     base = settings.dashboard_public_url.strip().rstrip("/")
     if not base:
         return ""
-    return f"<p>{_link(f'{base}/dashboard/livegang/{customer.id}')}</p>"
+    section = "oplevering" if phase == GOLIVE_PHASE else "seo-geo"
+    return f"<p>{_link(f'{base}/dashboard/livegang/{section}/{customer.id}')}</p>"
 
 
 def issue_item_name(issue: LaunchScanIssue) -> str:
@@ -275,7 +288,7 @@ def issue_body(
         parts.append(_evidence_html(evidence))
     parts.append(extra_html)
     parts.append(_p("Bron", f"Livegang-scan fase {phase}"))
-    parts.append(_dashboard_link(customer))
+    parts.append(_dashboard_link(customer, phase))
     return "".join(p for p in parts if p)
 
 
@@ -295,12 +308,62 @@ def topic_body(issue: LaunchScanIssue, customer: CustomerWebsite, phase: int = 1
         parts.append(_p("Aanpak", issue.recommendation))
     parts.append(_p("Categorie", issue.category))
     parts.append(_p("Bron", f"Livegang-scan fase {phase}"))
-    parts.append(_dashboard_link(customer))
+    parts.append(_dashboard_link(customer, phase))
     return "".join(p for p in parts if p)
 
 
 def checklist_item_name(item: dict[str, Any]) -> str:
     return str(item["label"])[:MAX_ITEM_NAME]
+
+
+def _list_html(title: str, rows: list[str], total: int | None = None) -> str:
+    """Opsomming met kop, gecapt op MAX_EVIDENCE; `total` is het echte aantal als `rows` al gecapt is."""
+    if not rows:
+        return ""
+    items = "".join(f"<li>{html.escape(r)}</li>" for r in rows[:MAX_EVIDENCE])
+    more = max(total or 0, len(rows)) - min(len(rows), MAX_EVIDENCE)
+    if more > 0:
+        items += f"<li>… en nog {more}</li>"
+    return f"<p><b>{html.escape(title)}:</b></p><ul>{items}</ul>"
+
+
+def _chain_line(row: dict[str, Any]) -> str:
+    """Eén redirectketen als tekst: start (301) → … → eind-URL (200)."""
+    steps = [f"{hop.get('url')} ({hop.get('status')})" for hop in row.get("chain") or [] if isinstance(hop, dict)]
+    if row.get("error"):
+        steps.append(str(row["error"]))
+    elif row.get("final_url"):
+        steps.append(f"{row['final_url']} ({row.get('final_status')})")
+    return " → ".join(steps) or str(row.get("start") or row.get("url") or "")
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def golive_details_html(key: str, auto: dict[str, Any]) -> str:
+    """Aanvulling uit `details` voor livegangpunten waar de bevindingen alleen een oordeel geven.
+
+    Alleen platte tekst, gecapt; de volledige lijsten staan in het dashboard. Niets
+    bij 'ok', 'nvt' en 'unknown' (dan is er niets te doen of is het niet te beoordelen).
+    """
+    details = auto.get("details") if isinstance(auto.get("details"), dict) else {}
+    if not details or auto.get("status") in ("ok", "nvt", "unknown"):
+        return ""
+    if key in ("gl_http_redirect", "gl_host_variants", "gl_404"):
+        # De bevindingen geven per adres het oordeel; hier de redirectketen zelf.
+        rows = _dicts(details.get("probes" if key == "gl_404" else "variants"))
+        if any(r.get("chain") or r.get("error") for r in rows):
+            return _list_html("Redirectketens", [_chain_line(r) for r in rows])
+        return ""
+    if key == "gl_staging_refs":
+        # De bevindingen tonen de hosts; hier waar de verwijzingen staan.
+        refs = _dicts(details.get("refs"))
+        total = details.get("total") if isinstance(details.get("total"), int) else None
+        return _list_html("Waar", [f"{r.get('page')}: {r.get('type')} {r.get('url')}" for r in refs], total)
+    if key == "gl_sitemap" and not auto.get("evidence"):
+        return _list_html("Gevonden sitemaps", [str(u) for u in details.get("sitemaps") or []])
+    return ""
 
 
 def checklist_body(
@@ -315,6 +378,8 @@ def checklist_body(
         parts.append(_p("Scanresultaat", auto["message"]))
     if isinstance(auto.get("evidence"), list):
         parts.append(_evidence_html(auto["evidence"]))
+    if phase == GOLIVE_PHASE:
+        parts.append(golive_details_html(item["key"], auto))
     if item.get("note"):
         parts.append(_p("Notitie", item["note"]))
     parts.append(_p("Prioriteit", item.get("priority") or "normaal"))
@@ -322,7 +387,7 @@ def checklist_body(
     if period:
         parts.append(_p("Ronde", period_label(period)))
     parts.append(_p("Bron", CHECKLIST_SOURCE.get(phase, f"Livegang fase {phase}")))
-    parts.append(_dashboard_link(customer))
+    parts.append(_dashboard_link(customer, phase))
     return "".join(p for p in parts if p)
 
 
@@ -536,7 +601,7 @@ def sync_links(db: Session, customer: CustomerWebsite) -> int:
 # --- doorzetten ------------------------------------------------------------
 
 def push_issues(db: Session, issue_ids: list[str], user_id: str | None) -> PushResult:
-    """Zet actiepunten (fase 1, 2 en 3) door. Alle punten moeten van één klant zijn."""
+    """Zet actiepunten (fase 1 t/m 4) door. Alle punten moeten van één klant zijn."""
     ids = list(dict.fromkeys(issue_ids))
     issues = {i.id: i for i in db.query(LaunchScanIssue).filter(LaunchScanIssue.id.in_(ids)).all()}
     scans = {
@@ -568,6 +633,10 @@ def push_issues(db: Session, issue_ids: list[str], user_id: str | None) -> PushR
             outcomes.append(PushOutcome(issue_id, "skipped", "Al doorgezet.", issue.external_url))
             continue
         phase = scans[issue.scan_id].phase or 1
+        if phase not in ISSUE_PHASES:
+            # De livegangscan (fase 5) maakt geen actiepunten; zijn punten gaan via de checklist.
+            outcomes.append(PushOutcome(issue_id, "failed", "Doorzetten naar Monday kan niet voor deze fase."))
+            continue
         geo_key = (
             issue.issue_type[len(GEO_ISSUE_PREFIX):]
             if issue.issue_type.startswith(GEO_ISSUE_PREFIX) else None
@@ -611,10 +680,13 @@ def push_checklist_items(
     phase: int = 2,
     period: str = "",
 ) -> PushResult:
-    """Zet checklistpunten (fase 2, 3 of 4) door naar de fasegroep van het klantbord.
+    """Zet checklistpunten (fase 2, 3, 4 of de livegangchecklist) door naar de fasegroep van het klantbord.
 
     Voor fase 4 is `period` de ronde; elke ronde krijgt eigen Monday-items.
     """
+    if phase not in CHECKLIST_SOURCE:
+        # Anders valt een onbekende fase in de fase-2 tak hieronder.
+        raise ValueError(f"Doorzetten naar Monday kan niet voor fase {phase}.")
     keys = list(dict.fromkeys(item_keys))
     if phase != 4:
         period = ""
@@ -627,6 +699,10 @@ def push_checklist_items(
         # Fase-3 actiepunten zijn per pagina; die delen geen item met het checklistpunt.
         geo = None
         merged = merged_content_checklist(db, customer.id, latest_content_scan(db, customer.id))
+    elif phase == GOLIVE_PHASE:
+        # Geen actiepunten bij de livegangscan; zonder scan alleen de handmatige status.
+        geo = None
+        merged = merged_golive_checklist(db, customer.id, latest_golive_scan(db, customer.id))
     else:
         geo = latest_completed_geo(db, customer.id)
         merged = merged_checklist(db, customer, geo)

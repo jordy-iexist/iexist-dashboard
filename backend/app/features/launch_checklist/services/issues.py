@@ -6,18 +6,66 @@ genoeg om later als Monday-item door te zetten.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any, Callable, Iterable
+from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.db.models import LaunchScanPage
-from app.features.launch_checklist.services.pagespeed import rate
+from app.features.launch_checklist.services.discovery import clean_url, url_key
+from app.features.launch_checklist.services.pagespeed import THRESHOLDS, rate
 
 TITLE_MIN, TITLE_MAX = 30, 60
 META_MIN, META_MAX = 70, 160
+# 'Weinig content': bij voorkeur gemeten op de hoofdinhoud (zonder menu, kop, voet en
+# zijbalk); heeft de pagina geen herkenbare structuur, dan op alle woorden in de HTML.
+THIN_MAIN_WORDS = 200
 THIN_CONTENT_WORDS = 300
 SLOW_RESPONSE_MS = 5000
-SLOW_TTFB_MS = 1000
+# Google-grens voor een 'goede' TTFB; dezelfde band als de CWV-beoordeling in pagespeed.py.
+SLOW_TTFB_MS = int(THRESHOLDS["ttfb"][0])
+# Lighthouse-audit total-byte-weight: boven p10 (2667 KiB) niet meer 'groen', boven de
+# mediaan (4000 KiB) 'rood'. Bron: core/audits/byte-efficiency/total-byte-weight.js.
+PAGE_WEIGHT_WARN_BYTES = 2667 * 1024
+PAGE_WEIGHT_POOR_BYTES = 4000 * 1024
+
+# Versie van de regelset. Fase 4 vergelijkt aantallen per type met een basis-scan;
+# een type dat pas na die scan is toegevoegd, telt daar niet mee (anders verschijnt
+# het als 'nieuwe problemen'). De versie staat in summary_stats["ruleset"].
+RULESET_VERSION = 2
+# Vanaf welke regelset een type bestaat (of sinds wanneer het op deze manier gemeten
+# wordt); niet genoemd = versie 1.
+ISSUE_TYPE_SINCE: dict[str, int] = {
+    "thin_content": 2,  # sinds v2 gemeten op de hoofdinhoud
+    "robots_blocked_in_sitemap": 2,
+    "hreflang_invalid": 2,
+    "hreflang_no_return": 2,
+    "hreflang_target_broken": 2,
+    "og_incomplete": 2,
+    "cwv_page_weight": 2,
+}
+
+
+def issue_type_since(issue_type: str) -> int:
+    return ISSUE_TYPE_SINCE.get(issue_type, 1)
+
+
+THIN_MEASURE_LABELS = {"main": "woorden in de hoofdinhoud", "total": "woorden in de HTML"}
+
+
+def thin_content_check(page: LaunchScanPage) -> tuple[bool, int, str]:
+    """(dun?, aantal woorden, maat) voor een fase 1-pagina.
+
+    maat = "main": woorden buiten nav/header/footer/aside, drempel THIN_MAIN_WORDS;
+    maat = "total": geen herkenbare paginastructuur, alle woorden, drempel THIN_CONTENT_WORDS.
+    """
+    main = getattr(page, "main_word_count", None)  # niet elk pagina-object heeft het veld
+    if main is not None:
+        return main < THIN_MAIN_WORDS, main, "main"
+    words = page.word_count or 0
+    return words < THIN_CONTENT_WORDS, words, "total"
+
 
 Issue = dict[str, Any]
 Rule = Callable[[list[LaunchScanPage], dict[str, Any]], Iterable[Issue]]
@@ -48,9 +96,15 @@ ISSUE_TYPES: dict[str, dict[str, str]] = {
     "images_missing_alt": {"label": "Afbeeldingen zonder alt-tekst", "category": "content"},
     "thin_content": {"label": "Weinig content", "category": "content"},
     "lang_missing": {"label": "lang-attribuut ontbreekt", "category": "techniek"},
+    "robots_blocked_in_sitemap": {"label": "Pagina in sitemap geblokkeerd door robots.txt", "category": "techniek"},
+    "hreflang_invalid": {"label": "Ongeldige hreflang-tags", "category": "techniek"},
+    "hreflang_no_return": {"label": "hreflang zonder terugverwijzing", "category": "techniek"},
+    "hreflang_target_broken": {"label": "hreflang wijst naar kapotte of niet-indexeerbare pagina", "category": "techniek"},
+    "og_incomplete": {"label": "Open Graph-tags onvolledig", "category": "on-page"},
     "cwv_lcp": {"label": "LCP te traag", "category": "performance"},
     "cwv_cls": {"label": "CLS te hoog", "category": "performance"},
     "cwv_inp": {"label": "INP/TBT te hoog", "category": "performance"},
+    "cwv_page_weight": {"label": "Pagina te zwaar", "category": "performance"},
     "ai_robots_txt": {"label": "robots.txt ontbreekt", "category": "ai"},
     "ai_ai_bots_blocked": {"label": "AI-bots geblokkeerd", "category": "ai"},
     "ai_sitemap": {"label": "Sitemap-probleem", "category": "ai"},
@@ -294,13 +348,24 @@ def rule_onpage(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issu
                 details={"h1": p.h1},
             )
         # Content
-        if (p.word_count or 0) < THIN_CONTENT_WORDS:
+        thin, words, measure = thin_content_check(p)
+        if thin:
+            if measure == "main":
+                description = (
+                    f"De hoofdinhoud van de pagina (zonder menu, kop, voet en zijbalk) heeft minder "
+                    f"dan {THIN_MAIN_WORDS} woorden; in totaal staan er {p.word_count or 0} in de HTML."
+                )
+            else:
+                description = (
+                    f"De pagina heeft minder dan {THIN_CONTENT_WORDS} woorden in de HTML (alle tekst "
+                    f"geteld: menu en hoofdinhoud zijn niet te onderscheiden)."
+                )
             yield _issue(
                 "thin_content", "laag", page=p,
-                title=f"Weinig content ({p.word_count or 0} woorden) op {p.path}",
-                description=f"De pagina heeft minder dan {THIN_CONTENT_WORDS} woorden in de HTML.",
+                title=f"Weinig content ({words} {THIN_MEASURE_LABELS[measure]}) op {p.path}",
+                description=description,
                 recommendation="Breid de content uit of voeg de pagina samen met een verwante pagina.",
-                details={"word_count": p.word_count},
+                details={"word_count": words, "measure": measure},
             )
         if (p.images_missing_alt or 0) > 0:
             yield _issue(
@@ -362,7 +427,7 @@ def rule_links_and_speed(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iter
                 yield _issue(
                     "slow_response", "middel", page=p,
                     title=f"Trage serverrespons (TTFB {int(lab_ttfb)} ms) op {p.path}",
-                    description=f"Google meet een server-responstijd van {int(lab_ttfb)} ms (doel: < 600 ms).",
+                    description=f"Google meet een server-responstijd van {int(lab_ttfb)} ms (doel: hooguit {SLOW_TTFB_MS} ms).",
                     recommendation="Controleer page caching/CDN, PHP-workers en hosting.",
                     details={"ttfb_ms": lab_ttfb, "source": "pagespeed"},
                 )
@@ -386,6 +451,239 @@ def rule_lang(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]
             recommendation="Stel <html lang=\"nl\"> (of de juiste taal) in het thema in.",
             details={"urls": [p.url for p in missing[:50]]},
         )
+
+
+def robots_blocked_in_sitemap(
+    pages: list[LaunchScanPage], ai_checks: dict[str, Any] | None
+) -> list[tuple[LaunchScanPage, dict[str, Any]]]:
+    """Sitemap-pagina's (eindstatus 200) die Googlebot of Bingbot niet mag ophalen.
+
+    Alleen sitemap-pagina's: zonder sitemap levert dit bewust niets op, want
+    winkelwagen- en filter-URL's zijn meestal met opzet geblokkeerd.
+    """
+    blocked = {
+        url_key(row["url"]): row
+        for row in ((ai_checks or {}).get("robots_pages") or {}).get("pages") or []
+        if row.get("url")
+    }
+    if not blocked:
+        return []
+    return [
+        (p, blocked[url_key(p.url)])
+        for p in pages
+        if p.in_sitemap and final_status(p) == 200 and url_key(p.url) in blocked
+    ]
+
+
+def rule_robots(pages: list[LaunchScanPage], ctx: dict[str, Any]) -> Iterable[Issue]:
+    for p, row in robots_blocked_in_sitemap(pages, ctx.get("ai_checks")):
+        bots = row.get("blocked_for") or []
+        rule = row.get("rule")
+        yield _issue(
+            "robots_blocked_in_sitemap", "hoog", page=p,
+            title=f"Pagina in sitemap geblokkeerd door robots.txt: {p.path}",
+            description=(
+                f"De pagina staat in de sitemap, maar robots.txt verbiedt {' en '.join(bots)} haar op te halen"
+                + (f" (regel \"{rule}\")." if rule else ".")
+                + " Zoekmachines krijgen zo tegenstrijdige signalen en kunnen de inhoud niet lezen."
+            ),
+            recommendation="Haal de blokkade uit robots.txt als de pagina gevonden moet worden; anders de pagina uit de sitemap halen.",
+            details={"blocked_for": bots, "rule": rule},
+        )
+
+
+# hreflang: taal ISO 639-1, regio ISO 3166-1 alpha-2 (zoals Google vraagt).
+_ISO_639_1 = frozenset("""
+aa ab ae af ak am an ar as av ay az ba be bg bi bm bn bo br bs ca ce ch co cr cs cu cv cy da de dv dz ee el
+en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu
+ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na
+nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so
+sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zh zu
+""".split())
+_ISO_3166_1 = frozenset("""
+ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bl bm bn bo bq br bs bt bv bw by bz
+ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg eh er es et fi fj fk fm fo
+fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je
+jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mf mg mh mk ml mm mn mo
+mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw
+py qa re ro rs ru rw sa sb sc sd se sg sh si sj sk sl sm sn so sr ss st sv sx sy sz tc td tf tg th tj tk tl
+tm tn to tr tt tv tw tz ua ug um us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw
+""".split())
+_HREFLANG_CODE = re.compile(r"^([a-z]{2})(?:-([a-z]{4}))?(?:-([a-z]{2}))?$")
+_ABSOLUTE_URL = re.compile(r"^https?://", re.IGNORECASE)
+
+
+def is_valid_hreflang(code: str) -> bool:
+    """`x-default`, of taal[-schrift][-regio] met geldige ISO-codes (dus niet en-UK of nl_NL)."""
+    value = (code or "").strip().lower()
+    if value == "x-default":
+        return True
+    match = _HREFLANG_CODE.match(value)
+    if not match:
+        return False
+    language, _script, region = match.groups()
+    return language in _ISO_639_1 and (region is None or region in _ISO_3166_1)
+
+
+def _page_keys(page: LaunchScanPage) -> set[str]:
+    return {url_key(u) for u in (page.url, page.final_url) if u}
+
+
+def _hreflang_entries(page: LaunchScanPage) -> list[tuple[str, str, str | None]]:
+    """[(code, href zoals in de HTML, absolute URL of None)], zonder exacte dubbelingen."""
+    base = page.final_url or page.url
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, str | None]] = []
+    for entry in page.hreflang or []:
+        if not isinstance(entry, dict):
+            continue
+        code, href = str(entry.get("lang") or "").strip(), str(entry.get("href") or "").strip()
+        if not code or not href or (code.lower(), href) in seen:
+            continue
+        seen.add((code.lower(), href))
+        out.append((code, href, clean_url(href, base)))
+    return out
+
+
+def rule_hreflang(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]:
+    sources = [p for p in pages if _is_ok_html(p) and p.hreflang]
+    if not sources:
+        return
+    by_key = {url_key(p.url): p for p in pages}
+
+    for p in sources:
+        entries = _hreflang_entries(p)
+        own = _page_keys(p)
+
+        # Ongeldige codes, relatieve URL's, dubbele codes en geen verwijzing naar zichzelf.
+        problems: list[dict[str, Any]] = []
+        urls_per_code: dict[str, set[str]] = defaultdict(set)
+        for code, href, absolute in entries:
+            if not is_valid_hreflang(code):
+                problems.append({"lang": code, "href": href, "problem": "ongeldige taal-/regiocode"})
+            if not _ABSOLUTE_URL.match(href):
+                problems.append({"lang": code, "href": href, "problem": "relatieve URL (moet volledig zijn, met https://)"})
+            urls_per_code[code.lower()].add(url_key(absolute) if absolute else href)
+        for code, href, _absolute in entries:
+            if len(urls_per_code[code.lower()]) > 1:
+                problems.append({"lang": code, "href": href, "problem": "dezelfde code verwijst naar meerdere URL's"})
+        if not any(absolute and url_key(absolute) in own for _, _, absolute in entries):
+            problems.append({"lang": None, "href": p.url, "problem": "geen hreflang naar de pagina zelf"})
+        if problems:
+            yield _issue(
+                "hreflang_invalid", "middel", page=p,
+                title=f"Ongeldige hreflang-tags op {p.path} ({len(problems)}×)",
+                description="De hreflang-tags bevatten fouten; Google negeert dan (een deel van) de taalversies.",
+                recommendation=(
+                    "Gebruik geldige codes (taal ISO 639-1, regio ISO 3166-1, bv. nl-NL of en-GB, met een "
+                    "koppelteken), één URL per code, volledige URL's en een hreflang naar de pagina zelf."
+                ),
+                details={"problems": problems},
+            )
+
+        # Doelpagina's die in de crawl zitten: kapot/niet-indexeerbaar, of zonder terugverwijzing.
+        broken: list[dict[str, Any]] = []
+        missing: list[dict[str, Any]] = []
+        checked: set[str] = set()
+        for code, _href, absolute in entries:
+            if not absolute:
+                continue
+            key = url_key(absolute)
+            target = by_key.get(key)
+            if target is None or key in own or (code.lower(), key) in checked:
+                continue
+            checked.add((code.lower(), key))
+            status = final_status(target)
+            if status is None or status in _INCONCLUSIVE_STATUSES:
+                continue
+            reason = None
+            if status >= 400:
+                reason = f"statuscode {status}"
+            elif target.redirect_chain:
+                reason = f"redirect naar {target.final_url}"
+            elif "noindex" in (target.indexability_reason or ""):
+                reason = "noindex"
+            elif target.indexability_reason == "Canonical naar andere URL":
+                reason = f"canonical naar {target.canonical}"
+            if reason:
+                broken.append({"lang": code, "url": target.url, "status": target.status_code, "reason": reason})
+                continue
+            if not _is_ok_html(target):
+                continue
+            back = {url_key(a) for _, _, a in _hreflang_entries(target) if a}
+            if not (back & own):
+                missing.append({"lang": code, "url": target.url})
+        if broken:
+            yield _issue(
+                "hreflang_target_broken", "hoog", page=p,
+                title=f"hreflang naar {len(broken)} kapotte of niet-indexeerbare pagina('s) op {p.path}",
+                description="Een taalversie waar de hreflang naar verwijst, werkt niet, verwijst door of mag niet geïndexeerd worden.",
+                recommendation="Laat de hreflang naar de werkende, indexeerbare eind-URL van elke taalversie wijzen.",
+                details={"targets": broken},
+            )
+        if missing:
+            yield _issue(
+                "hreflang_no_return", "middel", page=p,
+                title=f"{len(missing)} taalversie(s) zonder terugverwijzing naar {p.path}",
+                description="Een taalversie verwijst niet terug met een hreflang naar deze pagina; Google negeert de koppeling dan.",
+                recommendation="Zet op elke taalversie dezelfde, volledige set hreflang-tags (inclusief deze pagina).",
+                details={"missing": missing},
+            )
+
+
+OG_REQUIRED = ("og:title", "og:description", "og:image")
+
+
+def _is_home(page: LaunchScanPage) -> bool:
+    for candidate in (page.final_url, page.url):
+        if candidate:
+            parsed = urlparse(candidate)
+            if parsed.path in ("", "/") and not parsed.query:
+                return True
+    return False
+
+
+def rule_open_graph(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]:
+    indexable = [p for p in pages if _is_indexable_html(p)]
+    if not indexable:
+        return
+
+    def has(p: LaunchScanPage, tag: str) -> bool:
+        return bool(str((p.open_graph or {}).get(tag) or "").strip())
+
+    missing = {tag: [p for p in indexable if not has(p, tag)] for tag in OG_REQUIRED}
+    incomplete = [p for p in indexable if not all(has(p, tag) for tag in OG_REQUIRED)]
+    relative_image = [
+        p for p in indexable
+        if has(p, "og:image") and not _ABSOLUTE_URL.match(str(p.open_graph["og:image"]).strip())
+    ]
+    if not incomplete and not relative_image:
+        return
+    lacks_key = [p for p in indexable if not (has(p, "og:title") and has(p, "og:image"))]
+    home_lacks = any(_is_home(p) for p in lacks_key)
+    severity = "middel" if home_lacks or 2 * len(lacks_key) >= len(indexable) else "laag"
+    parts = [f"{len(v)}× geen {tag}" for tag, v in missing.items() if v]
+    if relative_image:
+        parts.append(f"{len(relative_image)}× relatieve og:image")
+    yield _issue(
+        "og_incomplete", severity, page=None,
+        title=f"Open Graph-tags onvolledig op {len({p.id for p in incomplete + relative_image})} pagina('s)",
+        description=(
+            f"Van de {len(indexable)} indexeerbare pagina's: {', '.join(parts)}."
+            + (" Ook de homepage mist og:title of og:image." if home_lacks else "")
+            + " Bij delen op social media en in chat-apps ontbreekt dan een nette titel, tekst of afbeelding."
+        ),
+        recommendation=(
+            "Laat het SEO-plugin of thema op elke pagina og:title, og:description en og:image zetten, "
+            "met een volledige URL (https://…) voor de afbeelding."
+        ),
+        details={
+            "total": len(indexable),
+            "missing": {tag: len(v) for tag, v in missing.items()},
+            "urls": [p.url for p in incomplete[:50]],
+            "relative_image": [p.url for p in relative_image[:20]],
+        },
+    )
 
 
 def rule_vitals(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issue]:
@@ -440,6 +738,21 @@ def rule_vitals(pages: list[LaunchScanPage], _: dict[str, Any]) -> Iterable[Issu
                 details={"value": value, "rating": rating, "source": src, "metric": label},
             )
 
+        # Paginagewicht (Lighthouse total-byte-weight); ontbreekt bij metingen van vóór deze regel.
+        weight = lab.get("total_byte_weight")
+        if isinstance(weight, (int, float)) and weight > PAGE_WEIGHT_WARN_BYTES:
+            mb = f"{weight / (1024 * 1024):.1f}".replace(".", ",")
+            yield _issue(
+                "cwv_page_weight", "hoog" if weight > PAGE_WEIGHT_POOR_BYTES else "middel", page=p,
+                title=f"Pagina te zwaar ({mb} MB) op {p.path}",
+                description=(
+                    f"Google PageSpeed meet {mb} MB aan bestanden voor deze pagina (mobiel). Lighthouse keurt "
+                    f"meer dan {PAGE_WEIGHT_WARN_BYTES // 1024} KiB af; boven {PAGE_WEIGHT_POOR_BYTES // 1024} KiB is het slecht."
+                ),
+                recommendation="Verklein afbeeldingen en video (WebP/AVIF, juiste afmetingen, lazy loading) en verwijder ongebruikte scripts, fonts en plugins.",
+                details={"bytes": int(weight), "source": "pagespeed"},
+            )
+
 
 _AI_RECOMMENDATIONS = {
     "robots_txt": "Plaats een robots.txt met een verwijzing naar de sitemap.",
@@ -452,6 +765,10 @@ _AI_RECOMMENDATIONS = {
     "page_access": "Controleer firewall/bot-protectie (Cloudflare, Shopify, Wordfence): crawlers moeten de pagina's kunnen ophalen.",
     "ssr_content": "Zorg dat de belangrijkste content server-side in de HTML staat (geen client-only rendering).",
 }
+# Voor checks waarvan het bestand niet kon worden opgehaald (details.fetched == False).
+_AI_NOT_FETCHED_RECOMMENDATION = (
+    "Controleer of het bestand bereikbaar is voor crawlers (firewall, bot-protectie, hosting) en draai de scan opnieuw."
+)
 
 
 def rule_ai(_: list[LaunchScanPage], ctx: dict[str, Any]) -> Iterable[Issue]:
@@ -459,11 +776,12 @@ def rule_ai(_: list[LaunchScanPage], ctx: dict[str, Any]) -> Iterable[Issue]:
         if check.get("status") == "ok":
             continue
         key = check.get("key", "")
+        not_fetched = (check.get("details") or {}).get("fetched") is False
         yield _issue(
             f"ai_{key}", "hoog" if check.get("status") == "error" else "middel", page=None,
             title=f"{check.get('label')}: {check.get('message')}",
             description=check.get("message") or "",
-            recommendation=_AI_RECOMMENDATIONS.get(key, ""),
+            recommendation=_AI_NOT_FETCHED_RECOMMENDATION if not_fetched else _AI_RECOMMENDATIONS.get(key, ""),
             details=check.get("details"),
         )
 
@@ -477,6 +795,9 @@ RULES: list[Rule] = [
     rule_duplicates,
     rule_links_and_speed,
     rule_lang,
+    rule_robots,
+    rule_hreflang,
+    rule_open_graph,
     rule_vitals,
     rule_ai,
 ]

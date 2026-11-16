@@ -292,10 +292,47 @@ function PageDetailSheet({ scanId, page, onClose }: { scanId: string; page: Laun
               </div>
               <Field label="Canonical">{page.canonical || "—"}</Field>
               <Field label="Meta robots">{page.meta_robots || "—"}</Field>
-              <Field label="Lang / hreflang">{page.lang || "—"}{page.hreflang?.length ? ` · ${page.hreflang.map((h) => h.lang).join(", ")}` : ""}</Field>
-              <Field label="Woorden">{page.word_count ?? "—"}</Field>
+              <Field label="Lang">{page.lang || "—"}</Field>
+              <Field label="Woorden">
+                {page.word_count ?? "—"}
+                {page.main_word_count != null && (
+                  <span className="text-muted-foreground"> · {page.main_word_count} in de hoofdinhoud</span>
+                )}
+              </Field>
               <Field label="Links intern / extern">{page.internal_links ?? "—"} / {page.external_links ?? "—"}</Field>
               <Field label="Afbeeldingen (zonder alt)">{page.images_total ?? "—"} ({page.images_missing_alt ?? 0})</Field>
+              {page.hreflang && page.hreflang.length > 0 && (
+                <div className="sm:col-span-2">
+                  <Field label={`hreflang (${page.hreflang.length})`}>
+                    <ul className="space-y-0.5 text-xs">
+                      {page.hreflang.map((h, i) => (
+                        <li key={`${i}-${h.lang}`} className="flex min-w-0 gap-2">
+                          <span className="shrink-0 font-mono">{h.lang}</span>
+                          {/^https?:\/\//i.test(h.href) ? (
+                            <a href={h.href} target="_blank" rel="noreferrer noopener" className="break-all hover:text-primary hover:underline">{h.href}</a>
+                          ) : (
+                            <span className="break-all">{h.href} <span className="text-muted-foreground">(relatief)</span></span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </Field>
+                </div>
+              )}
+              <div className="sm:col-span-2">
+                <Field label="Open Graph">
+                  {page.open_graph && Object.keys(page.open_graph).length > 0 ? (
+                    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
+                      {Object.entries(page.open_graph).map(([tag, value]) => (
+                        <div key={tag} className="contents">
+                          <dt className="font-mono text-muted-foreground">{tag}</dt>
+                          <dd className="break-all">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : "Geen"}
+                </Field>
+              </div>
               <div className="sm:col-span-2"><Field label="Structured data">{page.schema_types?.length ? page.schema_types.join(", ") : "Geen"}</Field></div>
               {page.broken_links && page.broken_links.length > 0 && (
                 <div className="sm:col-span-2">
@@ -312,6 +349,7 @@ function PageDetailSheet({ scanId, page, onClose }: { scanId: string; page: Laun
                     <span className="flex flex-wrap items-center gap-2">
                       <CwvBadge rating={page.cwv_status} />
                       Score {lab.performance_score ?? "—"} · LCP {lab.lcp ? (lab.lcp / 1000).toFixed(1) : "—"}s · CLS {lab.cls?.toFixed(2) ?? "—"} · TBT {lab.tbt ? Math.round(lab.tbt) : "—"} ms
+                      {lab.total_byte_weight != null && ` · ${(lab.total_byte_weight / (1024 * 1024)).toLocaleString("nl-NL", { maximumFractionDigits: 1 })} MB`}
                     </span>
                   </Field>
                 </div>

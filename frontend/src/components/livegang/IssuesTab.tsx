@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { CheckDetails, DETAIL_ITEM_KEYS } from "@/components/livegang/CheckDetails"
+import { IssueDetails } from "@/components/livegang/IssueDetails"
 import { Pill, SeverityBadge } from "@/components/livegang/shared"
 import {
   apiFetch,
@@ -323,10 +324,8 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                     {issueDetailData(issue) !== null ? (
                       <CheckDetails itemKey={issue.issue_type} details={issueDetailData(issue)} />
                     ) : (
-                      // Fase 4: de omschrijving bevat de bevindingen al; geen ruwe JSON tonen.
-                      issue.details != null && !issue.issue_type.startsWith("c4_") && (
-                        <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">{JSON.stringify(issue.details, null, 2)}</pre>
-                      )
+                      // Fase 4: de omschrijving bevat de bevindingen al; daar tonen we geen details.
+                      !issue.issue_type.startsWith("c4_") && <IssueDetails details={issue.details} />
                     )}
                   </div>
                 )}

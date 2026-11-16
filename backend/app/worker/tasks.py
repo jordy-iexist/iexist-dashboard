@@ -9,6 +9,7 @@ from app.features.launch_checklist.worker.content_scan import (
     run_content_scan_task,
 )
 from app.features.launch_checklist.worker.geo_scan import run_geo_scan_task
+from app.features.launch_checklist.worker.golive_scan import run_golive_scan_task
 from app.features.launch_checklist.worker.launch_scan import run_launch_scan_task
 from app.features.launch_checklist.worker.quarterly_scan import run_quarterly_scan_task
 from app.features.landing_pages.worker.landing_page_generation import generate_landing_page_task
@@ -25,6 +26,7 @@ __all__ = [
     "run_content_analysis_task",
     "run_content_scan_task",
     "run_geo_scan_task",
+    "run_golive_scan_task",
     "run_launch_scan_task",
     "run_quarterly_scan_task",
     "run_website_meta_optimization_task",

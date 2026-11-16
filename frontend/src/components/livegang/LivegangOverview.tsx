@@ -18,7 +18,32 @@ function OutdatedPill() {
   )
 }
 
-export function LivegangOverview() {
+function progressTone(percent: number) {
+  return percent >= 80 ? "green" : percent >= 50 ? "amber" : "red"
+}
+
+/** Livegang: laatste scan en voortgang van de livegangchecklist (los van de SEO/GEO-scan). */
+function GoLiveStatus({ customer }: { customer: LaunchCustomer }) {
+  const scan = customer.latest_golive_scan
+  const progress = customer.golive_progress
+  if (scan && isActive(scan.status)) return <ScanStatusBadge status={scan.status} />
+  // Mislukte of geannuleerde scan zonder eerdere voortgang: die status, niet "Niet gestart".
+  if (!progress) return scan ? <ScanStatusBadge status={scan.status} /> : <Pill>Niet gestart</Pill>
+  return (
+    <>
+      <span className="text-xs text-muted-foreground">
+        {progress.done} / {progress.total}
+      </span>
+      <Pill tone={progressTone(progress.percent)}>{progress.percent}% checklist</Pill>
+    </>
+  )
+}
+
+/**
+ * Klantenlijst van de livegang-pagina's. `seo-geo`: de SEO/GEO-scan (fase 1-4);
+ * `golive`: de livegangchecklist voor de oplevering van een nieuwe website.
+ */
+export function LivegangOverview({ variant = "seo-geo" }: { variant?: "seo-geo" | "golive" }) {
   const [customers, setCustomers] = useState<LaunchCustomer[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -71,10 +96,33 @@ export function LivegangOverview() {
             const contentProgress = customer.content_progress
             const quarterlyScan = customer.latest_quarterly_scan
             const quarterlyProgress = customer.quarterly_progress
+            const goLiveScan = customer.latest_golive_scan
+            if (variant === "golive") {
+              return (
+                <li key={customer.id}>
+                  <Link
+                    href={`/dashboard/livegang/oplevering/${customer.id}`}
+                    className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{customer.name}</p>
+                      <p className="truncate text-sm text-muted-foreground">{customer.domain}</p>
+                    </div>
+                    <div className="hidden text-right text-xs text-muted-foreground sm:block">
+                      {goLiveScan ? `Laatste scan: ${formatDateTime(goLiveScan.created_at)}` : "Nog niet gescand"}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <GoLiveStatus customer={customer} />
+                    </div>
+                    <ChevronRight className="size-4 text-muted-foreground" />
+                  </Link>
+                </li>
+              )
+            }
             return (
               <li key={customer.id}>
                 <Link
-                  href={`/dashboard/livegang/${customer.id}`}
+                  href={`/dashboard/livegang/seo-geo/${customer.id}`}
                   className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
                 >
                   <div className="min-w-0 flex-1">

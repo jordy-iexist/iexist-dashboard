@@ -1,18 +1,15 @@
-import { ChecklistPrint } from "@/components/livegang/ChecklistPrint"
+import { redirect } from "next/navigation"
 
-export const metadata = {
-  title: "Livegang checklist (print)",
-}
+import { toQueryString, type PageSearchParams } from "@/lib/search-params"
 
-type PrintPageProps = {
+type PrintRedirectProps = {
   params: Promise<{ customerId: string }>
-  searchParams: Promise<{ fase?: string; ronde?: string }>
+  searchParams: Promise<PageSearchParams>
 }
 
-export default async function ChecklistPrintPage({ params, searchParams }: PrintPageProps) {
+/** Oud adres van de printversie: doorsturen met behoud van `fase` en `ronde`. */
+export default async function ChecklistPrintRedirect({ params, searchParams }: PrintRedirectProps) {
   const { customerId } = await params
-  const { fase, ronde } = await searchParams
-  const phase = fase === "4" ? 4 : fase === "3" ? 3 : 2
-  const period = phase === 4 && ronde && /^\d{4}-Q[1-4]$/.test(ronde) ? ronde : undefined
-  return <ChecklistPrint customerId={customerId} phase={phase} period={period} />
+  const query = toQueryString(await searchParams)
+  redirect(`/dashboard/livegang/seo-geo/${encodeURIComponent(customerId)}/checklist/print${query}`)
 }

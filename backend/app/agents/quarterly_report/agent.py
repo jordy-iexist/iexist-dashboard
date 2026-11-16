@@ -27,6 +27,9 @@ Werkwijze:
    en ga door. Staat bij Ahrefs same_snapshot op true, dan is het dezelfde meting als de basis: noem de
    huidige cijfers, maar trek geen conclusies over groei of daling.
 5. Core Web Vitals worden in fase 4 niet gemeten; doe daar geen uitspraken over.
+6. De rijen onder new_checks in get_issue_changes (comparable=false) zijn nieuwe controles die de basis-scan nog niet deed (of anders mat). Dat
+   zijn geen verslechteringen: noem ze als nieuw gecontroleerd met het huidige aantal, zonder voor/na-vergelijking.
+   Ze tellen ook niet mee in issues_total uit get_overview (zie not_compared).
 
 Schrijf daarna het rapport in het Nederlands, in Markdown, met precies deze kopjes:
 ## Samenvatting

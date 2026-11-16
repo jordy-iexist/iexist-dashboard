@@ -19,6 +19,7 @@ import {
   PhasePanel,
   Pill,
   QUARTERLY_STEPS,
+  PollingFailedNotice,
   ScanProgress,
   ScanStatusBadge,
 } from "@/components/livegang/shared"
@@ -115,7 +116,7 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
   }, [customerId, loadChecklist])
 
   // Pollen zolang de laatste scan loopt; daarna checklist en fasestatus verversen.
-  usePolling(
+  const { failing: pollingFailed } = usePolling(
     async () => {
       const next = await loadLatest()
       if (!next || !isActive(next.status)) {
@@ -267,7 +268,7 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
               )}
               {checklist && !running && (
                 <Button size="sm" variant="outline" asChild>
-                  <Link href={`/dashboard/livegang/${customerId}/checklist/print?fase=4&ronde=${checklist.period}`} target="_blank">
+                  <Link href={`/dashboard/livegang/seo-geo/${customerId}/checklist/print?fase=4&ronde=${checklist.period}`} target="_blank">
                     <Printer /> Printversie / PDF
                   </Link>
                 </Button>
@@ -275,6 +276,7 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
             </div>
           </div>
           {latest && running && <ScanProgress scan={latest} steps={QUARTERLY_STEPS} bare />}
+          <PollingFailedNotice failing={pollingFailed} />
           {latest?.status === "failed" && (
             <p className="text-red-700 dark:text-red-400">Scan mislukt: {latest.error_message ?? "onbekende fout"}</p>
           )}

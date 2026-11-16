@@ -12,6 +12,7 @@ from app.agents.tools import tool
 from app.db.models import LaunchChecklistState, LaunchScan, LaunchScanPage
 from app.features.launch_checklist.services.geo_checklist import ITEMS, merge_checklist
 from app.features.launch_checklist.services.geo_extract import all_types
+from app.features.launch_checklist.services.issues import thin_content_check
 from app.features.launch_checklist.services.page_types import PAGE_TYPES
 
 
@@ -181,7 +182,7 @@ def query_pages(
         "deep": lambda p: p.click_depth is None or p.click_depth > 3,
         "orphan": lambda p: p.in_sitemap and (p.inlinks or 0) == 0,
         "no_schema": lambda p: not (p.jsonld or []),
-        "thin": lambda p: (p.word_count or 0) < 300,
+        "thin": lambda p: thin_content_check(p)[0],
     }
     if problem in predicates:
         pages = [p for p in pages if predicates[problem](p)]
@@ -195,6 +196,7 @@ def query_pages(
                 "depth": p.click_depth,
                 "inlinks": p.inlinks,
                 "words": p.word_count,
+                "main_words": p.main_word_count,
                 "schema": sorted(all_types(p.jsonld or []))[:10],
             }
             for p in pages[:limit]

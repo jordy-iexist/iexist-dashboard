@@ -76,6 +76,10 @@ class LaunchCustomerItem(BaseModel):
     latest_quarterly_scan: LaunchScanItem | None = None
     quarterly_progress: "ChecklistProgress | None" = None
     quarterly_period: str | None = None
+    # Livegang (fase 5): laatste scan en de voortgang van de livegangchecklist
+    # (None = nog niet gescand en niets afgevinkt).
+    latest_golive_scan: LaunchScanItem | None = None
+    golive_progress: "ChecklistProgress | None" = None
 
 
 class LaunchCustomerListResponse(BaseModel):
@@ -106,6 +110,8 @@ class LaunchScanPageItem(BaseModel):
     h2: Any = None
     canonical: str | None = None
     word_count: int | None = None
+    # Woorden buiten nav/header/footer/aside; None = geen paginastructuur herkend.
+    main_word_count: int | None = None
     lang: str | None = None
     hreflang: Any = None
     internal_links: int | None = None
@@ -373,6 +379,26 @@ class QuarterlyChecklistResponse(BaseModel):
     # Vergelijking met de vorige ronde of de nulmeting (zie quarterly_compare).
     comparison: Any = None
     sources: Any = None
+    summary: Any = None
+    sections: list[ChecklistSectionOut]
+    done: int
+    total: int
+    percent: int
+
+
+# --- Livegang (fase 5): oplevering van een nieuwe website ------------------------
+
+class GoLiveScanCreateRequest(BaseModel):
+    max_pages: int = Field(default=500, ge=1, le=2000)
+
+
+class GoLiveChecklistResponse(BaseModel):
+    customer_id: str
+    customer_name: str
+    base_url: str
+    # Laatste voltooide livegangscan; None = nog niet gescand (alleen handmatig afvinken).
+    scan: LaunchScanItem | None = None
+    generated_at: str | None = None
     summary: Any = None
     sections: list[ChecklistSectionOut]
     done: int

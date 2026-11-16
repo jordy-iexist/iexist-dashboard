@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from app.features.launch_checklist.services import quarterly_checklist
 from app.features.launch_checklist.services.content_checklist import ITEMS as CONTENT_ITEMS
 from app.features.launch_checklist.services.geo_checklist import ITEMS as GEO_ITEMS
-from app.features.launch_checklist.services.issues import ISSUE_TYPES, generate_quarterly_issues
+from app.features.launch_checklist.services.issues import (
+    ISSUE_TYPES,
+    RULESET_VERSION,
+    generate_quarterly_issues,
+)
 from app.features.launch_checklist.services.quarterly_checks import (
     evaluate_ai_scan,
     evaluate_new_pages,
@@ -23,7 +27,9 @@ from app.features.launch_checklist.services.quarterly_compare import (
     compare_search_console,
     count_issue_types,
     lost_schema_types,
+    scan_ruleset,
 )
+from app.features.launch_checklist.services.stats import build_summary_stats
 from app.features.launch_checklist.services.schema_validate import (
     extract_jsonld_blocks,
     validate_blocks,
@@ -149,6 +155,53 @@ class CompareTest(unittest.TestCase):
         self.assertEqual((result["before"], result["after"]), (2, 2))
         rows = {r["issue_type"]: r["delta"] for r in result["rows"]}
         self.assertEqual(rows, {"title_missing": -1, "status_4xx": 1})
+
+    def test_new_rule_types_are_not_compared_with_older_base(self):
+        before = count_issue_types(["title_missing", "title_missing"])
+        after = count_issue_types(["title_missing", "og_incomplete", "hreflang_invalid", "hreflang_invalid",
+                                   "robots_blocked_in_sitemap", "cwv_page_weight"])
+        result = compare_issues(before, after, base_ruleset=1)
+        # Nieuwe types tellen aan geen van beide kanten mee; cwv_ wordt al niet vergeleken.
+        self.assertEqual((result["before"], result["after"]), (2, 1))
+        self.assertEqual(result["not_compared"], 4)
+        rows = {r["issue_type"]: r for r in result["rows"]}
+        self.assertNotIn("cwv_page_weight", rows)
+        self.assertEqual(rows["title_missing"]["comparable"], True)
+        self.assertEqual(rows["title_missing"]["delta"], -1)
+        for issue_type, count in (("og_incomplete", 1), ("hreflang_invalid", 2), ("robots_blocked_in_sitemap", 1)):
+            row = rows[issue_type]
+            self.assertEqual((row["before"], row["after"], row["delta"], row["comparable"]), (None, count, None, False))
+        # Vergelijkbare rijen eerst, nieuwe controles onderaan.
+        self.assertEqual([r["comparable"] for r in result["rows"]], [True, False, False, False])
+
+    def test_new_rule_types_compare_normally_with_same_ruleset(self):
+        before = count_issue_types(["og_incomplete", "hreflang_invalid", "hreflang_invalid"])
+        after = count_issue_types(["og_incomplete", "hreflang_invalid"])
+        result = compare_issues(before, after, base_ruleset=RULESET_VERSION)
+        self.assertEqual((result["before"], result["after"], result["not_compared"]), (3, 2, 0))
+        rows = {r["issue_type"]: (r["before"], r["after"], r["delta"], r["comparable"]) for r in result["rows"]}
+        self.assertEqual(rows, {"og_incomplete": (1, 1, 0, True), "hreflang_invalid": (2, 1, -1, True)})
+
+    def test_thin_content_not_compared_with_unstamped_base(self):
+        # thin_content wordt sinds regelset 2 op de hoofdinhoud gemeten; een basis-scan
+        # zonder stempel (= regelset 1) telde anders, dus geen verbetering of verslechtering.
+        base = SimpleNamespace(summary_stats={"total_urls": 40})
+        before = count_issue_types(["thin_content"] * 12 + ["title_missing"])
+        after = count_issue_types(["thin_content"] * 3 + ["title_missing"])
+        result = compare_issues(before, after, base_ruleset=scan_ruleset(base))
+        rows = {r["issue_type"]: r for r in result["rows"]}
+        self.assertEqual((result["before"], result["after"], result["not_compared"]), (1, 1, 3))
+        thin = rows["thin_content"]
+        self.assertEqual((thin["before"], thin["after"], thin["delta"], thin["comparable"]), (None, 3, None, False))
+        # Met een basis op de huidige regelset wel gewoon vergelijken.
+        same = compare_issues(before, after, base_ruleset=RULESET_VERSION)
+        self.assertEqual({r["issue_type"]: r["delta"] for r in same["rows"]}["thin_content"], -9)
+
+    def test_scan_ruleset(self):
+        self.assertEqual(scan_ruleset(SimpleNamespace(summary_stats=None)), 1)
+        self.assertEqual(scan_ruleset(SimpleNamespace(summary_stats={"total_urls": 3})), 1)
+        self.assertEqual(scan_ruleset(SimpleNamespace(summary_stats={"ruleset": 2})), 2)
+        self.assertEqual(build_summary_stats([], [])["ruleset"], RULESET_VERSION)
 
     def test_compare_ahrefs(self):
         self.assertIsNone(compare_ahrefs(None, {"domain": {}}))

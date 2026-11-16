@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CheckDetails } from "@/components/livegang/CheckDetails"
-import { AutoStatusBadge, Pill } from "@/components/livegang/shared"
+import { AutoStatusBadge, Pill, PollingFailedNotice } from "@/components/livegang/shared"
 import { SuggestionRow } from "@/components/livegang/SuggestionRow"
 import {
   ANALYSIS_STATUS_LABELS,
@@ -425,7 +425,7 @@ export function ContentPagesTab({
   }, [load, refreshKey])
 
   // Tijdens de analyse de status per pagina bijhouden.
-  usePolling(load, analysing, 4000)
+  const { failing: pollingFailed } = usePolling(load, analysing, 4000)
 
   const types = useMemo(() => [...new Set((pages ?? []).map((p) => p.page_type ?? "overig"))].sort(), [pages])
   const visible = useMemo(() => {
@@ -567,6 +567,7 @@ export function ContentPagesTab({
         </p>
       )}
       {error && <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <PollingFailedNotice failing={pollingFailed} />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         {/* Links: pagina's als tabs */}

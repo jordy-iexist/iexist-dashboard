@@ -34,7 +34,7 @@ export function parseBingOAuthCookie(value: string | undefined): BingOAuthCookie
  */
 export function bingReturnUrl(customer: string | null, result: "gekoppeld" | "geweigerd" | "fout", detail?: string) {
   const base = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-  const url = new URL(customer ? `/dashboard/livegang/${customer}` : "/dashboard/livegang", base)
+  const url = new URL(customer ? `/dashboard/livegang/seo-geo/${customer}` : "/dashboard/livegang/seo-geo", base)
   if (customer) url.searchParams.set("fase", "4")
   url.searchParams.set("bing", result)
   if (detail) url.searchParams.set("bing_melding", detail.slice(0, 300))

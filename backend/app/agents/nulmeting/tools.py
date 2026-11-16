@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.agents.tools import tool
 from app.db.models import LaunchScan, LaunchScanIssue, LaunchScanPage
 from app.features.launch_checklist.services.ahrefs_enrich import is_lost
+from app.features.launch_checklist.services.issues import thin_content_check
 
 
 @dataclass
@@ -29,6 +30,7 @@ def _page_brief(p: LaunchScanPage) -> dict[str, Any]:
         "meta_len": p.meta_description_length,
         "h1": (p.h1 or [])[:3],
         "words": p.word_count,
+        "main_words": p.main_word_count,  # zonder menu/kop/voet/zijbalk; null = geen structuur herkend
         "ms": p.response_time_ms,
         "cwv": p.cwv_status,
         "org_traffic": p.org_traffic,
@@ -134,7 +136,7 @@ def query_pages(ctx: NulmetingContext, filter: str = "all", limit: int = 15) -> 
         "missing_meta": lambda p: p.indexable and not p.meta_description,
         "missing_h1": lambda p: p.indexable and not (p.h1_count or 0),
         "multiple_h1": lambda p: p.indexable and (p.h1_count or 0) > 1,
-        "thin_content": lambda p: p.indexable and (p.word_count or 0) < 300,
+        "thin_content": lambda p: p.indexable and thin_content_check(p)[0],
         "slow": lambda p: (p.response_time_ms or 0) > 2000,
         "cwv_poor": lambda p: p.cwv_status == "poor",
         # Ahrefs: pagina's met het meeste verkeer / de meeste verwijzende domeinen.
@@ -193,7 +195,13 @@ def get_worst_vitals(ctx: NulmetingContext, limit: int = 10) -> list[dict[str, A
 )
 def get_ai_checks(ctx: NulmetingContext) -> Any:
     scan = ctx.db.get(LaunchScan, ctx.scan_id)
-    return scan.ai_checks if scan else None
+    data = scan.ai_checks if scan else None
+    # Door robots.txt geblokkeerde pagina's (tot 200): alleen het totaal en een paar voorbeelden;
+    # de sitemap-pagina's daaruit staan al als actiepunt in get_issue_groups.
+    robots_pages = (data or {}).get("robots_pages") if isinstance(data, dict) else None
+    if isinstance(robots_pages, dict):
+        data = {**data, "robots_pages": {**robots_pages, "pages": (robots_pages.get("pages") or [])[:10]}}
+    return data
 
 
 NULMETING_TOOLS = [get_scan_overview, get_issue_groups, query_pages, get_worst_vitals, get_ai_checks]

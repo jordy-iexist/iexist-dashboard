@@ -7,7 +7,14 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 _SKIP_TEXT_TAGS = {"script", "style", "noscript", "template", "svg", "head"}
+# Paginachrome (menu, kop, voet, zijbalk). Fase 3 gebruikt dezelfde afbakening voor
+# de hoofdinhoud; fase 1 telt er de woorden in de hoofdinhoud mee.
+_CHROME_TAGS = {"nav", "aside", "header", "footer"}
+_MAIN_TAGS = {"main", "article"}
+_SKIP_LINK_RE = re.compile(r"skip-link|skip-to|screen-reader-text|sr-only|visually-hidden", re.IGNORECASE)
 _WORD_RE = re.compile(r"[\wÀ-ÿ'-]+", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 
@@ -27,7 +34,11 @@ class ExtractedPage:
     images_missing_alt: int = 0
     schema_types: list[str] = field(default_factory=list)
     open_graph: dict[str, str] = field(default_factory=dict)
+    # Alle woorden in de body (ruwe HTML); de SSR-checks rekenen hiermee.
     word_count: int = 0
+    # Woorden buiten nav/header/footer/aside; None als de pagina geen van die
+    # elementen heeft (geen herkenbare structuur, dan is het totaal het enige eerlijke getal).
+    main_word_count: int | None = None
 
 
 def _clean(value: str | None) -> str:
@@ -63,6 +74,36 @@ class _SeoParser(HTMLParser):
         self._in_jsonld = False
         self._jsonld_parts: list[str] = []
         self._words = 0
+        self._main_words = 0
+        self._chrome: list[str] = []
+        self._main_depth = 0
+        self._saw_chrome = False
+
+    @property
+    def in_content(self) -> bool:
+        """Tekst buiten paginachrome en buiten script/style e.d."""
+        return not self._chrome and self._skip_depth == 0
+
+    def _track_chrome_start(self, tag: str, a: dict[str, str]) -> None:
+        if tag in _MAIN_TAGS:
+            self._main_depth += 1
+        if tag in _CHROME_TAGS:
+            # <header>/<footer> binnen <main>/<article> horen bij de inhoud.
+            always = tag in {"nav", "aside"}
+            if self._chrome or always or self._main_depth == 0:
+                self._chrome.append(tag)
+                self._saw_chrome = True
+        elif a.get("role", "").lower() == "navigation" and tag in {"div", "ul", "section"}:
+            self._chrome.append(tag)
+            self._saw_chrome = True
+        elif tag == "a" and _SKIP_LINK_RE.search(a.get("class", "")):
+            self._chrome.append(tag)  # "Ga naar de inhoud"; zegt niets over de paginastructuur
+
+    def _track_chrome_end(self, tag: str) -> None:
+        if tag in _MAIN_TAGS:
+            self._main_depth = max(0, self._main_depth - 1)
+        if self._chrome and self._chrome[-1] == tag:
+            self._chrome.pop()
 
     # --- tags -----------------------------------------------------------
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -101,6 +142,7 @@ class _SeoParser(HTMLParser):
 
         if tag in _SKIP_TEXT_TAGS:
             self._skip_depth += 1
+        self._track_chrome_start(tag, a)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
@@ -122,6 +164,7 @@ class _SeoParser(HTMLParser):
 
         if tag in _SKIP_TEXT_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
+        self._track_chrome_end(tag)
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
@@ -131,7 +174,10 @@ class _SeoParser(HTMLParser):
         if self._heading:
             self._heading_parts.append(data)
         if self._skip_depth == 0:
-            self._words += len(_WORD_RE.findall(data))
+            words = len(_WORD_RE.findall(data))
+            self._words += words
+            if not self._chrome:
+                self._main_words += words
 
     # --- helpers --------------------------------------------------------
     def _handle_meta(self, a: dict[str, str]) -> None:
@@ -164,6 +210,7 @@ class _SeoParser(HTMLParser):
         if self._in_title and self.page.title is None:
             self.page.title = _clean("".join(self._title_parts))
         self.page.word_count = self._words
+        self.page.main_word_count = self._main_words if self._saw_chrome else None
         return self.page
 
 
@@ -172,6 +219,8 @@ def extract_page(html: str) -> ExtractedPage:
     try:
         parser.feed(html)
         parser.close()
+    except SoftTimeLimitExceeded:  # time-out van de taak, geen kapotte HTML
+        raise
     except Exception:  # kapotte HTML: neem wat we hebben
         pass
     return parser.result()

@@ -58,6 +58,7 @@ from app.features.launch_checklist.services.issue_state import (
     with_carried_state,
 )
 from app.features.launch_checklist.services.issues import _is_ok_html, generate_content_issues
+from app.features.launch_checklist.services.scan_recovery import heartbeat
 from app.worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -145,11 +146,14 @@ async def _fetch_content(
     return results
 
 
-async def _check_links(urls: list[str], known_ok: set[str]) -> dict[str, dict[str, Any]]:
+async def _check_links(
+    urls: list[str], known_ok: set[str], on_progress: Any = None,
+) -> dict[str, dict[str, Any]]:
     """Status van interne linkdoelen: {url_key: {status, broken, redirect, final_url}}.
 
     Pagina's die net met 200 zijn opgehaald hoeven niet opnieuw; de rest krijgt
     één verzoek zonder redirects te volgen, en bij een redirect nog één mét.
+    `on_progress` wordt na elke gecontroleerde link aangeroepen (levensteken).
     """
     out: dict[str, dict[str, Any]] = {key: {"status": 200, "broken": False, "redirect": False} for key in known_ok}
     todo: list[str] = []
@@ -194,6 +198,9 @@ async def _check_links(urls: list[str], known_ok: set[str]) -> dict[str, dict[st
                     out[url_key(url)] = info
                 except httpx.HTTPError:
                     return
+                finally:
+                    if on_progress is not None:
+                        on_progress()
 
         await asyncio.gather(*(one(u) for u in todo))
     return out
@@ -209,7 +216,9 @@ def run_content_scan_task(self, scan_id: str) -> None:
     warnings: list[str] = []
     with SessionLocal() as db:
         scan = db.get(LaunchScan, scan_id)
-        if scan is None or str(scan.status).lower() in STOPPED_STATUSES:
+        # 'failed' vóór de start: de scan is als vastgelopen hersteld terwijl de taak nog in de
+        # wachtrij stond (scan_recovery); dan niet alsnog beginnen.
+        if scan is None or str(scan.status).lower() in STOPPED_STATUSES | {"failed"}:
             return
         source = db.get(LaunchScan, scan.source_scan_id) if scan.source_scan_id else None
         if source is None:
@@ -283,7 +292,8 @@ def run_content_scan_task(self, scan_id: str) -> None:
             rows = content_pages(db, scan_id)
             known_ok = {url_key(p.url) for p in rows}
             link_urls = list(dict.fromkeys(l["url"] for p in rows for l in (p.links or [])))
-        link_status = asyncio.run(_check_links(link_urls, known_ok))
+        # Tot 800 links: dat kan langer duren dan scan_recovery een scan zonder levensteken laat staan.
+        link_status = asyncio.run(_check_links(link_urls, known_ok, heartbeat(lambda: _update(scan_id))))
         if _is_stopped(scan_id):
             return
         unchecked = len({url_key(u) for u in link_urls if _looks_like_page(u)} - set(link_status))
@@ -390,11 +400,16 @@ def run_content_analysis_task(self, scan_id: str, page_ids: list[str], run_gap_a
                 return {"ok": False, "warnings": [], "usage": {}, "skipped": True}
             return analyse_page(scan_id, page_id, user_id=user_id, customer_name=customer_name)
 
-        with ThreadPoolExecutor(max_workers=settings.launch_content_ai_concurrency) as pool:
+        # Geen `with`: bij een time-out zou die wachten tot ook alle nog niet gestarte pagina's
+        # klaar zijn, waardoor de harde limiet de taak afschiet voordat er iets is opgeslagen.
+        pool = ThreadPoolExecutor(max_workers=settings.launch_content_ai_concurrency)
+        try:
             futures = [pool.submit(one, page_id) for page_id in page_ids]
             for future in as_completed(futures):
                 try:
                     result = future.result()
+                except SoftTimeLimitExceeded:  # time-out niet inslikken: de buitenste handler rondt af
+                    raise
                 except Exception as exc:  # onverwachte fout in één pagina: de rest gaat door
                     logger.warning("AI-analyse van een pagina mislukt (scan %s): %s", scan_id, exc)
                     warnings.append(f"AI-analyse van een pagina mislukt: {exc}")
@@ -404,6 +419,9 @@ def run_content_analysis_task(self, scan_id: str, page_ids: list[str], run_gap_a
                 if not result.get("skipped"):
                     done += 1
                     _update(scan_id, vitals_measured=done)
+        finally:
+            # Normaal zijn alle pagina's hier al klaar; bij een time-out starten de wachtende niet meer.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         if not _analysis_active(scan_id):
             # Geannuleerd: wat klaar is blijft staan.
@@ -415,6 +433,8 @@ def run_content_analysis_task(self, scan_id: str, page_ids: list[str], run_gap_a
         if run_gap_agent or not gap_done:
             try:
                 usage.merge(run_gap(scan_id, user_id=user_id, customer_name=customer_name))
+            except SoftTimeLimitExceeded:
+                raise
             except Exception as exc:
                 logger.warning("Contentgap-agent faalde voor scan %s: %s", scan_id, exc)
                 warnings.append(f"Contentgap-analyse niet gelukt: {exc}")
@@ -434,6 +454,8 @@ def run_content_analysis_task(self, scan_id: str, page_ids: list[str], run_gap_a
             if report.output:
                 fields["ai_summary"] = report.output
             fields["agent_trace"] = report.to_trace()
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as exc:
             logger.warning("Rapport-agent faalde voor scan %s: %s", scan_id, exc)
             warnings.append(f"AI-rapport niet gegenereerd: {exc}")

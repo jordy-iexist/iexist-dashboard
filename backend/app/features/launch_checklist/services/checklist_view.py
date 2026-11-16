@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.db.models import CustomerWebsite, LaunchChecklistState, LaunchScan
 from app.features.launch_checklist.services.content_checklist import merge_content_checklist
 from app.features.launch_checklist.services.geo_checklist import merge_checklist
+from app.features.launch_checklist.services.golive_checklist import PHASE as GOLIVE_PHASE
+from app.features.launch_checklist.services.golive_checklist import merge_golive_checklist
 from app.features.launch_checklist.services.quarterly_checklist import merge_quarterly_checklist
 
 
@@ -50,7 +52,7 @@ def latest_content_scan(db: Session, customer_id: str) -> LaunchScan | None:
 def states_for_customer(
     db: Session, customer_id: str, period: str = ""
 ) -> dict[str, LaunchChecklistState]:
-    """Handmatige status per punt. `period` is leeg voor fase 2/3, een ronde voor fase 4."""
+    """Handmatige status per punt. `period` is leeg voor fase 2/3 en livegang, een ronde voor fase 4."""
     rows = (
         db.query(LaunchChecklistState)
         .filter(
@@ -171,3 +173,24 @@ def merged_quarterly_checklist(
     if states is None:
         states = states_for_customer(db, customer_id, period)
     return merge_quarterly_checklist(payload.get("items"), states)
+
+
+# --- livegang (fase 5): oplevering van een nieuwe website ----------------------
+
+def latest_golive_scan(db: Session, customer_id: str) -> LaunchScan | None:
+    """Laatste voltooide livegangscan (None = nog niet gescand)."""
+    return latest_completed_scan(db, customer_id, GOLIVE_PHASE)
+
+
+def merged_golive_checklist(
+    db: Session,
+    customer_id: str,
+    scan: LaunchScan | None,
+    *,
+    states: dict[str, LaunchChecklistState] | None = None,
+) -> dict[str, Any]:
+    """Samengevoegde livegangchecklist voor `scan` (None = nog geen livegangscan)."""
+    payload = (scan.checklist if scan else None) or {}
+    if states is None:
+        states = states_for_customer(db, customer_id)
+    return merge_golive_checklist(payload.get("items"), states)

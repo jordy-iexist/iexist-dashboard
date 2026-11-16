@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import LaunchScan, SerpScanResult
 from app.features.launch_checklist.services.discovery import url_key
-from app.features.launch_checklist.services.issues import ISSUE_TYPES, final_status
+from app.features.launch_checklist.services.issues import ISSUE_TYPES, final_status, issue_type_since
 from app.features.launch_checklist.services.quarterly_checklist import KEY_PREFIX, period_label
 
 # Statussen waarbij de scanner waarschijnlijk geblokkeerd werd: geen oordeel.
@@ -142,23 +142,55 @@ def count_issue_types(issue_types: Iterable[str]) -> Counter[str]:
     return Counter(t for t in issue_types if not t.startswith(_NOT_COMPARED_PREFIXES))
 
 
-def compare_issues(before: Counter[str], after: Counter[str]) -> dict[str, Any]:
-    rows = [
-        {
+def scan_ruleset(scan: Any) -> int:
+    """Regelset waarmee de actiepunten van een scan zijn gemaakt; scans zonder stempel = 1."""
+    stats = getattr(scan, "summary_stats", None)
+    value = stats.get("ruleset") if isinstance(stats, dict) else None
+    return value if isinstance(value, int) and value > 0 else 1
+
+
+def compare_issues(
+    before: Counter[str], after: Counter[str], *, base_ruleset: int | None = None
+) -> dict[str, Any]:
+    """Aantallen per type voor en na.
+
+    Met `base_ruleset` zijn types die pas in een latere regelset zijn toegevoegd
+    niet vergelijkbaar: de basis-scan kon ze nog niet vinden. Die tellen niet mee
+    in de totalen en komen als rij met `before: None`, `delta: None` en
+    `comparable: False` (onderaan). `not_compared` is hun aantal in deze scan.
+    """
+    def comparable(t: str) -> bool:
+        return base_ruleset is None or issue_type_since(t) <= base_ruleset
+
+    def meta(t: str) -> dict[str, Any]:
+        return {
             "issue_type": t,
             "label": ISSUE_TYPES.get(t, {}).get("label", t),
             "category": ISSUE_TYPES.get(t, {}).get("category", "techniek"),
+        }
+
+    types = set(before) | set(after)
+    rows = [
+        {
+            **meta(t),
             "before": before.get(t, 0),
             "after": after.get(t, 0),
             "delta": after.get(t, 0) - before.get(t, 0),
+            "comparable": True,
         }
-        for t in set(before) | set(after)
+        for t in types if comparable(t)
     ]
     rows.sort(key=lambda r: (-abs(r["delta"]), -r["after"], r["label"]))
+    new_checks = [
+        {**meta(t), "before": None, "after": after.get(t, 0), "delta": None, "comparable": False}
+        for t in types if not comparable(t) and after.get(t, 0)
+    ]
+    new_checks.sort(key=lambda r: (-r["after"], r["label"]))
     return {
-        "before": sum(before.values()),
-        "after": sum(after.values()),
-        "rows": rows,
+        "before": sum(n for t, n in before.items() if comparable(t)),
+        "after": sum(n for t, n in after.items() if comparable(t)),
+        "not_compared": sum(r["after"] for r in new_checks),
+        "rows": rows + new_checks,
     }
 
 

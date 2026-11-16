@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import { CwvBadge } from "@/components/livegang/shared"
+import { CwvBadge, PollingFailedNotice } from "@/components/livegang/shared"
 import { apiFetch, type CwvRating, type LaunchScanPage } from "@/lib/launch-checklist"
 import { usePolling } from "@/hooks/use-polling"
 import { cn } from "@/lib/utils"
@@ -60,7 +60,7 @@ export function VitalsTab({ scanId, measuring }: { scanId: string; measuring: bo
   }, [fetchPages])
 
   // Tijdens het meten elke 5 s verversen.
-  usePolling(async () => setPages((await fetchPages()).pages), measuring, 5000)
+  const { failing: pollingFailed } = usePolling(async () => setPages((await fetchPages()).pages), measuring, 5000)
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!pages) return <p className="text-sm text-muted-foreground">Laden…</p>
@@ -76,6 +76,7 @@ export function VitalsTab({ scanId, measuring }: { scanId: string; measuring: bo
         die voor de pagina beschikbaar is, anders labdata (Lighthouse). INP bestaat alleen als velddata; in het lab is
         TBT de vervanger.
       </p>
+      <PollingFailedNotice failing={pollingFailed} />
       {sorted.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {measuring ? "Metingen lopen…" : "Er zijn geen Core Web Vitals gemeten."}

@@ -8,7 +8,9 @@ import {
   CATEGORY_LABELS,
   formatDateTime,
   type AiCheckChange,
+  type BingCrawlIssue,
   type BingSitemap,
+  type BingWebmasterDetails,
   type ChecklistItem,
   type GscMetricChange,
   type GscMovers,
@@ -86,6 +88,11 @@ export function quarterlyItemDetails(item: ChecklistItem): React.ReactNode {
   if (item.key === "c4_new_pages") return <NewPagesList details={details as NewPagesDetails} />
   if (item.key === "c4_schema_validation") return <SchemaList details={details as SchemaValidationDetails} />
   if (item.key === "c4_search_console") return <SearchConsoleItemDetails details={details as SearchConsoleDetails} />
+  if (item.key === "c4_bing_webmaster") {
+    // Niet gekoppeld of nog geen data: de melding en evidence zeggen dan genoeg.
+    const bing = details as BingWebmasterDetails
+    return bing.state === "ok" && hasBingFindings(bing) ? <BingWebmasterItemDetails details={bing} /> : null
+  }
   if (item.key === "c4_ai_scan") {
     const checks = (details as { checks?: AiCheckChange[] }).checks ?? []
     const changed = checks.filter((c) => c.change !== "same")
@@ -256,7 +263,7 @@ function ComparisonSummary({ comparison, periodLabel }: { comparison: QuarterlyC
         <CompactStat
           label="Actiepunten"
           value={<span className="inline-flex items-baseline gap-2">{issues.after} <span className="text-xs"><Delta value={issues.after - issues.before} higherIsBetter={false} /></span></span>}
-          hint={`was ${issues.before}`}
+          hint={`was ${issues.before}${issues.not_compared ? ` · excl. ${issues.not_compared} uit nieuwe controles` : ""}`}
         />
         <CompactStat label="Pagina's" value={pages.after} hint={`was ${pages.before}`} />
         <CompactStat label="Nieuwe pagina's" value={pages.new} />
@@ -657,6 +664,119 @@ const SITEMAP_STATE: Record<BingSitemap["state"], { tone: "green" | "amber" | "r
   error: { tone: "red", label: "Fout" },
 }
 
+function BingSitemapList({ rows }: { rows: BingSitemap[] }) {
+  if (!rows.length) return null
+  return (
+    <ul className="divide-y rounded-md border bg-card text-xs">
+      {rows.slice(0, MAX_ROWS).map((sitemap) => (
+        <li key={sitemap.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+          <Pill tone={SITEMAP_STATE[sitemap.state].tone}>
+            {sitemap.state === "error" ? sitemap.status || "Fout" : SITEMAP_STATE[sitemap.state].label}
+          </Pill>
+          <PageLink url={sitemap.url} />
+          <span className="text-muted-foreground">
+            {formatNumber(sitemap.url_count)} URL&apos;s
+            {sitemap.last_crawled ? ` · laatst gelezen ${formatDateTime(sitemap.last_crawled)}` : ""}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function BingCrawlIssueList({ rows }: { rows: BingCrawlIssue[] }) {
+  if (!rows.length) return null
+  return (
+    <ul className="divide-y rounded-md border bg-card text-xs">
+      {rows.slice(0, MAX_ROWS).map((row) => (
+        <li key={row.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+          <Pill tone={row.severe ? "red" : "amber"}>{row.issues.map((i) => i.label).join(", ") || "Crawlfout"}</Pill>
+          <PageLink url={row.url} />
+          {row.in_links > 0 && <span className="text-muted-foreground">{formatNumber(row.in_links)} inkomende links</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** Signalen uit `c4_bing_webmaster` die geen lijst zijn (dalingen, malware, serverfouten, geen sitemap). */
+function bingSignals(details: BingWebmasterDetails): { tone: "red" | "amber"; label: string; text: string }[] {
+  const signals: { tone: "red" | "amber"; label: string; text: string }[] = []
+  if (details.malware) {
+    signals.push({ tone: "red", label: "Malware", text: `Bing meldt malware op ${formatNumber(details.malware)} ${details.malware === 1 ? "URL" : "URL's"}.` })
+  }
+  if (details.server_errors) {
+    signals.push({
+      tone: "amber",
+      label: "Serverfouten",
+      text: `${formatNumber(details.server_errors)} ${details.server_errors === 1 ? "URL geeft" : "URL's geven"} een serverfout (5xx) aan Bingbot.`,
+    })
+  }
+  if (details.index_drop_pct != null) {
+    signals.push({
+      tone: "amber",
+      label: "Index gedaald",
+      text: `Het aantal pagina's in de Bing-index is ${formatNumber(Math.abs(details.index_drop_pct), 1)}% gedaald.`,
+    })
+  }
+  if (details.clicks_drop_pct != null) {
+    signals.push({
+      tone: "amber",
+      label: "Klikken gedaald",
+      text: `De klikken uit Bing zijn ${formatNumber(Math.abs(details.clicks_drop_pct), 1)}% gedaald t.o.v. de vorige periode.`,
+    })
+  }
+  if (details.no_sitemap) {
+    signals.push({ tone: "amber", label: "Geen sitemap", text: "Er is geen sitemap ingediend in Bing Webmaster Tools." })
+  }
+  return signals
+}
+
+function hasBingFindings(details: BingWebmasterDetails) {
+  return bingSignals(details).length > 0 || !!details.sitemaps?.length || !!details.crawl_issues?.length
+}
+
+/** Details bij het checklistpunt `c4_bing_webmaster` (alleen als Bing data heeft): signalen, sitemaps en crawlfouten. */
+function BingWebmasterItemDetails({ details }: { details: BingWebmasterDetails }) {
+  const signals = bingSignals(details)
+  const sitemaps = details.sitemaps ?? []
+  const crawlIssues = details.crawl_issues ?? []
+  const crawlTotal = details.crawl_issues_total ?? crawlIssues.length
+  const moreCrawlIssues = crawlTotal - Math.min(crawlIssues.length, MAX_ROWS)
+  return (
+    <div className="space-y-3 text-xs">
+      {details.site && (
+        <p className="text-muted-foreground">
+          <span className="font-mono">{details.site}</span> in Bing Webmaster Tools
+        </p>
+      )}
+      {signals.length > 0 && (
+        <ul className="divide-y rounded-md border bg-card">
+          {signals.map((signal) => (
+            <li key={signal.label} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+              <Pill tone={signal.tone}>{signal.label}</Pill>
+              <span>{signal.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {sitemaps.length > 0 && (
+        <div>
+          <p className="mb-1 font-medium text-muted-foreground">Sitemaps met fouten ({sitemaps.length})</p>
+          <BingSitemapList rows={sitemaps} />
+        </div>
+      )}
+      {crawlIssues.length > 0 && (
+        <div>
+          <p className="mb-1 font-medium text-muted-foreground">URL&apos;s met een crawlfout ({crawlTotal})</p>
+          <BingCrawlIssueList rows={crawlIssues} />
+          {moreCrawlIssues > 0 && <p className="mt-1 text-muted-foreground">en nog {moreCrawlIssues}…</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BingWebmasterSection({ comparison }: { comparison: QuarterlyComparison }) {
   const bing = comparison.bing_webmaster
   // Scans van vóór de Bing-koppeling hebben dit blok niet.
@@ -786,22 +906,7 @@ function BingWebmasterSection({ comparison }: { comparison: QuarterlyComparison 
               ? "er is geen sitemap ingediend in Bing Webmaster Tools."
               : `${sitemaps.total} ingediend, ${sitemaps.with_errors} met fouten.`}
           </p>
-          {sitemaps.rows.length > 0 && (
-            <ul className="divide-y rounded-md border bg-card text-xs">
-              {sitemaps.rows.slice(0, MAX_ROWS).map((sitemap) => (
-                <li key={sitemap.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
-                  <Pill tone={SITEMAP_STATE[sitemap.state].tone}>
-                    {sitemap.state === "error" ? sitemap.status || "Fout" : SITEMAP_STATE[sitemap.state].label}
-                  </Pill>
-                  <PageLink url={sitemap.url} />
-                  <span className="text-muted-foreground">
-                    {formatNumber(sitemap.url_count)} URL&apos;s
-                    {sitemap.last_crawled ? ` · laatst gelezen ${formatDateTime(sitemap.last_crawled)}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <BingSitemapList rows={sitemaps.rows} />
         </div>
       )}
 
@@ -811,15 +916,7 @@ function BingWebmasterSection({ comparison }: { comparison: QuarterlyComparison 
             <span className="font-medium">Crawlfouten:</span> Bing meldt {issues.total}{" "}
             {issues.total === 1 ? "URL" : "URL's"} met een probleem.
           </p>
-          <ul className="divide-y rounded-md border bg-card text-xs">
-            {issues.rows.slice(0, MAX_ROWS).map((row) => (
-              <li key={row.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
-                <Pill tone={row.severe ? "red" : "amber"}>{row.issues.map((i) => i.label).join(", ") || "Crawlfout"}</Pill>
-                <PageLink url={row.url} />
-                {row.in_links > 0 && <span className="text-muted-foreground">{formatNumber(row.in_links)} inkomende links</span>}
-              </li>
-            ))}
-          </ul>
+          <BingCrawlIssueList rows={issues.rows} />
         </div>
       )}
     </section>
@@ -872,7 +969,8 @@ function AhrefsSection({ comparison }: { comparison: QuarterlyComparison }) {
 }
 
 function IssuesSection({ comparison }: { comparison: QuarterlyComparison }) {
-  const rows = comparison.issues.rows.filter((r) => r.delta !== 0)
+  // Nieuwe controles (comparable false) altijd tonen: ze hebben geen 'vorige' om mee te vergelijken.
+  const rows = comparison.issues.rows.filter((r) => r.comparable === false || r.delta !== 0)
   return (
     <section className="space-y-2">
       <SectionTitle>Veranderingen in actiepunten</SectionTitle>
@@ -890,19 +988,27 @@ function IssuesSection({ comparison }: { comparison: QuarterlyComparison }) {
             </tr>
           }
         >
-          {rows.slice(0, MAX_ROWS).map((row) => (
-            <tr key={row.issue_type}>
-              <td className={td}>{row.label}</td>
-              <td className={cn(td, "text-xs text-muted-foreground")}>{CATEGORY_LABELS[row.category] ?? row.category}</td>
-              <td className={tdRight}>{row.before}</td>
-              <td className={tdRight}>{row.after}</td>
-              <td className={tdRight}><Delta value={row.delta} higherIsBetter={false} /></td>
-            </tr>
-          ))}
+          {rows.slice(0, MAX_ROWS).map((row) => {
+            const isNew = row.comparable === false || row.before == null
+            return (
+              <tr key={row.issue_type}>
+                <td className={td}>{row.label}</td>
+                <td className={cn(td, "text-xs text-muted-foreground")}>{CATEGORY_LABELS[row.category] ?? row.category}</td>
+                <td className={tdRight}>{isNew ? <NewCheck /> : row.before}</td>
+                <td className={tdRight}>{row.after}</td>
+                <td className={tdRight}>{isNew ? <NewCheck /> : <Delta value={row.delta} higherIsBetter={false} />}</td>
+              </tr>
+            )
+          })}
         </Table>
       )}
     </section>
   )
+}
+
+/** Actiepunttype dat de basis-scan nog niet (of anders) controleerde: geen voor/na-vergelijking. */
+function NewCheck() {
+  return <span className="text-xs text-muted-foreground" title="De basis-scan deed deze controle nog niet, of mat hem op een andere manier">nieuwe controle</span>
 }
 
 const EXTERNAL_SOURCES: { key: "search_console" | "ga4" | "bing_webmaster" | null; label: string; hint: string }[] = [

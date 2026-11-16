@@ -6,7 +6,14 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { EffectiveIcon } from "@/components/livegang/ChecklistTab"
 import { AutoStatusBadge, PercentRing } from "@/components/livegang/shared"
-import { apiFetch, formatDateTime, MANUAL_STATUS_LABELS, periodQuery, type Checklist } from "@/lib/launch-checklist"
+import {
+  apiFetch,
+  formatDateTime,
+  MANUAL_STATUS_LABELS,
+  periodQuery,
+  type Checklist,
+  type ChecklistPath,
+} from "@/lib/launch-checklist"
 
 // Verberg de dashboard-chrome (sidebar, header) bij afdrukken.
 const PRINT_CSS = `
@@ -19,10 +26,21 @@ const PRINT_CSS = `
 }
 `
 
-const PHASE_TITLES: Record<2 | 3 | 4, string> = {
-  2: "Livegang fase 2 · GEO/SEO-checklist",
-  3: "Livegang fase 3 · Contentcreatie & onpage optimalisatie",
-  4: "Livegang fase 4 · Kwartaal GEO-werkzaamheden",
+/** Fase 2-4 van de SEO/GEO-scan; 5 is de livegangchecklist (livegangscans hebben phase = 5). */
+type PrintPhase = 2 | 3 | 4 | 5
+
+const PHASE_TITLES: Record<PrintPhase, string> = {
+  2: "SEO/GEO-scan fase 2 · GEO/SEO-checklist",
+  3: "SEO/GEO-scan fase 3 · Contentcreatie & onpage optimalisatie",
+  4: "SEO/GEO-scan fase 4 · Kwartaal GEO-werkzaamheden",
+  5: "Livegangchecklist · Oplevering nieuwe website",
+}
+
+const PHASE_PATHS: Record<PrintPhase, ChecklistPath> = {
+  2: "checklist",
+  3: "content-checklist",
+  4: "quarterly-checklist",
+  5: "golive-checklist",
 }
 
 export function ChecklistPrint({
@@ -31,21 +49,16 @@ export function ChecklistPrint({
   period,
 }: {
   customerId: string
-  phase?: 2 | 3 | 4
+  phase?: PrintPhase
   /** Fase 4: de ronde (leeg = huidige ronde). */
   period?: string
 }) {
-  // Fase 4 heeft geen webshop-velden; die zijn dan leeg.
+  // Fase 3, 4 en de livegangchecklist hebben geen webshop-velden; die zijn dan leeg.
   const [checklist, setChecklist] = useState<(Checklist & { period_label?: string }) | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const path =
-      phase === 4
-        ? `quarterly-checklist${periodQuery(period)}`
-        : phase === 3
-          ? "content-checklist"
-          : "checklist"
+    const path = `${PHASE_PATHS[phase]}${phase === 4 ? periodQuery(period) : ""}`
     apiFetch<Checklist & { period_label?: string }>(`/customers/${customerId}/${path}`)
       .then(setChecklist)
       .catch((err: Error) => setError(err.message))

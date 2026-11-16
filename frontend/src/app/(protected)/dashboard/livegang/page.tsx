@@ -1,21 +1,8 @@
-import { LivegangOverview } from "@/components/livegang/LivegangOverview"
+import { redirect } from "next/navigation"
 
-export const metadata = {
-  title: "Livegang checklist",
-}
+import { toQueryString, type PageSearchParams } from "@/lib/search-params"
 
-export default function LivegangPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Livegang checklist</h1>
-        <p className="text-muted-foreground">
-          Kies een klant om de livegang-checklist te doorlopen: fase 1 (Nulmeting &amp; AI scan), fase 2
-          (GEO/SEO-checklist), fase 3 (Contentcreatie &amp; onpage optimalisatie) en fase 4 (Kwartaal
-          GEO-werkzaamheden, elk kwartaal een nieuwe ronde).
-        </p>
-      </div>
-      <LivegangOverview />
-    </div>
-  )
+/** Oud adres van de SEO/GEO-scan: doorsturen met behoud van de query-string. */
+export default async function LivegangRedirect({ searchParams }: { searchParams: Promise<PageSearchParams> }) {
+  redirect(`/dashboard/livegang/seo-geo${toQueryString(await searchParams)}`)
 }

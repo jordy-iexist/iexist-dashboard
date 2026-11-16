@@ -10,15 +10,19 @@ import time
 import xml.etree.ElementTree as ET
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Any, Callable
 from urllib.parse import urldefrag, urljoin, urlparse
 
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.url_guard import is_safe_external_url
 from app.features.seo_tracker.services import extract_hostname, to_root_domain
 
 USER_AGENT = "Mozilla/5.0 (compatible; iExistLaunchScan/1.0; +https://iexist.nl)"
 DEFAULT_SITEMAP_PATHS = ("/sitemap.xml", "/sitemap_index.xml", "/wp-sitemap.xml")
+# Zoveel sitemap-URL's op een ander domein bewaren we als voorbeeld (de livegangcheck toont ze).
+MAX_FOREIGN_SAMPLE = 10
 
 
 @dataclass
@@ -28,6 +32,9 @@ class DiscoveryResult:
     robots_txt: str | None = None
     robots_status: int | None = None
     skipped_due_to_limit: int = 0
+    # Sitemap-URL's op een ander domein: worden niet gecrawld, wel geteld (livegang, gl_sitemap).
+    foreign_total: int = 0
+    foreign_sample: list[str] = field(default_factory=list)
 
 
 def clean_url(raw: str, base: str | None = None) -> str | None:
@@ -88,6 +95,8 @@ def _fetch(client: httpx.Client, url: str) -> httpx.Response | None:
             time.sleep(5)
             response = client.get(url)
         return response
+    except SoftTimeLimitExceeded:  # time-out van de taak: niet als 'niet bereikbaar' behandelen
+        raise
     except Exception:
         return None
 
@@ -119,7 +128,9 @@ def discover_from_sitemaps(
     max_urls: int,
     timeout_seconds: float = 20.0,
     max_sitemaps: int = 50,
+    on_progress: Callable[[], Any] | None = None,
 ) -> DiscoveryResult:
+    """`on_progress` wordt na elke opgehaalde sitemap aangeroepen (levensteken voor de scan)."""
     origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
     root_domain = root_domain_of(base_url)
     result = DiscoveryResult(urls=[])
@@ -151,6 +162,8 @@ def discover_from_sitemaps(
             visited.add(sitemap_url)
 
             response = _fetch(client, sitemap_url)
+            if on_progress is not None:
+                on_progress()
             if response is None or response.status_code != 200:
                 continue
             try:
@@ -186,6 +199,9 @@ def discover_from_sitemaps(
                 if not page_url:
                     continue
                 if root_domain and not is_internal(page_url, root_domain):
+                    result.foreign_total += 1
+                    if len(result.foreign_sample) < MAX_FOREIGN_SAMPLE:
+                        result.foreign_sample.append(page_url)
                     continue
                 key = url_key(page_url)
                 if key in seen_keys:

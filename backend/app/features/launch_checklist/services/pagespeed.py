@@ -67,6 +67,8 @@ def parse_psi_response(payload: dict[str, Any]) -> dict[str, Any]:
         "fcp": _audit_value(audits, "first-contentful-paint"),
         "si": _audit_value(audits, "speed-index"),
         "ttfb": _audit_value(audits, "server-response-time"),
+        # Totale overdrachtsgrootte in bytes (regel cwv_page_weight in issues.py).
+        "total_byte_weight": _audit_value(audits, "total-byte-weight"),
         "performance_score": round(perf_score * 100) if isinstance(perf_score, (int, float)) else None,
     }
     lab_status = _worst([rate("lcp", lab["lcp"]), rate("cls", lab["cls"]), rate("tbt", lab["tbt"])])

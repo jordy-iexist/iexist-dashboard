@@ -317,6 +317,8 @@ class CustomerWebsite(Base):
     monday_group_fase2_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     monday_group_fase3_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     monday_group_fase4_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Groep van de livegangchecklist (livegangscans hebben phase = 5).
+    monday_group_fase5_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Handmatig gekozen Search Console-property (bijv. "sc-domain:example.nl").
     # Leeg = automatisch zoeken op domein.
     gsc_property: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -969,6 +971,8 @@ class LaunchScanPage(Base):
     h2: Mapped[Any] = mapped_column(JSON, nullable=True)
     canonical: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Woorden buiten nav/header/footer/aside; NULL als de pagina geen van die elementen heeft.
+    main_word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     lang: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     hreflang: Mapped[Any] = mapped_column(JSON, nullable=True)
     internal_links: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
