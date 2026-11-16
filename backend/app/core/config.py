@@ -303,6 +303,15 @@ class Settings(BaseSettings):
         default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
     )
 
+    # ProRankTracker AI Tracking (livegang fase 1, 2 en 4): AI-zichtbaarheid per site.
+    # Alleen-lezen: URL's en prompts worden in ProRankTracker zelf beheerd.
+    proranktracker_api_token: str = Field(
+        default="", validation_alias="PRORANKTRACKER_API_X_TOKEN"
+    )
+    proranktracker_request_timeout_seconds: float = Field(
+        default=30.0, validation_alias="PRORANKTRACKER_REQUEST_TIMEOUT_SECONDS"
+    )
+
     # Google Search Console (livegang fase 4): één Google-account met alle klanten als
     # property. Het refresh token komt uit scripts/gsc_authorize.py.
     gsc_client_id: str = Field(default="", validation_alias="GSC_CLIENT_ID")

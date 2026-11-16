@@ -44,6 +44,7 @@ from app.features.launch_checklist.services.issue_state import (
 )
 from app.features.launch_checklist.services.issues import _is_ok_html, generate_geo_issues
 from app.features.launch_checklist.services.link_graph import GraphNode, build_link_graph
+from app.features.launch_checklist.worker.launch_scan import _proranktracker_step
 from app.worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -178,6 +179,13 @@ def run_geo_scan_task(self, scan_id: str) -> None:
 
         # 3. Extra checks (sitemap_index, HTML-sitemap, CDN-bottoegang) + evaluatie
         _update(scan_id, status="checking")
+
+        # 3a. ProRankTracker: AI-zichtbaarheid, opgeslagen op deze fase 2-scan
+        prt_snapshot = _proranktracker_step(scan_id, base_url, warnings)
+        if _is_stopped(scan_id):
+            return
+        _update(scan_id, proranktracker=prt_snapshot, warnings=warnings)
+
         with SessionLocal() as db:
             pages = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == source_id).all()
             extras = collect_extras(base_url, pages)

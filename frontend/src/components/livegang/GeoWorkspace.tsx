@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { AiVisibilityTab } from "@/components/livegang/AiVisibilityTab"
 import { ChecklistTab } from "@/components/livegang/ChecklistTab"
 import { IssuesTab } from "@/components/livegang/IssuesTab"
 import { SchemaTab } from "@/components/livegang/SchemaTab"
@@ -37,6 +38,7 @@ const TABS = [
   { key: "checklist", label: "Checklist" },
   { key: "schema", label: "Schema per paginatype" },
   { key: "issues", label: "Actiepunten" },
+  { key: "visibility", label: "AI-zichtbaarheid" },
   { key: "report", label: "Rapport" },
 ] as const
 
@@ -326,6 +328,14 @@ export function GeoWorkspace({ customerId, onChange }: { customerId: string; onC
             />
           )}
           {tab === "issues" && completedScan && <IssuesTab scanId={completedScan.id} customerId={customerId} />}
+          {tab === "visibility" &&
+            completedScan &&
+            // `report` is het detail van de voltooide scan; tot hij bij deze scan hoort nog even laden.
+            (report?.id === completedScan.id ? (
+              <AiVisibilityTab scanId={completedScan.id} snapshot={report.proranktracker} />
+            ) : (
+              <p className="text-sm text-muted-foreground">Laden…</p>
+            ))}
           {tab === "report" && (
             <section className="space-y-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">

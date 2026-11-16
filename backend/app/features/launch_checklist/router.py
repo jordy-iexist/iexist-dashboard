@@ -85,9 +85,10 @@ from app.features.launch_checklist.schemas import (
     LaunchScanIssueListResponse,
     LaunchScanListResponse,
     LaunchScanPageListResponse,
+    PrtPromptDetail,
 )
 from app.core.config import settings
-from app.features.launch_checklist.services import ahrefs_enrich, bing_enrich, gsc_enrich, monday_push
+from app.features.launch_checklist.services import ahrefs_enrich, bing_enrich, gsc_enrich, monday_push, prt_enrich
 from app.features.launch_checklist.services.checklist_view import (
     checklist_progress,
     latest_scans_by_customer as _latest_scans,
@@ -122,6 +123,7 @@ from app.services.bing_webmaster.client import BingWebmasterServiceError
 from app.services.bing_webmaster.connection import BingSession
 from app.services.search_console import client as gsc_client
 from app.services.search_console.client import SearchConsoleServiceError
+from app.services.proranktracker.client import ProRankTrackerServiceError
 from app.features.launch_checklist.services.content_checklist import (
     ITEMS as CONTENT_ITEMS,
 )
@@ -344,6 +346,30 @@ async def get_launch_scan(
     # De UI pollt deze endpoint tijdens een scan of analyse: hier herstellen we een vastgelopen scan.
     recover_stale_analysis(db, scan) or recover_stale_scan(db, scan)
     return to_scan_detail(scan)
+
+
+@router.get("/scans/{scan_id}/proranktracker/prompts/{prompt_id}", response_model=PrtPromptDetail)
+def get_proranktracker_prompt(
+    scan_id: str,
+    prompt_id: int,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Actueel antwoord per AI-platform voor één prompt, live uit ProRankTracker.
+
+    De scan levert de getrackte URL en de prompttekst; antwoorden worden niet bewaard.
+    """
+    scan = _get_scan(db, scan_id)
+    snapshot = scan.proranktracker
+    if prt_enrich.find_prompt(snapshot, prompt_id) is None:
+        raise HTTPException(status_code=404, detail="Prompt niet gevonden in de ProRankTracker-data van deze scan.")
+    try:
+        detail = prt_enrich.prompt_detail(snapshot, prompt_id)
+    except ProRankTrackerServiceError as exc:
+        raise HTTPException(status_code=502, detail=f"ProRankTracker-data niet opgehaald: {exc}") from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Prompt niet gevonden in de ProRankTracker-data van deze scan.")
+    return detail
 
 
 @router.post("/scans/{scan_id}/cancel")

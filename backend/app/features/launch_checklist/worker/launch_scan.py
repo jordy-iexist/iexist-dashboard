@@ -15,7 +15,7 @@ from app.agents.nulmeting.tools import NulmetingContext
 from app.core.config import settings
 from app.db.models import CustomerWebsite, LaunchScan, LaunchScanIssue, LaunchScanPage
 from app.db.session import SessionLocal
-from app.features.launch_checklist.services import ahrefs_enrich
+from app.features.launch_checklist.services import ahrefs_enrich, prt_enrich
 from app.features.launch_checklist.services.ai_checks import run_ai_checks
 from app.features.launch_checklist.services.discovery import discover_from_sitemaps, url_key
 from app.features.launch_checklist.services.inventory import PageRecord, run_inventory
@@ -58,6 +58,31 @@ def _update(scan_id: str, **fields: Any) -> None:
             LaunchScan.id == scan_id, LaunchScan.status != "canceled"
         ).update(fields, synchronize_session=False)
         db.commit()
+
+
+def _enrich_with_proranktracker(base_url: str, warnings: list[str]) -> dict[str, Any]:
+    """ProRankTracker-snapshot (AI-zichtbaarheid) van de klantsite; altijd een dict met een `state`.
+
+    Zonder token, of als de site niet in AI-tracking staat, komt er geen waarschuwing
+    bij de scan: dat is voor de meeste klanten de gewone situatie. Alleen echte
+    fouten worden gemeld. Gebruikt door fase 1, 2 en 4.
+    """
+    snapshot = prt_enrich.collect(base_url)
+    if snapshot["state"] == "error":
+        warnings.append(f"ProRankTracker: {snapshot.get('message') or 'data niet opgehaald'}")
+    return snapshot
+
+
+def _proranktracker_step(scan_id: str, base_url: str, warnings: list[str]) -> dict[str, Any]:
+    """`_enrich_with_proranktracker` met vangnet: een fout laat de scan nooit mislukken."""
+    try:
+        return _enrich_with_proranktracker(base_url, warnings)
+    except SoftTimeLimitExceeded:  # time-out niet inslikken: de buitenste handler rondt af
+        raise
+    except Exception as exc:  # ProRankTracker is een verrijking: de scan gaat zonder door
+        logger.warning("ProRankTracker-verrijking faalde voor scan %s: %s", scan_id, exc)
+        warnings.append(f"ProRankTracker-data niet opgehaald: {exc}")
+        return prt_enrich.empty_snapshot("error", message="ProRankTracker-data is niet opgehaald.")
 
 
 def _record_to_row(scan_id: str, rec: PageRecord) -> LaunchScanPage:
@@ -214,6 +239,11 @@ def run_launch_scan_task(self, scan_id: str) -> None:
         if _is_stopped(scan_id):
             return
 
+        # 3c. ProRankTracker: AI-zichtbaarheid (mentions en links in AI-antwoorden)
+        prt_snapshot = _proranktracker_step(scan_id, base_url, warnings)
+        if _is_stopped(scan_id):
+            return
+
         with SessionLocal() as db:
             db.add_all([_record_to_row(scan_id, r) for r in records])
             db.commit()
@@ -223,6 +253,7 @@ def run_launch_scan_task(self, scan_id: str) -> None:
             inventoried_urls=len(records),
             ai_checks=ai_checks,
             warnings=warnings,
+            proranktracker=prt_snapshot,
             **({"ahrefs": ahrefs_summary} if ahrefs_summary is not None else {}),
         )
 

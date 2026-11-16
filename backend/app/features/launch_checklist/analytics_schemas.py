@@ -38,6 +38,7 @@ class PointSources(BaseModel):
     ahrefs: SourceState
     search_console: SourceState
     bing: SourceState
+    proranktracker: SourceState
     cwv: SourceState
 
 

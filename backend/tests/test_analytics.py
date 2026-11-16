@@ -99,6 +99,24 @@ BING = {"state": "ok", "period": {"start": "2026-08-15", "end": "2026-11-12"},
 BING_PROJECTED = {"state": "ok", "period": BING["period"], "totals": BING["totals"], "in_index": 55}
 
 
+def _prt_platform(visibility, tracked=3, shown=2):
+    return {"visibility": visibility, "appearances": shown, "mentions": shown, "links": 1, "links_avg": 2.0,
+            "prompts_tracked": tracked, "prompts_shown": shown}
+
+
+PRT = {"state": "ok", "message": None, "fetched_at": "2026-09-01T10:00:00+00:00", "url_id": 7,
+       "url": "http://klant.nl",
+       "totals": {"visibility": 58.3, "appearances": 40, "mentions": 25, "links": 12, "links_avg": 3.1,
+                  "prompts": 20},
+       "platforms": {"aio": _prt_platform(70), "aim": _prt_platform(45.5), "chatgpt": _prt_platform(60),
+                     "gemini": _prt_platform(30), "copilot": _prt_platform(None, tracked=0, shown=0),
+                     "perplexity": _prt_platform(80)},
+       "prompts": [{"prompt_id": 1, "prompt": "beste koffiekar", "platforms": {}, "trend": [50, 60]}],
+       "errors": []}
+# Zoals `snapshot_from_row` de kolom projecteert: zonder promptlijst.
+PRT_PROJECTED = {"state": "ok", "totals": PRT["totals"], "platforms": PRT["platforms"]}
+
+
 def snapshot(**kw):
     base = dict(
         id=str(uuid.uuid4()), customer_id="c1", phase=1, status="completed", period=None,
@@ -172,7 +190,8 @@ class ExtractorTest(unittest.TestCase):
         self.assertEqual((values["ai_checks_ok"], values["ai_checks_warning"], values["ai_checks_error"]), (1, 1, 1))
         self.assertEqual(values["domain_rating"], 40)
         self.assertEqual(analytics.scan_sources(s),
-                         {"ahrefs": "reused", "search_console": "ok", "bing": "ok", "cwv": "not_measured"})
+                         {"ahrefs": "reused", "search_console": "ok", "bing": "ok",
+                          "proranktracker": "not_measured", "cwv": "not_measured"})
 
         s1 = snapshot(phase=1, ahrefs=AHREFS, search_console=GSC)
         self.assertIsNone(extract_metrics(s1)["gsc_clicks"])  # fase 1 meet geen GSC
@@ -182,13 +201,47 @@ class ExtractorTest(unittest.TestCase):
         bare = snapshot(phase=4, period="2026-Q4", bing_webmaster={"state": "site_not_linked"})
         self.assertEqual(analytics.scan_sources(bare),
                          {"ahrefs": "not_connected", "search_console": "not_connected",
-                          "bing": "not_connected", "cwv": "ok"})
+                          "bing": "not_connected", "proranktracker": "not_measured", "cwv": "ok"})
         self.assertIsNone(extract_metrics(bare)["bing_clicks"])
         broken = snapshot(phase=4, period="2026-Q4", bing_webmaster={"state": "token_expired"},
                           search_console={"property": "x", "totals": None, "errors": ["fout"]},
-                          ahrefs={"domain": {}, "errors": ["unauthorized"]})
+                          ahrefs={"domain": {}, "errors": ["unauthorized"]},
+                          proranktracker={"state": "error", "totals": None, "platforms": None})
         self.assertEqual({k: v for k, v in analytics.scan_sources(broken).items() if k != "cwv"},
-                         {"ahrefs": "error", "search_console": "error", "bing": "error"})
+                         {"ahrefs": "error", "search_console": "error", "bing": "error",
+                          "proranktracker": "error"})
+
+    def test_proranktracker_metrics(self):
+        prt_keys = {k for k, m in analytics.METRICS.items() if m.group == "prt"}
+        platforms = ("aio", "aim", "chatgpt", "gemini", "copilot", "perplexity")
+        self.assertEqual(prt_keys, {"prt_visibility", "prt_appearances", "prt_mentions", "prt_links",
+                                    "prt_prompts"} | {f"prt_visibility_{p}" for p in platforms})
+        self.assertTrue(all(analytics.METRICS[k].phases == (1, 4) for k in prt_keys))
+        self.assertIsNone(analytics.METRICS["prt_prompts"].higher_is_better)
+        self.assertEqual(analytics.METRICS["prt_visibility_chatgpt"].label, "AI-zichtbaarheid ChatGPT")
+        self.assertEqual(analytics.METRICS["prt_visibility"].as_dict()["group_label"],
+                         "AI-zichtbaarheid (ProRankTracker)")
+
+        for phase, period in ((1, None), (4, "2026-Q4")):
+            s = snapshot(phase=phase, period=period, proranktracker=PRT_PROJECTED)
+            values = extract_metrics(s)
+            self.assertEqual(values["prt_visibility"], 58.3)
+            self.assertEqual((values["prt_appearances"], values["prt_mentions"], values["prt_links"],
+                              values["prt_prompts"]), (40, 25, 12, 20))
+            self.assertEqual(values["prt_visibility_aim"], 45.5)
+            self.assertIsNone(values["prt_visibility_copilot"])  # geen getrackte prompts: None, niet 0
+            self.assertEqual(analytics.scan_sources(s)["proranktracker"], "ok")
+
+        for state in ("not_configured", "not_tracked"):
+            s = snapshot(proranktracker={"state": state, "totals": None, "platforms": None})
+            self.assertEqual(analytics.scan_sources(s)["proranktracker"], "not_connected")
+            self.assertTrue(all(extract_metrics(s)[k] is None for k in prt_keys))
+
+        old = snapshot()  # scan van vóór de koppeling
+        self.assertEqual(analytics.scan_sources(old)["proranktracker"], "not_measured")
+        self.assertTrue(all(extract_metrics(old)[k] is None for k in prt_keys))
+        # Fase 2 hoort niet op de tijdlijn, ook niet met een snapshot.
+        self.assertIsNone(extract_metrics(snapshot(phase=2, proranktracker=PRT_PROJECTED))["prt_visibility"])
 
     def test_is_primary_per_phase_and_period(self):
         q4_old = snapshot(phase=4, period="2026-Q4", created_at=NOW - timedelta(days=3))
@@ -265,7 +318,7 @@ class TrendEndpointTest(_DbTest):
         q3 = self.scan(cid, phase=4, period="2026-Q3", at=datetime(2026, 9, 1, tzinfo=timezone.utc),
                        summary_stats=stats({"title_missing": 2, "thin_content": 2, "c4_ai_scan": 1}, cwv_measured=0),
                        ai_checks=AI_LATER, ahrefs={**AHREFS, "reused_from": p1}, search_console=GSC,
-                       bing_webmaster=BING)
+                       bing_webmaster=BING, proranktracker=PRT)
         q4a = self.scan(cid, phase=4, period="2026-Q4", at=datetime(2026, 10, 5, tzinfo=timezone.utc),
                         summary_stats=stats({"title_missing": 1}, ruleset=2, cwv_measured=0))
         q4b = self.scan(cid, phase=4, period="2026-Q4", at=datetime(2026, 11, 5, tzinfo=timezone.utc),
@@ -304,8 +357,17 @@ class TrendEndpointTest(_DbTest):
         self.assertEqual(second["ai_score"], 100)
         self.assertEqual(second["domain_rating"], 40)
         self.assertEqual(points[1]["sources"],
-                         {"ahrefs": "reused", "search_console": "ok", "bing": "ok", "cwv": "not_measured"})
+                         {"ahrefs": "reused", "search_console": "ok", "bing": "ok",
+                          "proranktracker": "ok", "cwv": "not_measured"})
         self.assertEqual(points[2]["sources"]["ahrefs"], "not_connected")
+        # ProRankTracker via JSON-subpaden (state, totals, platforms); oude scans: niet gemeten
+        self.assertEqual(second["prt_visibility"], 58.3)
+        self.assertEqual(second["prt_visibility_perplexity"], 80)
+        self.assertIsNone(second["prt_visibility_copilot"])
+        self.assertIsNone(first["prt_visibility"])
+        self.assertEqual(points[0]["sources"]["proranktracker"], "not_measured")
+        projected = analytics.load_snapshots(self.db, LaunchScan.id == q3)[0].proranktracker
+        self.assertEqual(projected, PRT_PROJECTED)  # zonder promptlijst
 
         r = self.client.get(f"/api/launch-checklist/analytics/customers/{cid}/trend",
                             params={"start": "2026-09-01", "end": "2026-10-31"})

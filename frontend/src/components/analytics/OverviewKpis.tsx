@@ -14,9 +14,10 @@ const MEDIAN_TILES = [
   { key: "ai_score", label: "Mediaan AI-score" },
   { key: "issues_comparable", label: "Mediaan actiepunten" },
   { key: "domain_rating", label: "Mediaan Domain Rating" },
+  { key: "prt_visibility", label: "Mediaan AI-zichtbaarheid" },
 ] as const
 
-/** KPI-tegels uit de benchmark: hoeveel klanten een scan hebben en de mediaan van drie kerncijfers. */
+/** KPI-tegels uit de benchmark: hoeveel klanten een scan hebben en de mediaan van vier kerncijfers. */
 export function OverviewKpis() {
   const { data, error } = useRequest<BenchmarkResponse>("benchmark", (signal) => fetchBenchmark({ signal }))
 
@@ -27,7 +28,7 @@ export function OverviewKpis() {
 
   return (
     <div className="space-y-2" aria-busy={!data}>
-      <StatGrid className="grid-cols-2 lg:grid-cols-4">
+      <StatGrid className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <CompactStat
           label="Klanten met een scan"
           value={withScan ?? "…"}

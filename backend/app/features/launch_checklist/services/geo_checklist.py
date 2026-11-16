@@ -64,6 +64,7 @@ _ITEMS: list[ChecklistItem] = [
     ChecklistItem("schema_org_nap", "schema", "NAP in Organization-markup (naam, adres, telefoon, KvK, openingstijden)", priority="hoog"),
     ChecklistItem("schema_breadcrumb", "schema", "BreadcrumbList (websitebreed)"),
     ChecklistItem("schema_service", "schema", "Service op dienstenpagina's"),
+    ChecklistItem("schema_service_local", "schema", "Service met areaServed op landingspagina's"),
     ChecklistItem("schema_product", "schema", "Product op productpagina's"),
     ChecklistItem("schema_article", "schema", "BlogPosting / Article op blogs"),
     ChecklistItem("schema_person", "schema", "Person op blogs en/of over ons"),

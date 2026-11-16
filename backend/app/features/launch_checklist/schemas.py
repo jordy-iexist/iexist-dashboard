@@ -49,8 +49,60 @@ class LaunchScanDetail(LaunchScanItem):
     ai_checks: Any = None
     # Ahrefs-snapshot: {target, country, fetched_at, reused_from, units, domain, errors, ...}
     ahrefs: Any = None
+    # ProRankTracker-snapshot (fase 1, 2 en 4): {state, message, fetched_at, url_id, url,
+    # totals, platforms, prompts, errors}; None voor scans van vóór de koppeling.
+    proranktracker: Any = None
     ai_summary: str | None = None
     agent_trace: Any = None
+
+
+# --- ProRankTracker: promptdetail (live) ----------------------------------------------
+
+PrtPlatform = Literal["aio", "aim", "chatgpt", "gemini", "copilot", "perplexity"]
+
+
+class PrtMentionItem(BaseModel):
+    brand: str
+    sentence: str
+
+
+class PrtMentions(BaseModel):
+    rank: int | None = None
+    total: int = 0
+    counts: dict[str, int] = Field(default_factory=dict)
+    items: list[PrtMentionItem] = Field(default_factory=list)
+
+
+class PrtLinkItem(BaseModel):
+    url: str
+    title: str | None = None
+    rank: int | None = None
+    kind: Literal["link", "citation"] | None = None
+    checked_at: str | None = None
+    is_own: bool = False
+
+
+class PrtLinks(BaseModel):
+    rank: int | None = None
+    total: int = 0
+    items: list[PrtLinkItem] = Field(default_factory=list)
+
+
+class PrtPlatformDetail(BaseModel):
+    platform: PrtPlatform
+    label: str
+    tracked: bool
+    mentions: PrtMentions
+    links: PrtLinks
+    answer_text: str | None = None
+
+
+class PrtPromptDetail(BaseModel):
+    prompt_id: int
+    prompt: str
+    url: str | None = None
+    fetched_at: str
+    platforms: list[PrtPlatformDetail]
 
 
 class LaunchScanListResponse(BaseModel):

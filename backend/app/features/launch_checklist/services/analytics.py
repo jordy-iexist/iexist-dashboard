@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import LaunchScan, LaunchScanPage
 from app.features.launch_checklist.services.issues import ISSUE_TYPES, issue_type_since
+from app.features.launch_checklist.services.prt_enrich import DETAIL_ORDER as PRT_PLATFORMS
+from app.features.launch_checklist.services.prt_enrich import PLATFORM_LABELS as PRT_PLATFORM_LABELS
 from app.features.launch_checklist.services.quarterly_checklist import _TZ, period_label, period_of
 from app.features.launch_checklist.services.quarterly_compare import (
     compare_ahrefs,
@@ -45,6 +47,7 @@ GROUP_LABELS: dict[str, str] = {
     "ahrefs": "Ahrefs",
     "gsc": "Search Console",
     "bing": "Bing",
+    "prt": "AI-zichtbaarheid (ProRankTracker)",
     "checklist": "Checklist-voortgang",
 }
 
@@ -85,6 +88,8 @@ class ScanSnapshot:
     search_console: dict[str, Any] | None
     # {"state", "period", "totals", "in_index"} of None
     bing_webmaster: dict[str, Any] | None
+    # {"state", "totals", "platforms"} of None (scans van vóór de ProRankTracker-koppeling)
+    proranktracker: dict[str, Any] | None = None
 
 
 # Projectie: JSON-subpaden in plaats van hele kolommen (GSC-queries/pagina's en
@@ -117,6 +122,10 @@ SNAPSHOT_COLUMNS = (
     LaunchScan.bing_webmaster["period"].label("bing_period"),
     LaunchScan.bing_webmaster["totals"].label("bing_totals"),
     LaunchScan.bing_webmaster[("crawl", "in_index")].label("bing_in_index"),
+    # Niet de promptlijst: alleen de cijfers die op een tijdlijn passen.
+    LaunchScan.proranktracker["state"].label("prt_state"),
+    LaunchScan.proranktracker["totals"].label("prt_totals"),
+    LaunchScan.proranktracker["platforms"].label("prt_platforms"),
 )
 
 
@@ -156,6 +165,9 @@ def snapshot_from_row(row: Any) -> ScanSnapshot:
             "totals": row.bing_totals,
             "in_index": row.bing_in_index,
         }
+    prt = None
+    if row.prt_state is not None:
+        prt = {"state": row.prt_state, "totals": row.prt_totals, "platforms": row.prt_platforms}
     return ScanSnapshot(
         id=row.id,
         customer_id=row.customer_website_id,
@@ -169,6 +181,7 @@ def snapshot_from_row(row: Any) -> ScanSnapshot:
         ahrefs=ahrefs,
         search_console=search_console,
         bing_webmaster=bing,
+        proranktracker=prt,
     )
 
 
@@ -293,6 +306,7 @@ def ruleset_floor(snapshots: Iterable[ScanSnapshot]) -> int | None:
 # --- bronnen -------------------------------------------------------------------
 
 _BING_NOT_CONNECTED = {"not_configured", "not_connected", "site_not_linked", "site_not_verified"}
+_PRT_NOT_CONNECTED = {"not_configured", "not_tracked"}
 
 
 def scan_sources(snapshot: ScanSnapshot) -> dict[str, str]:
@@ -325,9 +339,25 @@ def scan_sources(snapshot: ScanSnapshot) -> dict[str, str]:
     else:
         bing_state = "error"
 
+    prt = snapshot.proranktracker
+    if prt is None:
+        prt_state = "not_measured"  # scan van vóór de koppeling
+    elif prt.get("state") == "ok":
+        prt_state = "ok"
+    elif prt.get("state") in _PRT_NOT_CONNECTED:
+        prt_state = "not_connected"
+    else:
+        prt_state = "error"
+
     cwv = (snapshot.summary_stats or {}).get("cwv") or {}
     cwv_state = "ok" if (cwv.get("measured") or 0) > 0 else "not_measured"
-    return {"ahrefs": ahrefs_state, "search_console": gsc_state, "bing": bing_state, "cwv": cwv_state}
+    return {
+        "ahrefs": ahrefs_state,
+        "search_console": gsc_state,
+        "bing": bing_state,
+        "proranktracker": prt_state,
+        "cwv": cwv_state,
+    }
 
 
 # --- metrics --------------------------------------------------------------------
@@ -431,6 +461,19 @@ def _bing_total(key: str) -> Getter:
     return lambda s: _num(((_bing(s) or {}).get("totals") or {}).get(key))
 
 
+def _prt(s: ScanSnapshot) -> dict[str, Any] | None:
+    prt = s.proranktracker
+    return prt if prt is not None and prt.get("state") == "ok" else None
+
+
+def _prt_total(key: str) -> Getter:
+    return lambda s: _num(((_prt(s) or {}).get("totals") or {}).get(key))
+
+
+def _prt_platform_visibility(platform: str) -> Getter:
+    return lambda s: _num((((_prt(s) or {}).get("platforms") or {}).get(platform) or {}).get("visibility"))
+
+
 _P14 = (1, 4)
 
 
@@ -489,6 +532,20 @@ def _metric_list() -> list[MetricDef]:
         MetricDef("bing_impressions", "Vertoningen (Bing)", "bing", "count", True, (4,), _bing_total("impressions")),
         MetricDef("bing_in_index", "Pagina's in Bing-index", "bing", "count", True, (4,),
                   lambda s: _num((_bing(s) or {}).get("in_index"))),
+        MetricDef("prt_visibility", "AI-zichtbaarheid", "prt", "score", True, _P14, _prt_total("visibility")),
+        MetricDef("prt_appearances", "Verschijningen in AI-antwoorden", "prt", "count", True, _P14,
+                  _prt_total("appearances")),
+        MetricDef("prt_mentions", "Merkvermeldingen in AI-antwoorden", "prt", "count", True, _P14,
+                  _prt_total("mentions")),
+        MetricDef("prt_links", "Links in AI-antwoorden", "prt", "count", True, _P14, _prt_total("links")),
+        MetricDef("prt_prompts", "Getrackte prompts", "prt", "count", None, _P14, _prt_total("prompts")),
+    ]
+    out += [
+        MetricDef(f"prt_visibility_{platform}", f"AI-zichtbaarheid {PRT_PLATFORM_LABELS[platform]}", "prt",
+                  "score", True, _P14, _prt_platform_visibility(platform))
+        for platform in PRT_PLATFORMS
+    ]
+    out += [
         MetricDef("checklist_geo_pct", "GEO/SEO-checklist (fase 2) afgerond", "checklist", "percent", True, (2,)),
         MetricDef("checklist_content_pct", "Contentchecklist (fase 3) afgerond", "checklist", "percent", True, (3,)),
         MetricDef("checklist_golive_pct", "Livegangchecklist (fase 5) afgerond", "checklist", "percent", True, (5,)),

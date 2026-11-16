@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AiChecksTab } from "@/components/livegang/AiChecksTab"
+import { AiVisibilityTab } from "@/components/livegang/AiVisibilityTab"
 import { ContentWorkspace } from "@/components/livegang/ContentWorkspace"
 import { GeoWorkspace } from "@/components/livegang/GeoWorkspace"
 import { InventoryTab } from "@/components/livegang/InventoryTab"
@@ -41,6 +42,7 @@ const TABS = [
   { key: "inventory", label: "Inventaris" },
   { key: "vitals", label: "Core Web Vitals" },
   { key: "ai", label: "AI-vindbaarheid" },
+  { key: "visibility", label: "AI-zichtbaarheid" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -428,6 +430,7 @@ function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onCh
           {tab === "inventory" && <InventoryTab scanId={scan.id} hasAhrefs={Boolean(scan.ahrefs)} />}
           {tab === "vitals" && <VitalsTab scanId={scan.id} measuring={scan.status === "vitals"} />}
           {tab === "ai" && <AiChecksTab checks={scan.ai_checks} />}
+          {tab === "visibility" && <AiVisibilityTab scanId={scan.id} snapshot={scan.proranktracker} />}
         </>
       )}
     </div>

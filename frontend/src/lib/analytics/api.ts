@@ -18,7 +18,7 @@ export type MetricDef = {
   phases: number[]
 }
 
-export type SourceKey = "ahrefs" | "search_console" | "bing" | "cwv"
+export type SourceKey = "ahrefs" | "search_console" | "bing" | "cwv" | "proranktracker"
 export type SourceStatus = "ok" | "reused" | "not_measured" | "not_connected" | "error"
 
 export type TrendPoint = {
@@ -135,6 +135,7 @@ export const GROUP_SOURCES: Partial<Record<string, SourceKey>> = {
   gsc: "search_console",
   bing: "bing",
   cwv: "cwv",
+  prt: "proranktracker",
 }
 
 export const SOURCE_LABELS: Record<SourceKey, string> = {
@@ -142,6 +143,7 @@ export const SOURCE_LABELS: Record<SourceKey, string> = {
   search_console: "Google Search Console",
   bing: "Bing Webmaster Tools",
   cwv: "Core Web Vitals",
+  proranktracker: "ProRankTracker",
 }
 
 // --- filters in de URL ------------------------------------------------------

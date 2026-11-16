@@ -11,12 +11,14 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.config import settings
 from app.features.launch_checklist.services.geo_extract import all_types
+from app.features.launch_checklist.services.places import _slug, detect_place
 
 logger = logging.getLogger(__name__)
 
 PAGE_TYPES: dict[str, str] = {
     "home": "Homepage",
     "dienst": "Dienstpagina",
+    "landing": "Landingspagina (dienst + plaats)",
     "product": "Productpagina",
     "categorie": "Categoriepagina",
     "blog": "Blog / artikel",
@@ -111,9 +113,59 @@ def classify_by_rules(url: str, *, is_home: bool, signals: dict[str, Any] | None
     return None
 
 
+# Reeksregel: zoveel slugs met dezelfde stam vormen een reeks landingspagina's.
+LANDING_SERIES_MIN = 3
+_LANDING_SUFFIX_MAX_TOKENS = 4
+
+
+def _last_segment(url: str) -> tuple[str, str]:
+    """(bovenliggend pad, laatste segment) in kleine letters."""
+    segments = [s for s in urlparse(url).path.lower().split("/") if s]
+    if not segments:
+        return "", ""
+    return "/".join(segments[:-1]), segments[-1]
+
+
+def find_landing_series(pages: list[Any]) -> list[Any]:
+    """Pagina's die bij een reeks landingspagina's horen (bijv. /website-laten-maken-<plaats>/).
+
+    Een stam telt als reeks wanneer minstens één pagina eindigt op een herkende
+    plaatsnaam (`detect_place`) en er minstens `LANDING_SERIES_MIN` pagina's met
+    dezelfde stam en hetzelfde bovenliggende pad zijn. Zo worden ook kleine
+    plaatsen herkend die niet in de plaatsenlijst staan.
+    """
+    stems: set[tuple[str, str]] = set()
+    for page in pages:
+        place = detect_place(page)
+        if not place:
+            continue
+        parent, segment = _last_segment(page.url)
+        suffix = f"-{_slug(place)}"
+        if segment.endswith(suffix) and len(segment) > len(suffix):
+            stems.add((parent, segment[: -len(suffix)]))
+    if not stems:
+        return []
+
+    members: dict[tuple[str, str], list[Any]] = {stem: [] for stem in stems}
+    for page in pages:
+        parent, segment = _last_segment(page.url)
+        for stem_parent, stem in stems:
+            if parent != stem_parent or not segment.startswith(stem + "-"):
+                continue
+            rest = segment[len(stem) + 1:]
+            if rest and len(rest.split("-")) <= _LANDING_SUFFIX_MAX_TOKENS:
+                members[(stem_parent, stem)].append(page)
+    out: dict[int, Any] = {}
+    for group in members.values():
+        if len(group) >= LANDING_SERIES_MIN:
+            out.update((id(page), page) for page in group)
+    return list(out.values())
+
+
 _LLM_INSTRUCTIONS = """Je classificeert pagina's van een Nederlandse bedrijfswebsite.
-Kies per pagina precies één type uit: dienst, product, categorie, blog, vacature, over_ons, contact, overzicht, juridisch, overig.
-- dienst: pagina over één dienst/behandeling/oplossing die het bedrijf aanbiedt.
+Kies per pagina precies één type uit: dienst, landing, product, categorie, blog, vacature, over_ons, contact, overzicht, juridisch, overig.
+- dienst: algemene pagina over één dienst/behandeling/oplossing die het bedrijf aanbiedt, niet gericht op één plaats.
+- landing: dienst gericht op één plaats, regio of provincie (bijv. /website-laten-maken-almere/, "Schilder in Ede").
 - product: pagina over één product dat te koop is.
 - categorie: overzicht van producten in een categorie.
 - blog: artikel, nieuwsbericht, kennisbankartikel of case.
@@ -122,7 +174,7 @@ Kies per pagina precies één type uit: dienst, product, categorie, blog, vacatu
 - overzicht: overzicht van meerdere diensten/blogs/vacatures.
 Antwoord ALLEEN met een JSON-object {"<id>": "<type>", ...}."""
 
-_LLM_ALLOWED = {"dienst", "product", "categorie", "blog", "vacature", "over_ons", "contact", "overzicht", "juridisch", "overig"}
+_LLM_ALLOWED = {"dienst", "landing", "product", "categorie", "blog", "vacature", "over_ons", "contact", "overzicht", "juridisch", "overig"}
 
 
 def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str, str]:

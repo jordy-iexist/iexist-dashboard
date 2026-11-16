@@ -23,6 +23,7 @@ from app.features.launch_checklist.services.page_types import (
     PAGE_TYPES,
     classify_by_rules,
     classify_with_llm,
+    find_landing_series,
 )
 
 
@@ -69,6 +70,19 @@ def apply_page_types(
             p.page_type, p.page_type_source = "overig", "rule"
             if p.indexable is True:
                 unresolved.append(p)
+
+    # Reeksen als /website-laten-maken-<plaats>/ → landingspagina, ook als de AI
+    # ze eerder als dienst labelde. Handmatige en specifieke regeltypes blijven staan.
+    candidates = [
+        p for p in pages
+        if p.page_type_source != "manual"
+        and (p.page_type_source == "ai" or p.page_type in {"dienst", "overig"})
+    ]
+    series = find_landing_series(candidates)
+    for p in series:
+        p.page_type, p.page_type_source = "landing", "rule"
+    series_ids = {id(p) for p in series}
+    unresolved = [p for p in unresolved if id(p) not in series_ids]
 
     if use_llm and unresolved and user_id:
         items = [

@@ -120,14 +120,18 @@ export function sourceNotes(points: TrendPoint[], sources: SourceKey[], labels: 
       switch (status) {
         case "not_connected":
           notes.push(
-            `${name} was bij ${at} niet gekoppeld aan deze klant, dus daar ontbreekt een punt. Koppel de bron bij de klant om het vanaf de volgende scan te meten.`
+            source === "proranktracker"
+              ? `Deze site werd bij ${at} niet getrackt in ProRankTracker (of het API-token ontbrak), dus daar ontbreekt een punt. Voeg de URL en prompts toe in ProRankTracker om het vanaf de volgende scan te meten.`
+              : `${name} was bij ${at} niet gekoppeld aan deze klant, dus daar ontbreekt een punt. Koppel de bron bij de klant om het vanaf de volgende scan te meten.`
           )
           break
         case "not_measured":
           notes.push(
             source === "cwv"
               ? `Core Web Vitals worden alleen bij de nulmeting gemeten; bij ${at} is daarom niets gemeten.`
-              : `${name} wordt in de fase van ${at} niet gemeten, dus daar ontbreekt een punt.`
+              : source === "proranktracker"
+                ? `De scans van ${at} zijn van vóór de ProRankTracker-koppeling, dus daar ontbreekt een punt.`
+                : `${name} wordt in de fase van ${at} niet gemeten, dus daar ontbreekt een punt.`
           )
           break
         case "reused":

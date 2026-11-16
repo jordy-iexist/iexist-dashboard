@@ -3,7 +3,7 @@
  * rapport uit deze config. Labels en eenheden komen uit `metrics` in de
  * API-respons; hier staan alleen keys en groepen.
  */
-import { Bot, ClipboardList, Globe, Link2, Search, Wrench, type LucideIcon } from "lucide-react"
+import { Bot, ClipboardList, Globe, Link2, Search, Sparkles, Wrench, type LucideIcon } from "lucide-react"
 
 /** Vaste lijst metric-keys, of alle metrics van één groep (bijv. dynamische categorieën). */
 export type SeriesSpec = string[] | { group: string }
@@ -126,7 +126,8 @@ export const REPORTS: ReportDef[] = [
   {
     slug: "ai-vindbaarheid",
     title: "AI-vindbaarheid",
-    description: "AI-score en de uitkomst van de AI-checks (toegang voor AI-bots, llms.txt, structuur).",
+    description:
+      "Technische AI-gereedheid: AI-score en de uitkomst van de AI-checks (toegang voor AI-bots, llms.txt, structuur).",
     icon: Bot,
     phases: [1, 4],
     kpis: ["ai_score", "ai_checks_ok", "ai_checks_warning", "ai_checks_error"],
@@ -140,6 +141,31 @@ export const REPORTS: ReportDef[] = [
       },
     ],
     table: [{ group: "ai" }],
+  },
+  {
+    slug: "ai-zichtbaarheid",
+    title: "AI-zichtbaarheid",
+    description:
+      "Hoe vaak de site echt getoond, genoemd en gelinkt wordt in ChatGPT, Gemini, Perplexity, Copilot en Google AI (bron: ProRankTracker).",
+    icon: Sparkles,
+    phases: [1, 4],
+    kpis: ["prt_visibility", "prt_appearances", "prt_mentions", "prt_links"],
+    charts: [
+      { title: "AI-zichtbaarheid", description: "Score 0–100 over alle prompts en platformen.", kind: "line", series: ["prt_visibility"], yDomain: [0, 100] },
+      { title: "Google AI", description: "AI Overviews en AI Mode.", kind: "line", series: ["prt_visibility_aio", "prt_visibility_aim"], yDomain: [0, 100] },
+      {
+        title: "Chatbots",
+        kind: "line",
+        series: ["prt_visibility_chatgpt", "prt_visibility_gemini", "prt_visibility_copilot", "prt_visibility_perplexity"],
+        yDomain: [0, 100],
+      },
+      { title: "Vermeldingen en links", kind: "line", series: ["prt_mentions", "prt_links"] },
+    ],
+    table: [{ group: "prt" }],
+    notes: [
+      "Prompts en URL's worden in ProRankTracker zelf beheerd; een site die daar niet getrackt wordt, heeft hier geen punten.",
+      "Een platform zonder getrackte prompts heeft geen score (geen 0).",
+    ],
   },
   {
     slug: "techniek",

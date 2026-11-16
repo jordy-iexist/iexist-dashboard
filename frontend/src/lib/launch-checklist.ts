@@ -169,8 +169,106 @@ export function formatCount(value: number | null | undefined) {
 export type LaunchScanDetail = LaunchScan & {
   ai_checks: AiChecks | null
   ahrefs?: AhrefsScan | null
+  /** AI-zichtbaarheid uit ProRankTracker; ontbreekt bij scans van vóór de koppeling. */
+  proranktracker?: ProRankTrackerSnapshot | null
   ai_summary: string | null
   agent_trace: AgentTrace | null
+}
+
+// --- ProRankTracker: AI-zichtbaarheid ------------------------------------------
+
+export type PrtPlatform = "aio" | "aim" | "chatgpt" | "copilot" | "gemini" | "perplexity"
+
+/** Platformen in weergavevolgorde: eerst Google AI, dan de chatbots. */
+export const PRT_PLATFORMS: { key: PrtPlatform; label: string }[] = [
+  { key: "aio", label: "AI Overviews" },
+  { key: "aim", label: "AI Mode" },
+  { key: "chatgpt", label: "ChatGPT" },
+  { key: "gemini", label: "Gemini" },
+  { key: "copilot", label: "Copilot" },
+  { key: "perplexity", label: "Perplexity" },
+]
+
+export const PRT_PLATFORM_LABELS = Object.fromEntries(PRT_PLATFORMS.map((p) => [p.key, p.label])) as Record<
+  PrtPlatform,
+  string
+>
+
+export type PrtTotals = {
+  /** Score 0–100. */
+  visibility: number | null
+  appearances: number
+  mentions: number
+  links: number
+  links_avg: number | null
+  prompts: number
+}
+
+export type PrtPlatformStats = {
+  /** Score 0–100; `null` als er op dit platform geen prompt getrackt wordt. */
+  visibility: number | null
+  appearances: number
+  mentions: number
+  links: number
+  links_avg: number | null
+  prompts_tracked: number
+  prompts_shown: number
+}
+
+export type PrtPromptStatus = "shown" | "not_shown" | "not_added"
+
+export type PrtPrompt = {
+  prompt_id: number
+  prompt: string
+  location: string | null
+  lang: string | null
+  visibility: number | null
+  appearances: number
+  mentions: number
+  links: number
+  platforms: Record<PrtPlatform, { status: PrtPromptStatus; count: number }>
+  trend: number[]
+}
+
+export type ProRankTrackerSnapshot = {
+  state: "ok" | "not_configured" | "not_tracked" | "error"
+  message: string | null
+  /** ISO-8601. */
+  fetched_at: string | null
+  url_id: number | null
+  url: string | null
+  totals: PrtTotals | null
+  platforms: Record<PrtPlatform, PrtPlatformStats> | null
+  prompts: PrtPrompt[]
+  errors: string[]
+}
+
+export type PrtLink = {
+  url: string
+  title: string | null
+  rank: number | null
+  kind: "link" | "citation" | null
+  checked_at: string | null
+  /** Link naar de eigen site van de klant. */
+  is_own: boolean
+}
+
+export type PrtPlatformDetail = {
+  platform: PrtPlatform
+  label: string
+  tracked: boolean
+  mentions: { rank: number | null; total: number; counts: Record<string, number>; items: { brand: string; sentence: string }[] }
+  links: { rank: number | null; total: number; items: PrtLink[] }
+  answer_text: string | null
+}
+
+/** Live opgehaald antwoord van één prompt (altijd zes platformen, in weergavevolgorde). */
+export type PrtPromptDetail = {
+  prompt_id: number
+  prompt: string
+  url: string | null
+  fetched_at: string
+  platforms: PrtPlatformDetail[]
 }
 
 export type LaunchCustomer = {
@@ -580,6 +678,7 @@ export function updateSuggestionStatus(id: string, status: SuggestionStatus) {
 export const PAGE_TYPE_LABELS: Record<string, string> = {
   home: "Homepage",
   dienst: "Dienstpagina",
+  landing: "Landingspagina",
   product: "Productpagina",
   categorie: "Categoriepagina",
   blog: "Blog / artikel",
@@ -596,6 +695,7 @@ export const PAGE_TYPE_LABELS: Record<string, string> = {
 export const EXPECTED_SCHEMA: Record<string, string[]> = {
   home: ["Organization", "WebSite"],
   dienst: ["Service", "BreadcrumbList"],
+  landing: ["Service", "BreadcrumbList"],
   product: ["Product", "Brand", "BreadcrumbList"],
   categorie: ["ItemList", "BreadcrumbList"],
   blog: ["BlogPosting|Article", "Person", "BreadcrumbList"],

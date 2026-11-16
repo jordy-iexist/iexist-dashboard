@@ -7,6 +7,7 @@ paginatype-correctie).
 """
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -235,6 +236,58 @@ def _coverage_result(
               _urls(missing), details)
 
 
+def _walk_nodes(value: Any, depth: int = 0) -> Iterable[dict[str, Any]]:
+    """Alle JSON-LD-nodes, ook geneste (bijv. WebPage.mainEntity → Service)."""
+    if depth > 8:
+        return
+    if isinstance(value, list):
+        for v in value:
+            yield from _walk_nodes(v, depth + 1)
+    elif isinstance(value, dict):
+        if types_of(value):
+            yield value
+        for v in value.values():
+            if isinstance(v, (dict, list)):
+                yield from _walk_nodes(v, depth + 1)
+
+
+def _node_key(node: dict[str, Any]) -> str:
+    return json.dumps(node, sort_keys=True, default=str)
+
+
+def _local_service_result(pages: list[LaunchScanPage], home: LaunchScanPage | None) -> dict[str, Any]:
+    """Landingspagina's: Service (of een paginaspecifieke LocalBusiness) met areaServed."""
+    if not pages:
+        return _r("nvt", "Geen landingspagina's gevonden.")
+    # Een sitebrede Organization/LocalBusiness (ook op de homepage) zegt niets over deze plaats.
+    site_wide = {_node_key(n) for n in _walk_nodes(home.jsonld or [])} if home is not None else set()
+    ok, no_area, missing = [], [], []
+    for p in pages:
+        nodes = list(_walk_nodes(p.jsonld or []))
+        services = [n for n in nodes if "Service" in types_of(n)]
+        local_orgs = [n for n in nodes if any(is_org_type(t) for t in types_of(n)) and _node_key(n) not in site_wide]
+        if any(n.get("areaServed") for n in services + local_orgs):
+            ok.append(p)
+        elif services:
+            no_area.append(p)
+        else:
+            missing.append(p)
+    total = len(pages)
+    pct = round(100 * len(ok) / total)
+    details = {"pages": total, "with_area_served": len(ok), "service_without_area": len(no_area),
+               "without_service": len(missing), "coverage": pct}
+    if not no_area and not missing:
+        return _r("ok", f"Alle {total} landingspagina's hebben Service-schema met areaServed.", details=details)
+    if not missing:
+        return _r("warning", f"{len(no_area)} van de {total} landingspagina's hebben Service-schema maar geen areaServed.",
+                  _urls(no_area), details)
+    status = "warning" if pct >= 50 else "error"
+    message = f"{len(missing)} van de {total} landingspagina's missen Service-schema met areaServed ({pct}% dekking)."
+    if no_area:
+        message += f" Nog {len(no_area)} hebben Service zonder areaServed."
+    return _r(status, message, _urls(missing + no_area), details)
+
+
 def evaluate_checklist(
     *,
     base_url: str,
@@ -325,6 +378,7 @@ def evaluate_checklist(
             return [p for p in fetched if p.indexable is True and p.page_type in types]
 
         out["schema_service"] = _coverage_result(typed("dienst"), {"Service"}, "dienstpagina's", "Service-schema")
+        out["schema_service_local"] = _local_service_result(typed("landing"), home)
         out["schema_product"] = _coverage_result(typed("product"), PRODUCT_TYPES, "productpagina's", "Product-schema")
         out["schema_article"] = _coverage_result(typed("blog"), ARTICLE_TYPES, "blogpagina's", "BlogPosting/Article-schema")
         person_pages = typed("blog", "over_ons")

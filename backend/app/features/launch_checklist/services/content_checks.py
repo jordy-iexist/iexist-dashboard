@@ -21,6 +21,7 @@ from app.features.launch_checklist.services.content_checklist import (
     PAGE_ITEM_KEYS,
 )
 from app.features.launch_checklist.services.discovery import url_key
+from app.features.launch_checklist.services.places import detect_place  # noqa: F401 (her-export)
 from app.features.launch_checklist.services.pixel_width import (
     DESCRIPTION_MAX_CHARS,
     DESCRIPTION_MAX_PX,
@@ -41,16 +42,16 @@ REDIRECTS_KEY = "c3_redirects_404"
 META_FIXED_KEY = "c3_meta_fixed"
 
 # Paginatypes (fase 2) waarop inhoudelijke punten van toepassing zijn.
-CONTENT_TYPES = {"home", "dienst", "product", "categorie", "blog", "over_ons", "overig"}
+CONTENT_TYPES = {"home", "dienst", "landing", "product", "categorie", "blog", "over_ons", "overig"}
 APPLIES: dict[str, set[str]] = {
     "c3_keywords": CONTENT_TYPES,
     "c3_headings": CONTENT_TYPES | {"contact", "overzicht", "vacature"},
-    "c3_scannable": {"dienst", "product", "categorie", "blog", "overig"},
-    "c3_answer_first": {"dienst", "product", "categorie", "blog", "overig"},
-    "c3_faq": {"dienst", "product", "categorie"},
-    "c3_eeat": {"home", "dienst", "product", "over_ons", "blog"},
-    "c3_conversion": {"home", "dienst", "product", "categorie", "blog"},
-    "c3_internal_links": {"home", "dienst", "product", "categorie", "blog", "overig"},
+    "c3_scannable": {"dienst", "landing", "product", "categorie", "blog", "overig"},
+    "c3_answer_first": {"dienst", "landing", "product", "categorie", "blog", "overig"},
+    "c3_faq": {"dienst", "landing", "product", "categorie"},
+    "c3_eeat": {"home", "dienst", "landing", "product", "over_ons", "blog"},
+    "c3_conversion": {"home", "dienst", "landing", "product", "categorie", "blog"},
+    "c3_internal_links": {"home", "dienst", "landing", "product", "categorie", "blog", "overig"},
 }
 # Fase-1 issue-types die `c3_meta_fixed` opnieuw controleert.
 F1_META_TYPES = (
@@ -70,31 +71,6 @@ _GENERIC_FILENAME_RE = re.compile(
     r"adobestock|pexels|unsplash|depositphotos|design|canva|banner|header|slide)[-_ ]?[\d\-_ ()]*$",
     re.IGNORECASE,
 )
-_PLACE_RE = re.compile(
-    r"\b(?:in|te|regio|omgeving|rond)\s+((?:Den |De |Het |'s-|Sint |Nieuw |Oud )?[A-Z][\wÀ-ÿ'\-]{2,})"
-)
-_NOT_PLACES = {"nederland", "belgië", "belgie", "europa", "huis", "nl"}
-# Grotere Nederlandse plaatsen: herkent locatiepagina's als /seo-bureau-apeldoorn/
-# ook zonder "in <plaats>" in de titel. Niet uitputtend; de regex hierboven vangt de rest.
-_PLACES = (
-    "Alkmaar Almelo Almere Alphen aan den Rijn Amersfoort Amstelveen Amsterdam Apeldoorn Arnhem Assen "
-    "Barneveld Bergen op Zoom Breda Bussum Capelle aan den IJssel Delft Den Bosch Den Haag Den Helder "
-    "Deventer Doetinchem Dordrecht Drachten Dronten Ede Eindhoven Elburg Emmen Enschede Epe Ermelo "
-    "Gorinchem Gouda Groningen Haarlem Haarlemmermeer Harderwijk Heerenveen Heerhugowaard Heerlen "
-    "Helmond Hengelo Hilversum Hoofddorp Hoogeveen Hoorn Houten Kampen Katwijk Leeuwarden Leiden "
-    "Leidschendam Lelystad Maastricht Meppel Middelburg Nieuwegein Nijkerk Nijmegen Nunspeet Oosterhout "
-    "Oss Purmerend Putten Roermond Roosendaal Rotterdam Schiedam Sittard Soest Spijkenisse Tiel Tilburg "
-    "Uden Utrecht Veenendaal Veldhoven Velsen Venlo Vlaardingen Vlissingen Wageningen Weert Woerden "
-    "Zaandam Zaanstad Zeewolde Zeist Zoetermeer Zutphen Zwolle"
-)
-_KNOWN_PLACES: dict[str, str] = {}
-_multi = ("Alphen aan den Rijn", "Bergen op Zoom", "Capelle aan den IJssel", "Den Bosch", "Den Haag", "Den Helder")
-_rest = _PLACES
-for _name in _multi:
-    _rest = _rest.replace(_name, "")
-    _KNOWN_PLACES[re.sub(r"[^a-z]+", "-", _name.lower())] = _name
-for _name in _rest.split():
-    _KNOWN_PLACES[_name.lower()] = _name
 _REGION_RE = re.compile(r"\b(regio|omgeving|werkgebied|omstreken|omliggende)\b", re.IGNORECASE)
 _FAQ_PATH_RE = re.compile(r"faq|veelgestelde|veel-gestelde", re.IGNORECASE)
 _CASES_PATH_RE = re.compile(r"case|project|referentie|portfolio|klantverhal|ervaring", re.IGNORECASE)
@@ -114,38 +90,12 @@ def _words(text: str | None) -> int:
     return len(_WORD_RE.findall(text or ""))
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower().replace("'", "")).strip("-")
-
-
 def _norm(text: str | None) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
 def is_bad(check: Check | None) -> bool:
     return bool(check) and check.get("status") in {"error", "warning"}
-
-
-def detect_place(page: Any) -> str | None:
-    """Plaatsnaam van een locatiepagina: staat in titel/H1 én in de URL."""
-    if (page.page_type or "") in {"home", "blog", "juridisch", "contact", "archief", "vacature"}:
-        return None
-    path = urlparse(page.url).path.lower()
-    h1 = " ".join((page.signals or {}).get("h1") or [])
-    for source in (h1, page.title or ""):
-        for match in _PLACE_RE.finditer(source):
-            place = match.group(1).strip()
-            if place.lower() in _NOT_PLACES:
-                continue
-            if _slug(place) and _slug(place) in path:
-                return place
-    # Bekende plaatsnaam als los woord in de URL én in titel/H1.
-    padded = "-" + re.sub(r"[^a-z0-9]+", "-", path).strip("-") + "-"
-    haystack = f"{h1} {page.title or ''}".lower()
-    for slug, name in _KNOWN_PLACES.items():
-        if f"-{slug}-" in padded and name.lower() in haystack:
-            return name
-    return None
 
 
 def generic_filename(filename: str) -> bool:
@@ -444,7 +394,7 @@ def evaluate_pages(
     dup_descriptions = {d for d, n in descriptions.items() if n > 1}
 
     by_key = {url_key(p.url): p for p in pages}
-    service_keys = {k for k, p in by_key.items() if (p.page_type or "") in {"dienst", "product"}}
+    service_keys = {k for k, p in by_key.items() if (p.page_type or "") in {"dienst", "landing", "product"}}
     inlinks: dict[str, set[str]] = defaultdict(set)
     links_to_service: set[str] = set()
     for page in pages:
@@ -551,9 +501,9 @@ def _gap_rule(key: str, pages: list[Any]) -> Check | None:
             return _r("warning", "Niet gevonden: " + ", ".join(missing) + ".")
     if key == "c3_landing_pages":
         places = sorted({pl for pl in (detect_place(p) for p in pages) if pl})
-        if not types.get("dienst"):
+        if not types.get("dienst") and not types.get("landing"):
             return _r("warning", "Geen dienstpagina's gevonden.")
-        if not places:
+        if not places and not types.get("landing"):
             return _r("info", f"{types.get('dienst', 0)} dienstpagina's, geen locatiepagina's gevonden.")
     return None
 

@@ -920,6 +920,8 @@ class LaunchScan(Base):
     search_console: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Fase 4: Bing Webmaster-snapshot (index, crawlfouten, sitemaps, klikken).
     bing_webmaster: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Fase 1, 2 en 4: ProRankTracker-snapshot (AI-zichtbaarheid per platform en per prompt).
+    proranktracker: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Fase 4: de ronde (kwartaal) waar de scan bij hoort, bijv. "2026-Q4".
     period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

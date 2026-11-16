@@ -79,7 +79,11 @@ from app.features.launch_checklist.services.quarterly_checklist import period_la
 from app.features.launch_checklist.services.scan_recovery import heartbeat
 from app.features.launch_checklist.services.schema_validate import validate_html
 from app.features.launch_checklist.services.stats import build_summary_stats
-from app.features.launch_checklist.worker.launch_scan import _enrich_with_ahrefs, _record_to_row
+from app.features.launch_checklist.worker.launch_scan import (
+    _enrich_with_ahrefs,
+    _proranktracker_step,
+    _record_to_row,
+)
 from app.services.bing_webmaster.connection import BingSession
 from app.services.search_console import client as gsc_client
 from app.worker.celery_app import celery_app
@@ -484,6 +488,12 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
         if _is_stopped(scan_id):
             return
         _update(scan_id, bing_webmaster=bing_snapshot, warnings=warnings)
+
+        # 3d. ProRankTracker: AI-zichtbaarheid (mentions en links in AI-antwoorden)
+        prt_snapshot = _proranktracker_step(scan_id, base_url, warnings)
+        if _is_stopped(scan_id):
+            return
+        _update(scan_id, proranktracker=prt_snapshot, warnings=warnings)
 
         # 4. Vergelijken, checklist en actiepunten
         _update(scan_id, status="checking")

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.tools import tool
 from app.db.models import CustomerWebsite, LaunchContentPage, LaunchScan, LaunchScanPage
-from app.features.launch_checklist.services.content_checks import detect_place
+from app.features.launch_checklist.services.places import detect_place
 from app.features.launch_checklist.services.page_types import PAGE_TYPES
 
 MAX_PAGES = 80
@@ -69,7 +69,7 @@ def get_site_overview(ctx: ContentSiteContext) -> dict[str, Any]:
         "seo_goals": getattr(customer, "seo_goals", None),
         "page_types": dict(Counter((p.page_type or "overig") for p in pages)),
         "services": [_row(p) for p in services[:MAX_PAGES]],
-        "location_pages": [_row(p) for p in pages if detect_place(p)][:MAX_PAGES],
+        "location_pages": [_row(p) for p in pages if p.page_type == "landing" or detect_place(p)][:MAX_PAGES],
         "addresses_on_site": [a for a, _ in addresses.most_common(5)],
     }
 
