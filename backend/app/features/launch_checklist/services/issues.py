@@ -687,7 +687,14 @@ _QUARTERLY_RECOMMENDATIONS: dict[str, str] = {
                             "pagina met de Rich Results Test van Google.",
     "c4_search_console": "Bekijk de melding in Search Console (URL-inspectie, Sitemaps, Prestaties), los de oorzaak "
                          "op en vraag waar nodig opnieuw indexering aan.",
+    "c4_bing_webmaster": "Bekijk de melding in Bing Webmaster Tools (Site Explorer, Sitemaps, URL Inspection), los "
+                         "de oorzaak op en dien de URL of sitemap daarna opnieuw in.",
 }
+
+# Bing kan honderden URL's met een crawlfout melden: de rest staat bij Vergelijking.
+MAX_BING_CRAWL_ISSUES = 25
+# Idem voor de URL-inspectie van Google, per soort (niet geïndexeerd, rich results).
+MAX_GSC_URL_ISSUES = 25
 
 
 def _quarterly_issue(
@@ -766,7 +773,8 @@ def generate_quarterly_issues(
     search_console = items.get("c4_search_console") or {}
     if "c4_search_console" not in skip:
         gsc = search_console.get("details") or {}
-        for row in gsc.get("not_indexed") or []:
+        not_indexed = sorted(gsc.get("not_indexed") or [], key=lambda r: r.get("state") != "blocked")
+        for row in not_indexed[:MAX_GSC_URL_ISSUES]:
             blocked = row.get("state") == "blocked"
             issues.append(_quarterly_issue(
                 "c4_search_console", "hoog" if blocked else "middel", page_id=None, url=row.get("url"),
@@ -774,6 +782,20 @@ def generate_quarterly_issues(
                 description=f"Volgens de URL-inspectie in Search Console is deze pagina niet opgenomen: "
                             f"{row.get('reason')}.",
                 details={"evidence": [], "data": row},
+            ))
+        rich_errors = [r for r in gsc.get("rich_results") or [] if r.get("errors")]
+        for row in rich_errors[:MAX_GSC_URL_ISSUES]:
+            messages = [
+                f"{i.get('type') or 'Rich result'}: {i.get('message')}"
+                for i in row.get("issues") or [] if i.get("severity") == "ERROR"
+            ]
+            count = int(row.get("errors") or 0)
+            issues.append(_quarterly_issue(
+                "c4_search_console", "middel", page_id=None, url=row.get("url"),
+                title=f"Rich results: {count} {'fout' if count == 1 else 'fouten'} volgens Google – {row.get('url')}",
+                description="Volgens de URL-inspectie in Search Console komt deze pagina door fouten in de "
+                            "structured data niet in aanmerking voor rich results: " + "; ".join(messages[:3]) + ".",
+                details={"evidence": messages, "data": row},
             ))
         for row in gsc.get("sitemaps") or []:
             errors, warnings = int(row.get("errors") or 0), int(row.get("warnings") or 0)
@@ -793,5 +815,59 @@ def generate_quarterly_issues(
                 description=f"Search Console toont {drop} minder klikken dan in de periode ervoor. Bekijk bij "
                             "Vergelijking welke zoekopdrachten en pagina's het meest zijn gedaald.",
                 details={"evidence": search_console.get("evidence") or []},
+            ))
+
+    bing_item = items.get("c4_bing_webmaster") or {}
+    bing = bing_item.get("details") or {}
+    # Zonder koppeling of zonder site in het Bing-account is er niets om actie op te ondernemen.
+    if "c4_bing_webmaster" not in skip and bing.get("state") == "ok":
+        for row in (bing.get("crawl_issues") or [])[:MAX_BING_CRAWL_ISSUES]:
+            reason = ", ".join(i.get("label") or "" for i in row.get("issues") or []) or "crawlfout"
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "hoog" if row.get("severe") else "middel", page_id=None, url=row.get("url"),
+                title=f"Crawlfout in Bing: {reason} – {row.get('url')}",
+                description=f"Bing Webmaster meldt bij deze URL: {reason}.",
+                details={"evidence": [], "data": row},
+            ))
+        for row in bing.get("sitemaps") or []:
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "hoog", page_id=None, url=row.get("url"),
+                title=f"Sitemap in Bing Webmaster heeft status {row.get('status') or 'onbekend'} – {row.get('url')}",
+                description="Bing kon deze sitemap niet verwerken.",
+                details={"evidence": [], "data": row},
+            ))
+        if bing.get("no_sitemap"):
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "middel", page_id=None, url=None,
+                title="Geen sitemap ingediend in Bing Webmaster Tools",
+                description="Zonder sitemap vindt Bing nieuwe pagina's later. Dien de sitemap in bij Bing Webmaster "
+                            "Tools (Sitemaps).",
+                details={"evidence": []},
+            ))
+        if bing.get("malware"):
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "hoog", page_id=None, url=None,
+                title=f"Bing meldt malware op {bing['malware']} URL('s)",
+                description="Bing toont bij malware een waarschuwing in de zoekresultaten. Controleer de site en "
+                            "vraag daarna een herbeoordeling aan in Bing Webmaster Tools.",
+                details={"evidence": bing_item.get("evidence") or []},
+            ))
+        if bing.get("index_drop_pct") is not None:
+            drop = f"{abs(bing['index_drop_pct']):g}%"
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "middel", page_id=None, url=None,
+                title=f"Pagina's in de Bing-index {drop} gedaald",
+                description=f"Bing heeft {drop} minder pagina's van de site in de index dan aan het begin van de "
+                            "meetperiode. Controleer de crawlfouten en de sitemap in Bing Webmaster Tools.",
+                details={"evidence": bing_item.get("evidence") or []},
+            ))
+        if bing.get("clicks_drop_pct") is not None:
+            drop = f"{abs(bing['clicks_drop_pct']):g}%"
+            issues.append(_quarterly_issue(
+                "c4_bing_webmaster", "laag", page_id=None, url=None,
+                title=f"Klikken uit Bing {drop} gedaald t.o.v. de vorige periode",
+                description=f"Bing Webmaster toont {drop} minder klikken dan in de periode ervoor. Bekijk bij "
+                            "Vergelijking welke zoekopdrachten en pagina's het meest zijn gedaald.",
+                details={"evidence": bing_item.get("evidence") or []},
             ))
     return issues

@@ -90,6 +90,13 @@ Pas daarin minimaal aan:
 | `CELERY_QUEUES` | `default,blog_generation,image_generation,audit` — **let op:** het voorbeeld mist `audit`; zonder die queue draaien website-audits nooit |
 | `SERPAPI_API_KEY` | optioneel (SEO-tracker) |
 | `GSC_CLIENT_ID`, `GSC_CLIENT_SECRET`, `GSC_REFRESH_TOKEN` | optioneel (Search Console in livegang fase 4). Neem de drie waarden over uit de lokale `backend/.env`; het refresh token is niet aan een machine gebonden. Een nieuw token maak je met `docker compose -f docker-compose.prod.yml run --rm api python scripts/gsc_authorize.py` |
+| `BING_CLIENT_ID`, `BING_CLIENT_SECRET`, `BING_WEBMASTER_REDIRECT_URI` | optioneel (Bing Webmaster in livegang fase 4). Client-ID en -secret van de OAuth-client bij Bing Webmaster → Settings → API Access. De redirect-URI is `https://app.iexist.nl/api/bing-webmaster/callback` en moet exact gelijk zijn aan die bij Bing. Daarna koppel je één keer met de knop **Koppel Bing Webmaster** bij fase 4 van een klant; het token staat versleuteld in de database (`oauth_connections`), dus elke omgeving koppelt zelf. Zet `BING_WEBMASTER_API_KEY` **niet** in productie: die is voor lokaal testen en heeft schrijfrechten |
+
+Bing accepteert geen `localhost` als redirect-URI. Lokaal test je Bing daarom met
+`BING_WEBMASTER_API_KEY` (zelfde data, geen OAuth). Wil je de OAuth-flow toch lokaal
+doorlopen: klik lokaal op **Koppel Bing Webmaster**, geef toestemming, en vervang in de
+adresbalk van de pagina waar je uitkomt `https://app.iexist.nl` door
+`http://localhost:3000` (binnen 5 minuten, zolang is de code geldig).
 
 `DATABASE_URL`, `REDIS_URL`, `MEDIA_BASE_URL` en `CORS_ALLOWED_ORIGINS` worden
 door `docker-compose.prod.yml` overschreven — wat er in `backend/.env` staat

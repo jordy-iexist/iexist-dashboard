@@ -144,6 +144,7 @@ class InspectionTest(unittest.TestCase):
         self.assertEqual((result["requested"], result["checked"], result["indexed"]), (4, 2, 1))
         self.assertEqual(result["rows"][1]["state"], "not_indexed")
         self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(result["stopped_reason"], "quota")
 
     def test_inspect_pages_respects_stop(self):
         with patch.object(gsc_enrich.gsc, "inspect_url") as mocked:
@@ -151,6 +152,51 @@ class InspectionTest(unittest.TestCase):
                                               should_continue=lambda: False)
         mocked.assert_not_called()
         self.assertEqual(result["checked"], 0)
+        self.assertEqual(result["stopped_reason"], "stopped")
+
+    def test_inspect_pages_parallel_keeps_order_and_own_service_per_thread(self):
+        urls = [f"https://klant.nl/{i}" for i in range(20)]
+        services = []
+
+        def make_service():
+            services.append(object())
+            return services[-1]
+
+        def inspect(site_url, url, *, service=None):
+            self.assertIn(service, services)  # nooit de service van de aanroeper
+            if url.endswith("/7"):
+                raise SearchConsoleServiceError("tijdelijk", code="gsc_error")
+            return {"url": url, "verdict": "PASS"}
+
+        with patch.object(gsc_enrich.gsc, "get_service", side_effect=make_service), \
+                patch.object(gsc_enrich.gsc, "inspect_url", side_effect=inspect):
+            result = gsc_enrich.inspect_pages("p", urls, service=object(), workers=4)
+        self.assertEqual([r["url"] for r in result["rows"]], [u for u in urls if not u.endswith("/7")])
+        self.assertEqual((result["checked"], result["indexed"]), (19, 19))
+        self.assertIsNone(result["stopped_reason"])
+        self.assertLessEqual(len(services), 4)
+
+    def test_inspect_pages_parallel_stops_on_quota(self):
+        urls = [f"https://klant.nl/{i}" for i in range(200)]
+
+        def inspect(site_url, url, *, service=None):
+            if url.endswith("/3"):
+                raise SearchConsoleServiceError("quotum", code="rate_limited")
+            return {"url": url, "verdict": "PASS"}
+
+        with patch.object(gsc_enrich.gsc, "get_service", return_value=object()), \
+                patch.object(gsc_enrich.gsc, "inspect_url", side_effect=inspect) as mocked:
+            result = gsc_enrich.inspect_pages("p", urls, workers=4)
+        self.assertEqual(result["stopped_reason"], "quota")
+        self.assertLess(mocked.call_count, len(urls))
+        self.assertEqual(result["checked"], mocked.call_count - 1)
+
+    def test_inspect_pages_stops_at_time_limit(self):
+        with patch.object(gsc_enrich.gsc, "inspect_url", return_value={"url": "u", "verdict": "PASS"}), \
+                patch.object(gsc_enrich.time, "monotonic", side_effect=[0.0, 1.0, 11.0]):
+            result = gsc_enrich.inspect_pages("p", ["https://klant.nl/a", "https://klant.nl/b"], service=object(),
+                                              max_seconds=10)
+        self.assertEqual((result["checked"], result["stopped_reason"]), (1, "timeout"))
 
 
 if __name__ == "__main__":

@@ -101,11 +101,34 @@ class SearchConsoleClientTests(unittest.TestCase):
         self.assertEqual(row["verdict"], "NEUTRAL")
         self.assertEqual(row["coverage_state"], "Gecrawld - momenteel niet geïndexeerd")
         self.assertEqual(row["url"], "https://klant.nl/nieuw/")
+        self.assertIsNone(row["rich_results"])
         uri, _method, body, _headers = http.request_sequence[0]
         self.assertIn("/v1/urlInspection/index:inspect", uri)
         self.assertEqual(json.loads(body), {
             "inspectionUrl": "https://klant.nl/nieuw/", "siteUrl": "sc-domain:klant.nl", "languageCode": "nl-NL",
         })
+
+    def test_inspect_url_reads_rich_results(self):
+        service, _ = _service((200, {"inspectionResult": {
+            "indexStatusResult": {"verdict": "PASS"},
+            "richResultsResult": {"verdict": "FAIL", "detectedItems": [
+                {"richResultType": "Productfragmenten", "items": [
+                    {"name": "Schoen", "issues": [
+                        {"issueMessage": "Ontbrekend veld 'price'", "severity": "ERROR"},
+                        {"issueMessage": "Ontbrekend veld 'review'", "severity": "WARNING"},
+                    ]},
+                ]},
+                {"richResultType": "Breadcrumbs", "items": [{"name": "Naamloos item"}]},
+            ]},
+        }}))
+        rich = gsc.inspect_url("sc-domain:klant.nl", "https://klant.nl/schoen/", service=service)["rich_results"]
+        self.assertEqual(rich["verdict"], "FAIL")
+        self.assertEqual(rich["types"], ["Productfragmenten", "Breadcrumbs"])
+        self.assertEqual(rich["issues"], [
+            {"type": "Productfragmenten", "item": "Schoen", "message": "Ontbrekend veld 'price'", "severity": "ERROR"},
+            {"type": "Productfragmenten", "item": "Schoen", "message": "Ontbrekend veld 'review'",
+             "severity": "WARNING"},
+        ])
 
     def test_forbidden_property(self):
         service, _ = _service((403, {"error": {"code": 403, "message": "User does not have sufficient permission"}}))

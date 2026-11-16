@@ -45,12 +45,20 @@ _ITEMS: list[ChecklistItem] = [
                               "(en Search Console zonder koppeling) vul je zelf aan."),
     # --- Controle -------------------------------------------------------------
     ChecklistItem("c4_search_console", "controle",
-                  "Search Console en Bing Webmaster controleren op fouten en nieuwe indexatieproblemen",
+                  "Search Console controleren op fouten en nieuwe indexatieproblemen",
                   mode="hybrid", priority="hoog",
                   description="Met de Search Console-koppeling controleert de scan de klikken t.o.v. de vorige "
-                              "periode, de ingediende sitemaps en de indexstatus van nieuwe pagina's. Het rapport "
-                              "Pagina-indexering, Verbeteringen en Bing Webmaster (Crawlfouten) controleer je zelf; "
-                              "vink het punt daarna af."),
+                              "periode, de ingediende sitemaps en per indexeerbare pagina de indexstatus en "
+                              "rich-results-fouten (URL-inspectie). Is alles geïnspecteerd en is er niets mis, dan "
+                              "rondt de scan dit punt af. URL's die niet in de scan zitten en Core Web Vitals zie "
+                              "je alleen in Search Console zelf."),
+    ChecklistItem("c4_bing_webmaster", "controle",
+                  "Bing Webmaster controleren op crawlfouten en indexatie",
+                  mode="hybrid", priority="normaal",
+                  description="ChatGPT Search en Copilot leunen op de Bing-index. Met de Bing Webmaster-koppeling "
+                              "controleert de scan het aantal pagina's in de index, crawlfouten, de ingediende "
+                              "sitemaps en de klikken t.o.v. de vorige periode. Staat de site niet in het "
+                              "Bing-account, dan doe je deze controle handmatig en vink je het punt af."),
     ChecklistItem("c4_new_pages", "controle", "Indexatie en 404's controleren op nieuwe pagina's",
                   priority="hoog",
                   description="Nieuwe pagina's sinds de vorige ronde moeten bereikbaar en indexeerbaar zijn (geen "
@@ -68,6 +76,7 @@ ITEM_ISSUE_CATEGORY: dict[str, str] = {
     "c4_ai_scan": "ai",
     "c4_new_pages": "techniek",
     "c4_search_console": "techniek",
+    "c4_bing_webmaster": "techniek",
     "c4_schema_validation": "schema",
 }
 

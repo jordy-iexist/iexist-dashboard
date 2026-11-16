@@ -710,6 +710,40 @@ export function setSearchConsoleProperty(customerId: string, property: string | 
   })
 }
 
+// --- Bing Webmaster ---------------------------------------------------------
+
+export type BingWebmasterSettings = {
+  /** Of er een API-key of OAuth-client in de backend is ingesteld. */
+  configured: boolean
+  /** "api_key" (lokaal testen) wint van "oauth". */
+  mode: "api_key" | "oauth" | null
+  /** Of de koppelknop kan werken (OAuth-client ingesteld). */
+  oauth_available: boolean
+  /** Of er een werkende koppeling is. Eén koppeling geldt voor alle klanten. */
+  connected: boolean
+  connected_at: string | null
+  /** De site van deze klant in het Bing-account, als die er (al dan niet geverifieerd) staat. */
+  site: string | null
+  site_state: "linked" | "not_linked" | "not_verified" | null
+  /** Aantal geverifieerde sites in het Bing-account. */
+  sites_total: number | null
+  error: string | null
+}
+
+export function fetchBingWebmasterSettings(customerId: string, refresh = false) {
+  return apiFetch<BingWebmasterSettings>(`/customers/${customerId}/bing-webmaster${refresh ? "?refresh=true" : ""}`)
+}
+
+/** Verwijdert de OAuth-koppeling (voor alle klanten). */
+export function disconnectBingWebmaster() {
+  return apiFetch<{ connected: boolean }>("/bing-webmaster/connection", { method: "DELETE" })
+}
+
+/** Start de OAuth-flow; na toestemming komt de gebruiker terug op fase 4 van deze klant. */
+export function bingWebmasterConnectUrl(customerId: string) {
+  return `/api/bing-webmaster/connect?customer=${encodeURIComponent(customerId)}`
+}
+
 /**
  * Ruimt koppelingen op naar items die in Monday verwijderd zijn, zodat die
  * punten weer als niet-doorgezet verschijnen. Geeft het aantal opgeruimde
@@ -852,6 +886,96 @@ export type QuarterlyComparison = {
   } | null
   /** Search Console: meetperiode t.o.v. de periode ervoor. null = niet gekoppeld of geen data. */
   search_console?: QuarterlySearchConsole | null
+  /** Bing Webmaster. Ontbreekt bij scans van vóór de koppeling; zonder site in het account alleen `state` en `message`. */
+  bing_webmaster?: QuarterlyBingWebmaster | null
+}
+
+export type BingState =
+  | "ok"
+  | "not_configured"
+  | "not_connected"
+  | "token_expired"
+  | "site_not_linked"
+  | "site_not_verified"
+  | "error"
+
+export type BingMetricChange = {
+  key: "clicks" | "impressions" | "ctr"
+  label: string
+  /** Periode ervoor; null als de geschiedenis van Bing die niet dekt. */
+  before: number | null
+  after: number | null
+  delta: number | null
+  pct: number | null
+}
+
+export type BingSitemap = {
+  url: string
+  status: string
+  type: string
+  url_count: number
+  last_crawled: string | null
+  submitted: string | null
+  state: "ok" | "pending" | "error"
+}
+
+export type BingCrawlIssue = {
+  url: string
+  http_code: number | null
+  in_links: number
+  issues: { key: string; label: string }[]
+  /** Serverfout, malware of een belangrijke URL die geblokkeerd is. */
+  severe: boolean
+}
+
+export type QuarterlyBingWebmaster = {
+  state: BingState
+  /** Uitleg als er geen data is (niet gekoppeld, site niet in het account). */
+  message: string | null
+  site: string | null
+  auth_mode: "api_key" | "oauth" | null
+  has_data: boolean
+  fetched_at: string | null
+  // De velden hieronder zijn er alleen bij state "ok".
+  period?: GscSpan
+  previous?: GscSpan
+  has_performance?: boolean
+  metrics?: BingMetricChange[]
+  queries?: GscMovers
+  pages?: GscMovers
+  index?: {
+    date: string | null
+    in_index: {
+      before: number | null
+      after: number | null
+      delta: number | null
+      pct: number | null
+      before_date: string | null
+      /** "bing": begin van de meetperiode; "base": de vorige ronde. */
+      before_source: "bing" | "base" | null
+    }
+    in_links: number | null
+    /** Aantal door Bing gecrawlde pagina's in de meetperiode. */
+    crawled_pages: number | null
+    /** Stand van de crawl op de laatste dag (2xx, redirects, fouten, geblokkeerd). */
+    status: { key: string; label: string; value: number | null }[]
+  } | null
+  crawl_issues?: { total: number; rows: BingCrawlIssue[] } | null
+  sitemaps?: { total: number; with_errors: number; pending: number; rows: BingSitemap[] } | null
+}
+
+/** Details van het checklistpunt `c4_bing_webmaster`. */
+export type BingWebmasterDetails = {
+  state: BingState | "no_data"
+  site: string | null
+  index_drop_pct?: number | null
+  clicks_drop_pct?: number | null
+  malware?: number
+  server_errors?: number
+  no_sitemap?: boolean
+  sitemaps?: BingSitemap[]
+  crawl_issues_total?: number
+  crawl_issues?: BingCrawlIssue[]
 }
 
 export type GscSpan = { start: string; end: string; days: number }
@@ -916,8 +1040,41 @@ export type QuarterlySearchConsole = {
   queries: GscMovers
   pages: GscMovers
   sitemaps: { total: number; with_errors: number; with_warnings: number; rows: GscSitemap[] } | null
-  inspection: { requested: number; checked: number; indexed: number; not_indexed: GscNotIndexed[] } | null
+  inspection: {
+    requested: number
+    /** Aantal indexeerbare pagina's dat in aanmerking kwam; ontbreekt bij oudere scans. */
+    eligible?: number | null
+    checked: number
+    indexed: number
+    /** Alle indexeerbare pagina's zijn geïnspecteerd. */
+    complete?: boolean
+    not_indexed: GscNotIndexed[]
+    /** Pagina's waarop Google rich results heeft gevonden. */
+    with_rich_results?: number
+    /** Alleen pagina's met een melding, fouten eerst. */
+    rich_results?: GscRichResultRow[]
+  } | null
   fetched_at: string | null
+}
+
+/** Rich-results-meldingen van één URL volgens de URL-inspectie. */
+export type GscRichResultRow = {
+  url: string
+  link: string | null
+  types: string[]
+  /** Aantal meldingen met severity "ERROR". */
+  errors: number
+  issues: { type: string; item: string | null; message: string; severity: "ERROR" | "WARNING" | string }[]
+}
+
+/** Details van het checklistpunt `c4_search_console`. */
+export type SearchConsoleDetails = {
+  property: string | null
+  clicks_drop_pct: number | null
+  sitemaps: GscSitemap[]
+  inspection?: { eligible: number | null; checked: number; indexed: number; complete: boolean } | null
+  not_indexed: GscNotIndexed[]
+  rich_results?: GscRichResultRow[]
 }
 
 export type QuarterlySources = {

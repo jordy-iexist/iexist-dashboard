@@ -217,7 +217,7 @@ class ChecksTest(unittest.TestCase):
 class CatalogAndIssuesTest(unittest.TestCase):
     def test_catalog(self):
         keys = set(quarterly_checklist.ITEMS)
-        self.assertEqual(len(keys), 6)
+        self.assertEqual(len(keys), 7)
         self.assertTrue(all(k.startswith("c4_") for k in keys))
         self.assertFalse(keys & set(GEO_ITEMS))
         self.assertFalse(keys & set(CONTENT_ITEMS))
@@ -237,7 +237,7 @@ class CatalogAndIssuesTest(unittest.TestCase):
         self.assertEqual(effective["c4_proranktracker"], "open")
         # Zonder koppeling geen auto-resultaat: het Search Console-punt blijft handmatig open.
         self.assertEqual(effective["c4_search_console"], "open")
-        self.assertEqual(merged["total"], 6)
+        self.assertEqual(merged["total"], 7)
 
     def test_issues(self):
         items = {
@@ -302,15 +302,73 @@ class SearchConsoleTest(unittest.TestCase):
         self.assertEqual(result["sitemaps"]["with_errors"], 0)
         self.assertIsNone(result["inspection"])
 
-    def test_clean_result_is_info_never_ok(self):
+    def _effective(self, result):
+        merged = quarterly_checklist.merge_quarterly_checklist({"c4_search_console": result}, {})
+        return {i["key"]: i["effective"] for s in merged["sections"] for i in s["items"]}["c4_search_console"]
+
+    def test_without_full_inspection_stays_open(self):
+        # Geen inspectie: het punt blijft open tot het handmatig is afgevinkt.
         result = evaluate_search_console(compare_search_console(gsc_snapshot()), 20)
         self.assertEqual(result["status"], "info")
         self.assertIn("Klikken 1.000 → 900 (-10%) in 90 dagen", result["message"])
         self.assertIn("Pagina-indexering", result["message"])
-        merged = quarterly_checklist.merge_quarterly_checklist({"c4_search_console": result}, {})
-        effective = {i["key"]: i["effective"] for s in merged["sections"] for i in s["items"]}
-        self.assertEqual(effective["c4_search_console"], "open")
+        self.assertEqual(self._effective(result), "open")
         self.assertEqual(evaluate_search_console(None)["status"], "unknown")
+
+        # Wel inspectie, maar afgekapt op de limiet: ook open.
+        partial = gsc_snapshot(inspection={"requested": 2, "eligible": 5, "checked": 2, "indexed": 2, "rows": [
+            {"url": "https://x.nl/", "state": "indexed"}, {"url": "https://x.nl/a/", "state": "indexed"},
+        ]})
+        result = evaluate_search_console(compare_search_console(partial), 20)
+        self.assertEqual(result["status"], "info")
+        self.assertIn("2 van 5 pagina's geïnspecteerd", result["message"])
+        self.assertIn("niet alle indexeerbare pagina's", result["message"])
+        self.assertFalse(result["details"]["inspection"]["complete"])
+
+        # Volledige inspectie, maar de klikken ontbreken: ook open.
+        no_clicks = gsc_snapshot(totals=None, inspection={"requested": 1, "eligible": 1, "checked": 1, "indexed": 1,
+                                                          "rows": [{"url": "https://x.nl/", "state": "indexed"}]})
+        result = evaluate_search_console(compare_search_console(no_clicks), 20)
+        self.assertEqual(result["status"], "info")
+        self.assertIn("de klikken zijn niet opgehaald", result["message"])
+
+    def test_full_clean_inspection_completes_item(self):
+        snapshot = gsc_snapshot(inspection={"requested": 2, "eligible": 2, "checked": 2, "indexed": 2, "rows": [
+            {"url": "https://x.nl/", "state": "indexed", "rich_results": {"verdict": "PASS", "types": ["FAQ"], "issues": [
+                {"type": "FAQ", "item": "Vraag", "message": "Ontbrekend veld 'x'", "severity": "WARNING"},
+            ]}},
+            {"url": "https://x.nl/a/", "state": "indexed", "rich_results": None},
+        ]})
+        result = evaluate_search_console(compare_search_console(snapshot), 20)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("2 van 2 pagina's geïnspecteerd, 2 geïndexeerd; geen rich-results-fouten.", result["message"])
+        self.assertNotIn("Pagina-indexering", result["message"])
+        # De waarschuwing van Google wordt getoond, maar telt niet mee.
+        self.assertEqual(len(result["details"]["rich_results"]), 1)
+        self.assertEqual(self._effective(result), "done")
+        self.assertEqual(generate_quarterly_issues({"c4_search_console": result}, {}), [])
+
+    def test_rich_results_errors(self):
+        snapshot = gsc_snapshot(inspection={"requested": 2, "eligible": 2, "checked": 2, "indexed": 2, "rows": [
+            {"url": "https://x.nl/", "state": "indexed", "rich_results": None},
+            {"url": "https://x.nl/schoen/", "state": "indexed", "link": "https://search.google.com/x",
+             "rich_results": {"verdict": "FAIL", "types": ["Productfragmenten"], "issues": [
+                 {"type": "Productfragmenten", "item": "Schoen", "message": "Ontbrekend veld 'review'",
+                  "severity": "WARNING"},
+                 {"type": "Productfragmenten", "item": "Schoen", "message": "Ontbrekend veld 'price'",
+                  "severity": "ERROR"},
+             ]}},
+        ]})
+        compared = compare_search_console(snapshot)
+        self.assertEqual(compared["inspection"]["with_rich_results"], 1)
+        self.assertEqual(compared["inspection"]["rich_results"][0]["issues"][0]["severity"], "ERROR")
+        result = evaluate_search_console(compared, 20)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("1 pagina met rich-results-fouten", result["message"])
+        issues = generate_quarterly_issues({"c4_search_console": result}, {})
+        self.assertEqual([(i["severity"], i["url"]) for i in issues], [("middel", "https://x.nl/schoen/")])
+        self.assertIn("Ontbrekend veld 'price'", issues[0]["description"])
+        self.assertNotIn("review", issues[0]["description"])
 
     def test_problems_and_issues(self):
         snapshot = gsc_snapshot(

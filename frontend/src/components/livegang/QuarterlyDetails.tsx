@@ -8,14 +8,19 @@ import {
   CATEGORY_LABELS,
   formatDateTime,
   type AiCheckChange,
+  type BingSitemap,
   type ChecklistItem,
   type GscMetricChange,
   type GscMovers,
+  type GscNotIndexed,
+  type GscRichResultRow,
+  type GscSitemap,
   type GscSpan,
   type NewPagesDetails,
   type QuarterlyChecklist,
   type QuarterlyComparison,
   type SchemaValidationDetails,
+  type SearchConsoleDetails,
 } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
@@ -71,12 +76,16 @@ const tdRight = "px-3 py-2 text-right tabular-nums"
 
 // --- details per checklistpunt ---------------------------------------------------
 
-/** Detailweergave van een fase 4-punt in de checklist; null = de standaard evidence-lijst. */
-export function QuarterlyItemDetails({ item }: { item: ChecklistItem }) {
+/**
+ * Detailweergave van een fase 4-punt in de checklist; null = de standaard evidence-lijst.
+ * Een gewone functie en geen component: alleen een echte null laat de checklist terugvallen op de evidence.
+ */
+export function quarterlyItemDetails(item: ChecklistItem): React.ReactNode {
   const details = item.auto?.details
   if (!details || typeof details !== "object") return null
   if (item.key === "c4_new_pages") return <NewPagesList details={details as NewPagesDetails} />
   if (item.key === "c4_schema_validation") return <SchemaList details={details as SchemaValidationDetails} />
+  if (item.key === "c4_search_console") return <SearchConsoleItemDetails details={details as SearchConsoleDetails} />
   if (item.key === "c4_ai_scan") {
     const checks = (details as { checks?: AiCheckChange[] }).checks ?? []
     const changed = checks.filter((c) => c.change !== "same")
@@ -221,6 +230,7 @@ export function ComparisonTab({ checklist }: { checklist: QuarterlyChecklist }) 
       <AiSection comparison={comparison} />
       <RankingsSection comparison={comparison} />
       <SearchConsoleSection comparison={comparison} />
+      <BingWebmasterSection comparison={comparison} />
       <AhrefsSection comparison={comparison} />
       <IssuesSection comparison={comparison} />
       <SourcesNote checklist={checklist} />
@@ -342,13 +352,17 @@ function RankingsSection({ comparison }: { comparison: QuarterlyComparison }) {
 
 const dayFormat = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" })
 
+/** "2026-11-13" → "13 nov 2026". */
+function formatSpanDay(value: string) {
+  return dayFormat.format(new Date(`${value}T00:00:00`))
+}
+
 function formatSpan(span: GscSpan) {
-  const day = (value: string) => dayFormat.format(new Date(`${value}T00:00:00`))
-  return `${day(span.start)} – ${day(span.end)}`
+  return `${formatSpanDay(span.start)} – ${formatSpanDay(span.end)}`
 }
 
 /** CTR is een fractie (0,035 = 3,5%); positie heeft één decimaal; de rest zijn aantallen. */
-function formatGscValue(key: GscMetricChange["key"], value: number | null) {
+function formatGscValue(key: GscMetricChange["key"], value: number | null | undefined) {
   if (value == null) return "—"
   if (key === "ctr") return `${formatNumber(value * 100, 1)}%`
   return formatNumber(value, key === "position" ? 1 : 0)
@@ -417,6 +431,7 @@ function SearchConsoleSection({ comparison }: { comparison: QuarterlyComparison 
   }
   const problemSitemaps = gsc.sitemaps?.rows.filter((s) => s.errors || s.warnings) ?? []
   const notIndexed = gsc.inspection?.not_indexed ?? []
+  const richResults = gsc.inspection?.rich_results ?? []
   return (
     <section className="space-y-3">
       <SectionTitle>Search Console (Google)</SectionTitle>
@@ -477,16 +492,312 @@ function SearchConsoleSection({ comparison }: { comparison: QuarterlyComparison 
               ? "er is geen sitemap ingediend in Search Console."
               : `${gsc.sitemaps.total} ingediend, ${gsc.sitemaps.with_errors} met fouten, ${gsc.sitemaps.with_warnings} met waarschuwingen.`}
           </p>
-          {problemSitemaps.length > 0 && (
+          <GscSitemapList rows={problemSitemaps} />
+        </div>
+      )}
+
+      {gsc.inspection && (
+        <div className="space-y-1 text-sm">
+          <p>
+            <span className="font-medium">URL-inspectie:</span> {gscCoverageText(gsc.inspection)}
+          </p>
+          <GscNotIndexedList rows={notIndexed} />
+          {richResults.length > 0 && (
+            <>
+              <p>
+                <span className="font-medium">Rich results:</span> {richResults.filter((r) => r.errors > 0).length} pagina&apos;s
+                met fouten, {richResults.filter((r) => r.errors === 0).length} met alleen waarschuwingen.
+              </p>
+              <GscRichResultsList rows={richResults} />
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** "12 van 40 indexeerbare pagina's geïnspecteerd, 11 geïndexeerd door Google." */
+function gscCoverageText(inspection: { eligible?: number | null; checked: number; indexed: number }) {
+  const scope = inspection.eligible
+    ? `${inspection.checked} van ${inspection.eligible} indexeerbare pagina's geïnspecteerd`
+    : `${inspection.checked} URL's geïnspecteerd (homepage en nieuwe pagina's)`
+  return `${scope}, ${inspection.indexed} geïndexeerd door Google.`
+}
+
+function SearchConsoleLink({ href }: { href: string | null }) {
+  if (!href) return null
+  return (
+    <>
+      {" · "}
+      <a href={href} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">
+        Open in Search Console
+      </a>
+    </>
+  )
+}
+
+function GscSitemapList({ rows }: { rows: GscSitemap[] }) {
+  if (!rows.length) return null
+  return (
+    <ul className="divide-y rounded-md border bg-card text-xs">
+      {rows.slice(0, MAX_ROWS).map((sitemap) => (
+        <li key={sitemap.path} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+          <Pill tone={sitemap.errors ? "red" : "amber"}>
+            {sitemap.errors
+              ? `${sitemap.errors} ${sitemap.errors === 1 ? "fout" : "fouten"}`
+              : `${sitemap.warnings} ${sitemap.warnings === 1 ? "waarschuwing" : "waarschuwingen"}`}
+          </Pill>
+          <PageLink url={sitemap.path} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function GscNotIndexedList({ rows }: { rows: GscNotIndexed[] }) {
+  if (!rows.length) return null
+  return (
+    <ul className="divide-y rounded-md border bg-card text-xs">
+      {rows.slice(0, MAX_ROWS).map((row) => (
+        <li key={row.url} className="space-y-0.5 px-2 py-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Pill tone={row.state === "blocked" ? "red" : "amber"}>
+              {row.state === "blocked" ? "Geblokkeerd" : "Niet geïndexeerd"}
+            </Pill>
+            <PageLink url={row.url} />
+          </div>
+          <p className="text-muted-foreground">
+            {row.reason ?? "Reden onbekend"}
+            {row.last_crawl_time ? ` · laatst gecrawld ${formatDateTime(row.last_crawl_time)}` : ""}
+            <SearchConsoleLink href={row.link} />
+          </p>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function GscRichResultsList({ rows }: { rows: GscRichResultRow[] }) {
+  if (!rows.length) return null
+  return (
+    <ul className="divide-y rounded-md border bg-card text-xs">
+      {rows.slice(0, MAX_ROWS).map((row) => (
+        <li key={row.url} className="space-y-0.5 px-2 py-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Pill tone={row.errors ? "red" : "amber"}>
+              {row.errors ? `${row.errors} ${row.errors === 1 ? "fout" : "fouten"}` : "Waarschuwing"}
+            </Pill>
+            <PageLink url={row.url} />
+          </div>
+          <ul className="text-muted-foreground">
+            {row.issues.map((issue, index) => (
+              <li key={index} className={issue.severity === "ERROR" ? "text-foreground" : undefined}>
+                {issue.type || "Rich result"}
+                {issue.item ? ` (${issue.item})` : ""}: {issue.message}
+              </li>
+            ))}
+          </ul>
+          {row.link && (
+            <p className="text-muted-foreground">
+              <a href={row.link} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">
+                Open in Search Console
+              </a>
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** Details bij het checklistpunt `c4_search_console`: wat de URL-inspectie en de sitemaps opleverden. */
+function SearchConsoleItemDetails({ details }: { details: SearchConsoleDetails }) {
+  const richResults = details.rich_results ?? []
+  const withErrors = richResults.filter((r) => r.errors > 0)
+  const onlyWarnings = richResults.filter((r) => r.errors === 0)
+  return (
+    <div className="space-y-3 text-xs">
+      {details.inspection && <p className="text-muted-foreground">{gscCoverageText(details.inspection)}</p>}
+      {details.sitemaps.length > 0 && (
+        <div>
+          <p className="mb-1 font-medium text-muted-foreground">Sitemaps met een melding ({details.sitemaps.length})</p>
+          <GscSitemapList rows={details.sitemaps} />
+        </div>
+      )}
+      {details.not_indexed.length > 0 && (
+        <div>
+          <p className="mb-1 font-medium text-muted-foreground">Niet geïndexeerd door Google ({details.not_indexed.length})</p>
+          <GscNotIndexedList rows={details.not_indexed} />
+        </div>
+      )}
+      {withErrors.length > 0 && (
+        <div>
+          <p className="mb-1 font-medium text-muted-foreground">Rich results met fouten ({withErrors.length})</p>
+          <GscRichResultsList rows={withErrors} />
+        </div>
+      )}
+      {onlyWarnings.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">
+            {onlyWarnings.length} pagina&apos;s met alleen rich-results-waarschuwingen (optionele velden, tellen niet mee)
+          </summary>
+          <div className="mt-1">
+            <GscRichResultsList rows={onlyWarnings} />
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+const SITEMAP_STATE: Record<BingSitemap["state"], { tone: "green" | "amber" | "red"; label: string }> = {
+  ok: { tone: "green", label: "Verwerkt" },
+  pending: { tone: "amber", label: "In behandeling" },
+  error: { tone: "red", label: "Fout" },
+}
+
+function BingWebmasterSection({ comparison }: { comparison: QuarterlyComparison }) {
+  const bing = comparison.bing_webmaster
+  // Scans van vóór de Bing-koppeling hebben dit blok niet.
+  if (!bing) return null
+  if (bing.state !== "ok" || !bing.has_data) {
+    return (
+      <section className="space-y-2">
+        <SectionTitle>Bing Webmaster</SectionTitle>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Pill tone={bing.state === "error" || bing.state === "token_expired" ? "red" : "amber"}>
+            {bing.state === "ok"
+              ? "Nog geen data"
+              : bing.state === "site_not_linked"
+                ? "Site niet gekoppeld"
+                : bing.state === "site_not_verified"
+                  ? "Site niet geverifieerd"
+                  : bing.state === "token_expired"
+                    ? "Koppeling verlopen"
+                    : bing.state === "error"
+                      ? "Niet opgehaald"
+                      : "Niet gekoppeld"}
+          </Pill>
+          <span className="text-muted-foreground">
+            {bing.message ?? "De site staat in Bing Webmaster Tools, maar Bing heeft nog geen data. Scan later opnieuw."}
+          </span>
+        </div>
+      </section>
+    )
+  }
+
+  const index = bing.index
+  const inIndex = index?.in_index
+  const status = (index?.status ?? []).filter((row) => row.value)
+  const issues = bing.crawl_issues
+  const sitemaps = bing.sitemaps
+  return (
+    <section className="space-y-3">
+      <SectionTitle>Bing Webmaster</SectionTitle>
+      <p className="text-xs text-muted-foreground">
+        <span className="font-mono">{bing.site}</span>
+        {bing.period && bing.previous && (
+          <>
+            {" "}
+            · {formatSpan(bing.period)} t.o.v. de {bing.previous.days} dagen ervoor ({formatSpan(bing.previous)})
+          </>
+        )}
+        . ChatGPT Search en Copilot gebruiken de Bing-index.
+      </p>
+
+      {index && inIndex && (
+        <StatGrid className="grid-cols-2 sm:grid-cols-4">
+          <CompactStat
+            label="Pagina's in Bing-index"
+            value={
+              <span className="inline-flex items-baseline gap-2">
+                {formatNumber(inIndex.after)} <span className="text-xs"><Delta value={inIndex.delta} /></span>
+              </span>
+            }
+            hint={
+              inIndex.before != null
+                ? `was ${formatNumber(inIndex.before)} ${inIndex.before_source === "base" ? "in de vorige ronde" : "aan het begin van de periode"}`
+                : undefined
+            }
+            tone={inIndex.after === 0 ? "bad" : undefined}
+          />
+          <CompactStat label="Gecrawld in de periode" value={formatNumber(index.crawled_pages)} />
+          <CompactStat label="Inkomende links" value={formatNumber(index.in_links)} />
+          <CompactStat
+            label="URL's met crawlfout"
+            value={issues ? formatNumber(issues.total) : "—"}
+            tone={issues ? (issues.total ? "bad" : "good") : undefined}
+          />
+        </StatGrid>
+      )}
+
+      {status.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Crawlstatus{index?.date ? ` op ${formatSpanDay(index.date)}` : ""}:{" "}
+          {status.map((row) => `${row.label} ${formatNumber(row.value)}`).join(" · ")}
+        </p>
+      )}
+
+      {bing.has_performance && bing.metrics ? (
+        <Table
+          head={
+            <tr>
+              <th className={th}>Cijfer</th>
+              <th className={thRight}>Vorige periode</th>
+              <th className={thRight}>Deze periode</th>
+              <th className={thRight}>Verschil</th>
+            </tr>
+          }
+        >
+          {bing.metrics.map((metric) => {
+            const delta = metric.delta == null ? null : metric.key === "ctr" ? metric.delta * 100 : metric.delta
+            return (
+              <tr key={metric.key}>
+                <td className={td}>{metric.label}</td>
+                <td className={tdRight}>{formatGscValue(metric.key, metric.before)}</td>
+                <td className={tdRight}>{formatGscValue(metric.key, metric.after)}</td>
+                <td className={tdRight}>
+                  <Delta value={delta} digits={metric.key === "ctr" ? 1 : 0} />
+                  {metric.key !== "ctr" && <GscPercent value={metric.pct} />}
+                </td>
+              </tr>
+            )
+          })}
+        </Table>
+      ) : (
+        <p className="text-sm text-muted-foreground">Bing heeft voor deze periode geen klikken en vertoningen.</p>
+      )}
+
+      {bing.queries && bing.pages && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <GscMoversTable title="Zoekopdrachten in Bing: meeste klikken" rows={bing.queries.top} isUrl={false} />
+          <GscMoversTable title="Pagina's in Bing: meeste klikken" rows={bing.pages.top} isUrl />
+          <GscMoversTable title="Zoekopdrachten in Bing: grootste dalers" rows={bing.queries.fallers} isUrl={false} />
+          <GscMoversTable title="Zoekopdrachten in Bing: grootste stijgers" rows={bing.queries.risers} isUrl={false} />
+        </div>
+      )}
+
+      {sitemaps && (
+        <div className="space-y-1 text-sm">
+          <p>
+            <span className="font-medium">Sitemaps:</span>{" "}
+            {sitemaps.total === 0
+              ? "er is geen sitemap ingediend in Bing Webmaster Tools."
+              : `${sitemaps.total} ingediend, ${sitemaps.with_errors} met fouten.`}
+          </p>
+          {sitemaps.rows.length > 0 && (
             <ul className="divide-y rounded-md border bg-card text-xs">
-              {problemSitemaps.slice(0, MAX_ROWS).map((sitemap) => (
-                <li key={sitemap.path} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
-                  <Pill tone={sitemap.errors ? "red" : "amber"}>
-                    {sitemap.errors
-                      ? `${sitemap.errors} ${sitemap.errors === 1 ? "fout" : "fouten"}`
-                      : `${sitemap.warnings} ${sitemap.warnings === 1 ? "waarschuwing" : "waarschuwingen"}`}
+              {sitemaps.rows.slice(0, MAX_ROWS).map((sitemap) => (
+                <li key={sitemap.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+                  <Pill tone={SITEMAP_STATE[sitemap.state].tone}>
+                    {sitemap.state === "error" ? sitemap.status || "Fout" : SITEMAP_STATE[sitemap.state].label}
                   </Pill>
-                  <PageLink url={sitemap.path} />
+                  <PageLink url={sitemap.url} />
+                  <span className="text-muted-foreground">
+                    {formatNumber(sitemap.url_count)} URL&apos;s
+                    {sitemap.last_crawled ? ` · laatst gelezen ${formatDateTime(sitemap.last_crawled)}` : ""}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -494,38 +805,21 @@ function SearchConsoleSection({ comparison }: { comparison: QuarterlyComparison 
         </div>
       )}
 
-      {gsc.inspection && (
+      {issues && issues.rows.length > 0 && (
         <div className="space-y-1 text-sm">
           <p>
-            <span className="font-medium">URL-inspectie:</span> {gsc.inspection.checked} URL&apos;s gecontroleerd (homepage en
-            nieuwe pagina&apos;s), {gsc.inspection.indexed} geïndexeerd door Google.
+            <span className="font-medium">Crawlfouten:</span> Bing meldt {issues.total}{" "}
+            {issues.total === 1 ? "URL" : "URL's"} met een probleem.
           </p>
-          {notIndexed.length > 0 && (
-            <ul className="divide-y rounded-md border bg-card text-xs">
-              {notIndexed.slice(0, MAX_ROWS).map((row) => (
-                <li key={row.url} className="space-y-0.5 px-2 py-1.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Pill tone={row.state === "blocked" ? "red" : "amber"}>
-                      {row.state === "blocked" ? "Geblokkeerd" : "Niet geïndexeerd"}
-                    </Pill>
-                    <PageLink url={row.url} />
-                  </div>
-                  <p className="text-muted-foreground">
-                    {row.reason ?? "Reden onbekend"}
-                    {row.last_crawl_time ? ` · laatst gecrawld ${formatDateTime(row.last_crawl_time)}` : ""}
-                    {row.link && (
-                      <>
-                        {" · "}
-                        <a href={row.link} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">
-                          Open in Search Console
-                        </a>
-                      </>
-                    )}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul className="divide-y rounded-md border bg-card text-xs">
+            {issues.rows.slice(0, MAX_ROWS).map((row) => (
+              <li key={row.url} className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1.5">
+                <Pill tone={row.severe ? "red" : "amber"}>{row.issues.map((i) => i.label).join(", ") || "Crawlfout"}</Pill>
+                <PageLink url={row.url} />
+                {row.in_links > 0 && <span className="text-muted-foreground">{formatNumber(row.in_links)} inkomende links</span>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </section>

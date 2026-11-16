@@ -22,6 +22,8 @@ from app.features.launch_checklist.services.quarterly_checklist import KEY_PREFI
 INCONCLUSIVE_STATUSES = {401, 403, 429, 503}
 MAX_LIST = 200
 MAX_RANKINGS = 100
+# Rich-results-meldingen per URL (een productpagina kan er tientallen hebben).
+MAX_RICH_ISSUES_PER_URL = 10
 
 _AI_RANK = {"ok": 0, "warning": 1, "error": 2}
 
@@ -265,18 +267,170 @@ def compare_search_console(snapshot: dict[str, Any] | None) -> dict[str, Any] | 
             "with_warnings": len([s for s in sitemaps if s.get("warnings")]),
             "rows": sitemaps[:MAX_LIST],
         },
-        "inspection": None if not inspection else {
-            "requested": inspection.get("requested"),
-            "checked": inspection.get("checked"),
-            "indexed": inspection.get("indexed"),
-            "not_indexed": [
-                {k: r.get(k) for k in ("url", "state", "reason", "last_crawl_time", "google_canonical", "link")}
-                for r in inspection.get("rows") or []
-                if r.get("state") != "indexed"
-            ][:MAX_LIST],
-        },
+        "inspection": _inspection_summary(inspection) if inspection else None,
         "fetched_at": snapshot.get("fetched_at"),
     }
+
+
+def _inspection_summary(inspection: dict[str, Any]) -> dict[str, Any]:
+    """URL-inspectie samengevat: dekking, niet-geïndexeerde URL's en rich-results-meldingen.
+
+    `eligible` is het aantal pagina's dat in aanmerking kwam (None bij scans van
+    vóór de volledige inspectie); `complete` zegt of ze allemaal zijn gecontroleerd.
+    """
+    rows = inspection.get("rows") or []
+    checked = inspection.get("checked") or 0
+    eligible = inspection.get("eligible")
+    rich_rows = []
+    for row in rows:
+        rich = row.get("rich_results") or {}
+        issues = rich.get("issues") or []
+        if issues:
+            rich_rows.append({
+                "url": row.get("url"),
+                "link": row.get("link"),
+                "types": rich.get("types") or [],
+                "errors": len([i for i in issues if i.get("severity") == "ERROR"]),
+                "issues": sorted(issues, key=lambda i: i.get("severity") != "ERROR")[:MAX_RICH_ISSUES_PER_URL],
+            })
+    rich_rows.sort(key=lambda r: (not r["errors"], str(r["url"])))
+    return {
+        "requested": inspection.get("requested"),
+        "eligible": eligible,
+        "checked": checked,
+        "indexed": inspection.get("indexed"),
+        "complete": bool(eligible) and checked >= eligible,
+        "stopped_reason": inspection.get("stopped_reason"),
+        "not_indexed": [
+            {k: r.get(k) for k in ("url", "state", "reason", "last_crawl_time", "google_canonical", "link")}
+            for r in rows
+            if r.get("state") != "indexed"
+        ][:MAX_LIST],
+        "with_rich_results": len([r for r in rows if r.get("rich_results")]),
+        "rich_results": rich_rows[:MAX_LIST],
+    }
+
+
+# --- Bing Webmaster ------------------------------------------------------------------
+
+BING_METRICS: list[tuple[str, str]] = [
+    ("clicks", "Klikken"),
+    ("impressions", "Vertoningen"),
+    ("ctr", "CTR"),
+]
+# Stand van de crawl op de laatste dag, in de volgorde waarin ze getoond worden.
+BING_CRAWL_FIELDS: list[tuple[str, str]] = [
+    ("code_2xx", "Pagina's met 2xx"),
+    ("code_301", "301-redirects"),
+    ("code_302", "302-redirects"),
+    ("code_4xx", "4xx-fouten"),
+    ("code_5xx", "5xx-fouten"),
+    ("blocked_by_robots", "Geblokkeerd door robots.txt"),
+    ("dns_failures", "DNS-fouten"),
+    ("connection_timeouts", "Time-outs"),
+    ("contains_malware", "Malware"),
+]
+_FEED_OK = {"success", "ok"}
+_FEED_PENDING = {"", "pending", "processing", "submitted", "inprogress", "in progress", "queued"}
+
+
+def bing_feed_state(status: Any) -> str:
+    """"ok", "pending" (nog niet verwerkt) of "error" voor de status van een sitemap in Bing."""
+    value = str(status or "").strip().lower()
+    if value in _FEED_OK:
+        return "ok"
+    return "pending" if value in _FEED_PENDING else "error"
+
+
+def compare_bing_webmaster(
+    snapshot: dict[str, Any] | None, base_snapshot: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Bing Webmaster-cijfers van de meetperiode naast de periode ervoor.
+
+    Klikken en vertoningen worden vergeleken met de even lange periode ervoor, uit
+    Bing zelf. Het aantal pagina's in de index wordt vergeleken met de stand aan
+    het begin van de meetperiode; kent Bing die niet meer, dan met de vorige ronde
+    (`base_snapshot`). Zonder koppeling of zonder site in het account bevat het
+    resultaat alleen `state` en `message`. None als de scan geen Bing-stap had.
+    """
+    if not snapshot:
+        return None
+    result: dict[str, Any] = {
+        "state": snapshot.get("state"),
+        "message": snapshot.get("message"),
+        "site": snapshot.get("site"),
+        "auth_mode": snapshot.get("auth_mode"),
+        "has_data": False,
+        "fetched_at": snapshot.get("fetched_at"),
+    }
+    if snapshot.get("state") != "ok":
+        return result
+
+    cur = snapshot.get("totals") or {}
+    prev = snapshot.get("totals_previous") or {}
+    metrics = []
+    for key, label in BING_METRICS:
+        b, a = _num(prev.get(key)), _num(cur.get(key))
+        metrics.append({
+            "key": key,
+            "label": label,
+            "before": b,
+            "after": a,
+            "delta": (a - b) if a is not None and b is not None else None,
+            "pct": round(100 * (a - b) / b, 1) if a is not None and b else None,
+        })
+
+    crawl = snapshot.get("crawl")
+    index = None
+    if crawl:
+        after = _num(crawl.get("in_index"))
+        before, before_date, source = _num(crawl.get("in_index_before")), crawl.get("in_index_before_date"), "bing"
+        base_crawl = (base_snapshot or {}).get("crawl") if (base_snapshot or {}).get("state") == "ok" else None
+        if before is None and base_crawl:
+            before, before_date, source = _num(base_crawl.get("in_index")), base_crawl.get("date"), "base"
+        index = {
+            "date": crawl.get("date"),
+            "in_index": {
+                "before": before,
+                "after": after,
+                "delta": (after - before) if after is not None and before is not None else None,
+                "pct": round(100 * (after - before) / before, 1) if after is not None and before else None,
+                "before_date": before_date,
+                "before_source": source if before is not None else None,
+            },
+            "in_links": crawl.get("in_links"),
+            "crawled_pages": crawl.get("crawled_pages"),
+            "status": [{"key": key, "label": label, "value": crawl.get(key)} for key, label in BING_CRAWL_FIELDS],
+        }
+
+    feeds = snapshot.get("sitemaps")
+    sitemaps = None
+    if feeds is not None:
+        rows = [{**feed, "state": bing_feed_state(feed.get("status"))} for feed in feeds]
+        sitemaps = {
+            "total": len(rows),
+            "with_errors": len([r for r in rows if r["state"] == "error"]),
+            "pending": len([r for r in rows if r["state"] == "pending"]),
+            "rows": rows[:MAX_LIST],
+        }
+
+    crawl_issues = snapshot.get("crawl_issues")
+    result.update({
+        "has_data": bool(crawl) or bool(feeds) or snapshot.get("totals") is not None,
+        "period": snapshot.get("period"),
+        "previous": snapshot.get("previous"),
+        "has_performance": snapshot.get("totals") is not None,
+        "metrics": metrics,
+        "queries": _movers(snapshot.get("queries") or []),
+        "pages": _movers(snapshot.get("pages") or []),
+        "index": index,
+        "crawl_issues": None if crawl_issues is None else {
+            "total": crawl_issues.get("total") or 0,
+            "rows": (crawl_issues.get("rows") or [])[:MAX_LIST],
+        },
+        "sitemaps": sitemaps,
+    })
+    return result
 
 
 # --- posities (SEO-tracker) ----------------------------------------------------------

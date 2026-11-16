@@ -121,7 +121,8 @@ def get_rankings(ctx: QuarterlyContext) -> dict[str, Any]:
     "get_search_console",
     "Google Search Console: klikken, vertoningen, CTR en gemiddelde positie in de meetperiode, de periode ervoor "
     "en dezelfde periode vorig jaar; zoekopdrachten en pagina's met de meeste klikken en de grootste stijgers en "
-    "dalers; ingediende sitemaps; en geïnspecteerde URL's die Google niet heeft geïndexeerd. "
+    "dalers; ingediende sitemaps; en de URL-inspectie: hoeveel indexeerbare pagina's zijn gecontroleerd "
+    "(complete=true als dat allemaal is), welke Google niet heeft geïndexeerd en welke rich-results-fouten hebben. "
     "available=false als Search Console niet is gekoppeld.",
 )
 def get_search_console(ctx: QuarterlyContext) -> dict[str, Any]:
@@ -159,10 +160,66 @@ def get_search_console(ctx: QuarterlyContext) -> dict[str, Any]:
             ][:MAX_ROWS],
         },
         "url_inspection": None if not inspection else {
+            "eligible": inspection.get("eligible"),
             "checked": inspection.get("checked"),
             "indexed": inspection.get("indexed"),
+            "complete": bool(inspection.get("complete")),
             "not_indexed": (inspection.get("not_indexed") or [])[:MAX_ROWS],
+            # Alleen pagina's met fouten (errors > 0); waarschuwingen gaan over optionele velden.
+            "rich_results_errors": [
+                r for r in inspection.get("rich_results") or [] if r.get("errors")
+            ][:MAX_ROWS],
         },
+    }
+
+
+@tool(
+    "get_bing_webmaster",
+    "Bing Webmaster Tools: aantal pagina's in de Bing-index (begin van de meetperiode en nu), crawlstatus "
+    "(4xx, 5xx, robots.txt, DNS, malware), URL's met een crawlfout, ingediende sitemaps, klikken en vertoningen "
+    "in de meetperiode en de periode ervoor, en de zoekopdrachten en pagina's met de meeste klikken. "
+    "available=false met een reden als Bing niet is gekoppeld of de site niet in het Bing-account staat.",
+)
+def get_bing_webmaster(ctx: QuarterlyContext) -> dict[str, Any]:
+    bing = _comparison(ctx).get("bing_webmaster")
+    if not bing or bing.get("state") != "ok" or not bing.get("has_data"):
+        reason = (bing or {}).get("message") or (
+            "Bing heeft nog geen data voor deze site." if bing and bing.get("state") == "ok"
+            else "Bing Webmaster is niet gekoppeld."
+        )
+        return {"available": False, "reason": reason}
+
+    def movers(block: dict[str, Any] | None) -> dict[str, Any]:
+        block = block or {}
+        return {
+            "total": block.get("total", 0),
+            "top": (block.get("top") or [])[:10],
+            "risers": (block.get("risers") or [])[:10],
+            "fallers": (block.get("fallers") or [])[:10],
+        }
+
+    sitemaps = bing.get("sitemaps")
+    crawl_issues = bing.get("crawl_issues")
+    return {
+        "available": True,
+        "site": bing.get("site"),
+        "period": bing.get("period"),
+        "previous_period": bing.get("previous"),
+        # before = periode ervoor, after = meetperiode. Bing geeft geen gemiddelde positie voor de hele site.
+        "metrics": bing.get("metrics") if bing.get("has_performance") else None,
+        # in_index.before is de stand aan het begin van de meetperiode (of de vorige ronde).
+        "index": bing.get("index"),
+        "crawl_issues": None if crawl_issues is None else {
+            "total": crawl_issues.get("total"),
+            "examples": (crawl_issues.get("rows") or [])[:MAX_ROWS],
+        },
+        "sitemaps": None if sitemaps is None else {
+            "total": sitemaps.get("total"),
+            "with_errors": sitemaps.get("with_errors"),
+            "rows": (sitemaps.get("rows") or [])[:MAX_ROWS],
+        },
+        "queries": movers(bing.get("queries")),
+        "pages": movers(bing.get("pages")),
     }
 
 
@@ -224,6 +281,7 @@ QUARTERLY_REPORT_TOOLS = [
     get_issue_changes,
     get_rankings,
     get_search_console,
+    get_bing_webmaster,
     get_new_pages,
     get_schema_problems,
     query_issues,

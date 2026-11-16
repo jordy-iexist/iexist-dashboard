@@ -2,12 +2,15 @@
 
 Zoekt de property van de klant, haalt prestaties (klikken, vertoningen, CTR,
 positie) op voor de meetperiode, de periode ervoor en dezelfde periode vorig
-jaar, plus de sitemaps en de indexstatus van een beperkt aantal URL's. Het
+jaar, plus de sitemaps en per URL de indexstatus en rich results. Het
 resultaat (`LaunchScan.search_console`) is een JSON-snapshot; elke call faalt
 los, zodat een ontbrekend onderdeel de rest niet tegenhoudt.
 """
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -249,27 +252,78 @@ def inspect_pages(
     *,
     service: Any | None = None,
     should_continue: Callable[[], bool] | None = None,
+    workers: int = 1,
+    max_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Indexstatus per URL. Stopt bij een fatale fout of een bereikt quotum."""
-    svc = service if service is not None else gsc.get_service()
-    rows: list[dict[str, Any]] = []
+    """Indexstatus en rich results per URL, in de volgorde van `urls`.
+
+    Stopt bij een fatale fout, een bereikt quotum, `should_continue() == False`
+    of na `max_seconds`; `stopped_reason` zegt welke ("fatal", "quota", "stopped",
+    "timeout") en is None als alle URL's aan de beurt zijn geweest. Met
+    `workers > 1` lopen de inspecties parallel; elke thread maakt dan een eigen
+    service, want die is niet thread-safe (`service` geldt alleen voor één worker).
+    """
+    parallel = workers > 1 and len(urls) > 1
+    deadline = time.monotonic() + max_seconds if max_seconds else None
+    stop = threading.Event()
+    lock = threading.Lock()
+    local = threading.local()
+    reasons: list[str] = []
+    found: dict[int, dict[str, Any]] = {}
     errors: list[str] = []
-    for url in urls:
+
+    def halt(reason: str) -> None:
+        with lock:
+            if not stop.is_set():
+                reasons.append(reason)
+                stop.set()
+
+    def thread_service() -> Any:
+        if not parallel and service is not None:
+            return service
+        if getattr(local, "service", None) is None:
+            local.service = gsc.get_service()
+        return local.service
+
+    def inspect(index: int, url: str) -> None:
+        if stop.is_set():
+            return
         if should_continue is not None and not should_continue():
-            break
+            return halt("stopped")
+        if deadline is not None and time.monotonic() >= deadline:
+            return halt("timeout")
         try:
-            row = gsc.inspect_url(site_url, url, service=svc)
+            row = gsc.inspect_url(site_url, url, service=thread_service())
         except SearchConsoleServiceError as exc:
-            errors.append(f"{url}: {exc}")
-            if exc.code in FATAL_CODES or exc.code == "rate_limited":
-                break
-            continue
+            with lock:
+                errors.append(f"{url}: {exc}")
+            if exc.code == "rate_limited":
+                halt("quota")
+            elif exc.code in FATAL_CODES:
+                halt("fatal")
+            return
         row["state"], row["reason"] = classify_inspection(row)
-        rows.append(row)
+        with lock:
+            found[index] = row
+
+    if parallel:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            try:
+                list(pool.map(lambda job: inspect(*job), enumerate(urls)))
+            finally:
+                stop.set()  # ook bij een afgebroken taak: wachtende inspecties starten niet meer
+    else:
+        for index, url in enumerate(urls):
+            if stop.is_set():
+                break
+            inspect(index, url)
+
+    rows = [found[index] for index in sorted(found)]
     return {
         "requested": len(urls),
         "checked": len(rows),
         "indexed": len([r for r in rows if r["state"] == "indexed"]),
         "rows": rows,
         "errors": errors[:10],
+        "stopped_reason": reasons[0] if reasons else None,
     }

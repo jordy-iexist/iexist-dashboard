@@ -295,13 +295,40 @@ class Settings(BaseSettings):
     gsc_row_limit: int = Field(
         default=250, ge=10, le=5000, validation_alias="GSC_ROW_LIMIT"
     )
-    # URL-inspecties per scan (quotum: 2000 per dag per property).
+    # URL-inspecties per scan (quotum: 2000 per dag en 600 per minuut per property).
     gsc_inspect_max_urls: int = Field(
-        default=40, ge=0, le=500, validation_alias="GSC_INSPECT_MAX_URLS"
+        default=500, ge=0, le=2000, validation_alias="GSC_INSPECT_MAX_URLS"
+    )
+    # Gelijktijdige URL-inspecties; elke thread heeft een eigen verbinding. Eén inspectie
+    # duurt ongeveer 7 seconden: 8 tegelijk is ruim 60 per minuut, 500 pagina's in ±7,5 minuut.
+    gsc_inspect_workers: int = Field(
+        default=8, ge=1, le=16, validation_alias="GSC_INSPECT_WORKERS"
+    )
+    # Na zoveel seconden stopt de URL-inspectie; de rest blijft ongecontroleerd.
+    gsc_inspect_max_seconds: int = Field(
+        default=600, ge=30, le=1800, validation_alias="GSC_INSPECT_MAX_SECONDS"
     )
     # Vanaf deze daling in klikken (%) geeft de checklist een waarschuwing.
     gsc_clicks_drop_warn_pct: int = Field(
         default=20, ge=1, le=100, validation_alias="GSC_CLICKS_DROP_WARN_PCT"
+    )
+
+    # Bing Webmaster Tools (livegang fase 4): één Bing-account met alle klantsites.
+    # Koppelen gaat via OAuth (knop bij fase 4); het token staat versleuteld in de database.
+    bing_client_id: str = Field(default="", validation_alias="BING_CLIENT_ID")
+    bing_client_secret: str = Field(default="", validation_alias="BING_CLIENT_SECRET")
+    # Moet exact gelijk zijn aan de redirect-URI van de OAuth-client bij Bing. Bing
+    # accepteert geen localhost: ook lokaal staat hier de productie-URL.
+    bing_webmaster_redirect_uri: str = Field(
+        default="", validation_alias="BING_WEBMASTER_REDIRECT_URI"
+    )
+    # Alleen voor lokaal testen: met een API-key slaat de client OAuth over. De key
+    # heeft lees- én schrijfrechten, dus niet zetten in productie.
+    bing_webmaster_api_key: str = Field(
+        default="", validation_alias="BING_WEBMASTER_API_KEY"
+    )
+    bing_webmaster_request_timeout_seconds: float = Field(
+        default=30.0, validation_alias="BING_WEBMASTER_REQUEST_TIMEOUT_SECONDS"
     )
 
     model_config = SettingsConfigDict(

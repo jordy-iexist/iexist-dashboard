@@ -6,9 +6,10 @@ import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { BingWebmasterSetting } from "@/components/livegang/BingWebmasterSetting"
 import { ChecklistTab } from "@/components/livegang/ChecklistTab"
 import { IssuesTab } from "@/components/livegang/IssuesTab"
-import { ComparisonTab, QuarterlyItemDetails } from "@/components/livegang/QuarterlyDetails"
+import { ComparisonTab, quarterlyItemDetails } from "@/components/livegang/QuarterlyDetails"
 import { SearchConsoleSetting } from "@/components/livegang/SearchConsoleSetting"
 import {
   isActive,
@@ -301,6 +302,10 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
           <SearchConsoleSetting customerId={customerId} />
         </PanelRow>
 
+        <PanelRow tone="muted">
+          <BingWebmasterSetting customerId={customerId} />
+        </PanelRow>
+
         {!running && report?.warnings && report.warnings.length > 0 && (
           <PanelRow tone="warning">
             <ul className="space-y-1 text-xs">
@@ -345,7 +350,7 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
                 customerId={customerId}
                 path="quarterly-checklist"
                 period={checklist.period}
-                itemDetails={(item) => <QuarterlyItemDetails item={item} />}
+                itemDetails={quarterlyItemDetails}
                 onChanged={loadChecklist}
               />
             </>
@@ -365,10 +370,26 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                {checklist.sources?.search_console
-                  ? "Concept op basis van de scan, de SEO-tracker, Ahrefs en Search Console. Vul de cijfers uit GA4, Bing"
-                  : "Concept op basis van de scan, de SEO-tracker en Ahrefs. Vul de cijfers uit Search Console, GA4, Bing"}{" "}
-                Webmaster en ProRankTracker zelf aan en vink daarna &quot;Maandrapportage opstellen&quot; af.
+                Concept op basis van{" "}
+                {[
+                  "de scan",
+                  "de SEO-tracker",
+                  "Ahrefs",
+                  checklist.sources?.search_console ? "Search Console" : null,
+                  checklist.sources?.bing_webmaster ? "Bing Webmaster" : null,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+                . Vul de cijfers uit{" "}
+                {[
+                  checklist.sources?.search_console ? null : "Search Console",
+                  "GA4",
+                  checklist.sources?.bing_webmaster ? null : "Bing Webmaster",
+                  "ProRankTracker",
+                ]
+                  .filter(Boolean)
+                  .join(", ")}{" "}
+                zelf aan en vink daarna &quot;Maandrapportage opstellen&quot; af.
               </p>
               {report?.ai_summary ? (
                 <article className="prose prose-sm max-w-none rounded-lg border bg-card p-6 leading-7 dark:prose-invert">

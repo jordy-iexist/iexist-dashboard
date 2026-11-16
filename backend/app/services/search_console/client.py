@@ -197,8 +197,40 @@ def list_sitemaps(site_url: str, *, service: Any | None = None) -> list[dict[str
     return sitemaps
 
 
+def _rich_results(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Rich results van één inspectie, met per gevonden item de meldingen van Google.
+
+    None als Google geen rich results op de pagina heeft gevonden. `severity` is
+    "ERROR" (item telt niet mee als rich result) of "WARNING" (optioneel veld).
+    """
+    rich = result.get("richResultsResult")
+    if not isinstance(rich, dict):
+        return None
+    types: list[str] = []
+    issues: list[dict[str, Any]] = []
+    for detected in rich.get("detectedItems") or []:
+        if not isinstance(detected, dict):
+            continue
+        rich_type = str(detected.get("richResultType") or "")
+        if rich_type and rich_type not in types:
+            types.append(rich_type)
+        for item in detected.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            for issue in item.get("issues") or []:
+                if not isinstance(issue, dict):
+                    continue
+                issues.append({
+                    "type": rich_type,
+                    "item": item.get("name"),
+                    "message": str(issue.get("issueMessage") or ""),
+                    "severity": str(issue.get("severity") or ""),
+                })
+    return {"verdict": rich.get("verdict"), "types": types, "issues": issues}
+
+
 def inspect_url(site_url: str, url: str, *, service: Any | None = None) -> dict[str, Any]:
-    """Indexstatus van één URL volgens Google (URL Inspection API)."""
+    """Indexstatus en rich results van één URL volgens Google (URL Inspection API)."""
     body = {"inspectionUrl": url, "siteUrl": site_url, "languageCode": "nl-NL"}
     payload = _execute(lambda svc: svc.urlInspection().index().inspect(body=body), service)
     result = payload.get("inspectionResult") or {}
@@ -214,6 +246,7 @@ def inspect_url(site_url: str, url: str, *, service: Any | None = None) -> dict[
         "user_canonical": index.get("userCanonical"),
         "last_crawl_time": index.get("lastCrawlTime"),
         "link": result.get("inspectionResultLink"),
+        "rich_results": _rich_results(result),
     }
 
 

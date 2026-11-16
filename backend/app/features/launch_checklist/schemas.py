@@ -444,4 +444,36 @@ class SearchConsolePropertyUpdate(BaseModel):
     property: str | None = Field(default=None, max_length=500)
 
 
+class BingWebmasterSettingsResponse(BaseModel):
+    # Of er een API-key of OAuth-client (BING_CLIENT_ID, BING_CLIENT_SECRET,
+    # BING_WEBMASTER_REDIRECT_URI) is ingesteld.
+    configured: bool
+    # "api_key" (lokaal testen) wint van "oauth"; None als er niets is ingesteld.
+    mode: Literal["api_key", "oauth"] | None = None
+    # Of de koppelknop kan werken (OAuth-client ingesteld).
+    oauth_available: bool = False
+    # Of er een werkende koppeling is. Eén koppeling geldt voor alle klanten.
+    connected: bool = False
+    connected_at: datetime | None = None
+    # De site van deze klant in het Bing-account, en of hij daar (geverifieerd) staat.
+    site: str | None = None
+    site_state: Literal["linked", "not_linked", "not_verified"] | None = None
+    # Aantal geverifieerde sites in het Bing-account.
+    sites_total: int | None = None
+    # Melding als de koppeling verlopen is of de sites niet opgehaald konden worden.
+    error: str | None = None
+
+
+class BingWebmasterAuthorizeUrl(BaseModel):
+    url: str
+
+
+class BingWebmasterExchangeRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=4000)
+
+
+class BingWebmasterConnectionResponse(BaseModel):
+    connected: bool
+
+
 LaunchCustomerItem.model_rebuild()

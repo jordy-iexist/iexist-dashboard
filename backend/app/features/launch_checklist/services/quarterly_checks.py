@@ -3,7 +3,8 @@
 Elk resultaat heeft dezelfde vorm als in fase 2 en 3:
 `{status, message, evidence, details}`. `c4_proranktracker` is handmatig en
 krijgt geen auto-resultaat; `c4_search_console` alleen als Search Console is
-gekoppeld.
+gekoppeld. `c4_bing_webmaster` krijgt altijd een resultaat: zonder koppeling of
+zonder site in het Bing-account zegt het dat de controle handmatig moet.
 """
 from __future__ import annotations
 
@@ -218,6 +219,9 @@ def evaluate_schema(pages: list[Any], lost_types: list[dict[str, Any]]) -> dict[
 
 # --- c4_search_console -----------------------------------------------------------------
 
+PAGES = "pagina's"
+
+
 def _nl(value: Any) -> str:
     return f"{int(value):,}".replace(",", ".")
 
@@ -225,9 +229,12 @@ def _nl(value: Any) -> str:
 def evaluate_search_console(gsc: dict[str, Any] | None, clicks_drop_warn_pct: int = 20) -> dict[str, Any]:
     """`gsc`: resultaat van `compare_search_console`.
 
-    Het rapport Pagina-indexering en Bing Webmaster zitten niet in de API. Daarom
-    is de status nooit "ok": zonder problemen blijft het punt open ("info") tot het
-    handmatig is afgevinkt.
+    De rapporten Pagina-indexering en Verbeteringen zitten niet in de API; de
+    scan benadert ze met de URL-inspectie per pagina (indexstatus en rich
+    results). Alleen als alle indexeerbare pagina's zijn geïnspecteerd en ook de
+    klikken en sitemaps zijn opgehaald, kan de status "ok" worden. Anders blijft
+    het punt zonder problemen open ("info") tot het handmatig is afgevinkt.
+    Bing Webmaster heeft een eigen punt (`c4_bing_webmaster`).
     """
     if not gsc:
         return _r("unknown", "Geen Search Console-data in deze scan (zie de waarschuwingen bij de scan).")
@@ -271,26 +278,204 @@ def evaluate_search_console(gsc: dict[str, Any] | None, clicks_drop_warn_pct: in
 
     inspection = gsc.get("inspection")
     not_indexed: list[dict[str, Any]] = []
+    rich_errors: list[dict[str, Any]] = []
+    coverage: dict[str, Any] | None = None
     if inspection:
         not_indexed = inspection.get("not_indexed") or []
         blocked = [r for r in not_indexed if r.get("state") == "blocked"]
         errors += len(blocked)
         warnings += len(not_indexed) - len(blocked)
-        checked = _plural(inspection.get("checked") or 0, "URL", "URL's")
-        parts.append(f"{checked} geïnspecteerd, {inspection.get('indexed') or 0} geïndexeerd")
+        # Alleen fouten tellen mee; waarschuwingen van Google gaan over optionele velden.
+        rich_errors = [r for r in inspection.get("rich_results") or [] if r.get("errors")]
+        errors += len(rich_errors)
+        checked, eligible = inspection.get("checked") or 0, inspection.get("eligible")
+        coverage = {
+            "eligible": eligible,
+            "checked": checked,
+            "indexed": inspection.get("indexed") or 0,
+            "complete": bool(inspection.get("complete")),
+        }
+        if eligible:
+            inspected = f"{checked} van {_plural(eligible, 'pagina', PAGES)}"
+        else:  # scan van vóór de volledige inspectie: alleen de homepage en nieuwe pagina's
+            inspected = _plural(checked, "URL", "URL's")
+        parts.append(f"{inspected} geïnspecteerd, {coverage['indexed']} geïndexeerd")
+        if rich_errors:
+            parts.append(f"{_plural(len(rich_errors), 'pagina', PAGES)} met rich-results-fouten")
+        elif inspection.get("with_rich_results"):
+            parts.append("geen rich-results-fouten")
         evidence += [f"Niet geïndexeerd ({r.get('reason')}) · {r.get('url')}" for r in blocked + [
             r for r in not_indexed if r.get("state") != "blocked"
         ]]
+        evidence += [
+            f"Rich results: {_plural(r['errors'], 'fout', 'fouten')} "
+            f"({', '.join(r.get('types') or []) or 'onbekend type'}) · {r.get('url')}"
+            for r in rich_errors
+        ]
 
-    status = "error" if errors else "warning" if warnings else "info"
+    # Zonder volledige dekking of zonder klikken of sitemaps valt "niets mis" niet te zeggen.
+    missing: list[str] = []
+    if not gsc.get("has_performance"):
+        missing.append("de klikken zijn niet opgehaald")
+    if sitemaps is None:
+        missing.append("de sitemaps zijn niet opgehaald")
+    if not coverage:
+        missing.append("er zijn geen pagina's geïnspecteerd")
+    elif not coverage["complete"]:
+        missing.append("niet alle indexeerbare pagina's zijn geïnspecteerd")
+
     summary = "; ".join(parts)
-    message = f"{summary[:1].upper()}{summary[1:]}. " if summary else ""
-    message +="Controleer Pagina-indexering en Bing Webmaster zelf en vink dit punt daarna af."
+    message = f"{summary[:1].upper()}{summary[1:]}." if summary else ""
+    if errors:
+        status = "error"
+    elif warnings:
+        status = "warning"
+    elif missing:
+        status = "info"
+    else:
+        status = "ok"
+    if missing:
+        message += (
+            f" Let op: {' en '.join(missing)}. Controleer het rapport Pagina-indexering zelf en vink dit "
+            "punt daarna af."
+        )
     details = {
         "property": gsc.get("property"),
         "clicks_drop_pct": drop_pct,
         "sitemaps": bad_sitemaps[:MAX_LIST],
+        "inspection": coverage,
         "not_indexed": not_indexed[:MAX_LIST],
+        "rich_results": (inspection or {}).get("rich_results") or [],
+    }
+    return _r(status, message.strip(), evidence, details)
+
+
+# --- c4_bing_webmaster -----------------------------------------------------------------
+
+# Onder deze aantallen zegt een procentuele daling niets.
+BING_MIN_CLICKS_FOR_DROP = 20
+BING_MIN_INDEX_FOR_DROP = 10
+BING_INDEX_DROP_WARN_PCT = 20
+_BING_MANUAL = "Voer deze controle handmatig uit in Bing Webmaster Tools en vink het punt daarna af."
+
+
+def evaluate_bing_webmaster(bing: dict[str, Any] | None, clicks_drop_warn_pct: int = 20) -> dict[str, Any]:
+    """`bing`: resultaat van `compare_bing_webmaster`.
+
+    Dit punt krijgt altijd een resultaat. Zonder koppeling, of als de site niet in
+    het Bing-account staat, is dat "info": het punt blijft open en wordt handmatig
+    gedaan. Met data en zonder problemen is het "ok" en telt het als afgerond.
+    """
+    if not bing:
+        return _r("info", "Bing Webmaster is niet gekoppeld. " + _BING_MANUAL, details={"state": "not_connected"})
+    state = bing.get("state")
+    site = bing.get("site")
+    if state != "ok":
+        message = bing.get("message") or "Bing Webmaster-data is niet opgehaald. " + _BING_MANUAL
+        return _r("info", message, details={"state": state, "site": site})
+    if not bing.get("has_data"):
+        return _r(
+            "info",
+            "De site staat in Bing Webmaster Tools, maar Bing heeft nog geen data. Scan later opnieuw of voer "
+            "deze controle handmatig uit.",
+            details={"state": "no_data", "site": site},
+        )
+
+    parts: list[str] = []
+    evidence: list[str] = []
+    errors = warnings = 0
+
+    index = bing.get("index") or {}
+    in_index = index.get("in_index") or {}
+    index_drop_pct = None
+    status_counts = {row["key"]: row.get("value") or 0 for row in index.get("status") or []}
+    if in_index.get("after") is not None:
+        text = f"{_nl(in_index['after'])} pagina's in de Bing-index"
+        if in_index.get("before") is not None:
+            text += f" (was {_nl(in_index['before'])})"
+            pct = in_index.get("pct")
+            if pct is not None and in_index["before"] >= BING_MIN_INDEX_FOR_DROP and pct <= -BING_INDEX_DROP_WARN_PCT:
+                index_drop_pct = pct
+                warnings += 1
+                evidence.append(f"Aantal pagina's in de Bing-index {abs(pct):g}% gedaald")
+        parts.append(text)
+        if in_index["after"] == 0:
+            warnings += 1
+            evidence.append("Bing heeft geen enkele pagina van de site in de index")
+    malware = int(status_counts.get("contains_malware") or 0)
+    if malware:
+        errors += 1
+        evidence.append("Bing meldt malware op " + _plural(malware, "URL", "URL's"))
+    server_errors = int(status_counts.get("code_5xx") or 0)
+    if server_errors:
+        warnings += 1
+        evidence.append(_plural(server_errors, "URL geeft", "URL's geven") + " een serverfout (5xx) aan Bingbot")
+    for key, label in (("dns_failures", "DNS-fouten"), ("connection_timeouts", "time-outs")):
+        if int(status_counts.get(key) or 0):
+            warnings += 1
+            evidence.append(f"Bingbot meldt {status_counts[key]} {label}")
+
+    crawl_issues = bing.get("crawl_issues")
+    issue_rows: list[dict[str, Any]] = []
+    if crawl_issues is not None:
+        issue_rows = crawl_issues.get("rows") or []
+        severe = [r for r in issue_rows if r.get("severe")]
+        errors += len(severe)
+        warnings += len(issue_rows) - len(severe)
+        total = crawl_issues.get("total") or 0
+        parts.append(_plural(total, "URL met een crawlfout", "URL's met een crawlfout") if total else "geen crawlfouten")
+        evidence += [
+            f"{', '.join(i['label'] for i in r.get('issues') or []) or 'crawlfout'} · {r.get('url')}"
+            for r in severe + [r for r in issue_rows if not r.get("severe")]
+        ]
+
+    sitemaps = bing.get("sitemaps")
+    bad_sitemaps: list[dict[str, Any]] = []
+    no_sitemap = False
+    if sitemaps is not None:
+        bad_sitemaps = [s for s in sitemaps.get("rows") or [] if s.get("state") == "error"]
+        errors += len(bad_sitemaps)
+        if not sitemaps.get("total"):
+            no_sitemap = True
+            warnings += 1
+            parts.append("geen sitemap ingediend")
+            evidence.append("Er is geen sitemap ingediend in Bing Webmaster Tools")
+        else:
+            parts.append(f"{_plural(sitemaps['total'], 'sitemap', 'sitemaps')}, {len(bad_sitemaps)} met fouten")
+        evidence += [f"Sitemap met status {s.get('status') or 'onbekend'} · {s.get('url')}" for s in bad_sitemaps]
+
+    clicks = next((m for m in bing.get("metrics") or [] if m["key"] == "clicks"), None)
+    clicks_drop_pct = None
+    if clicks and clicks.get("after") is not None:
+        text = f"{_nl(clicks['after'])} klikken"
+        if clicks.get("before") is not None:
+            text = f"klikken {_nl(clicks['before'])} → {_nl(clicks['after'])}"
+            pct = clicks.get("pct")
+            if pct is not None:
+                text += f" ({'+' if pct >= 0 else ''}{pct:g}%)"
+                if clicks["before"] >= BING_MIN_CLICKS_FOR_DROP and pct <= -clicks_drop_warn_pct:
+                    clicks_drop_pct = pct
+                    warnings += 1
+                    evidence.append(f"Klikken uit Bing {abs(pct):g}% gedaald t.o.v. de vorige periode")
+        days = (bing.get("period") or {}).get("days")
+        parts.append(text + (f" in {days} dagen" if days else ""))
+
+    status = "error" if errors else "warning" if warnings else "ok"
+    summary = "; ".join(parts)
+    message = f"{summary[:1].upper()}{summary[1:]}." if summary else "Bing Webmaster-data opgehaald."
+    if status == "ok":
+        message += " Geen problemen gevonden in Bing Webmaster."
+    details = {
+        "state": "ok",
+        "site": site,
+        "index_drop_pct": index_drop_pct,
+        "clicks_drop_pct": clicks_drop_pct,
+        "malware": malware,
+        "server_errors": server_errors,
+        "no_sitemap": no_sitemap,
+        "sitemaps": bad_sitemaps[:MAX_LIST],
+        "crawl_issues_total": (crawl_issues or {}).get("total") or 0,
+        "crawl_issues": issue_rows[:MAX_LIST],
     }
     return _r(status, message, evidence, details)
 

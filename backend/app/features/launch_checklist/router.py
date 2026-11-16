@@ -39,6 +39,10 @@ from app.features.launch_checklist.mappers import (
 )
 from app.features.launch_checklist.schemas import (
     ACTIVE_STATUSES,
+    BingWebmasterAuthorizeUrl,
+    BingWebmasterConnectionResponse,
+    BingWebmasterExchangeRequest,
+    BingWebmasterSettingsResponse,
     ChecklistItemOut,
     ChecklistProgress,
     ChecklistResponse,
@@ -79,7 +83,7 @@ from app.features.launch_checklist.schemas import (
     LaunchScanPageListResponse,
 )
 from app.core.config import settings
-from app.features.launch_checklist.services import ahrefs_enrich, gsc_enrich, monday_push
+from app.features.launch_checklist.services import ahrefs_enrich, bing_enrich, gsc_enrich, monday_push
 from app.features.launch_checklist.services.checklist_view import (
     latest_completed_geo as _latest_completed_geo,
     latest_completed_scan,
@@ -105,6 +109,10 @@ from app.features.launch_checklist.services.geo_checklist import (
 )
 from app.services.monday import client as monday_client
 from app.services.monday.client import MondayServiceError
+from app.services.bing_webmaster import client as bing_client
+from app.services.bing_webmaster import connection as bing_connection
+from app.services.bing_webmaster.client import BingWebmasterServiceError
+from app.services.bing_webmaster.connection import BingSession
 from app.services.search_console import client as gsc_client
 from app.services.search_console.client import SearchConsoleServiceError
 from app.features.launch_checklist.services.content_checklist import (
@@ -915,6 +923,101 @@ def set_search_console_property(
     customer.updated_at = _now()
     db.commit()
     return _search_console_settings(customer)
+
+
+# --- Bing Webmaster (fase 4) -----------------------------------------------------
+
+_BING_SITES_TTL_SECONDS = 600.0
+# (tijdstip, sites) van de laatste GetUserSites; het account is voor alle klanten hetzelfde.
+_bing_sites_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def _bing_sites(db: Session, *, refresh: bool = False) -> list[dict[str, Any]]:
+    global _bing_sites_cache
+    cached = _bing_sites_cache
+    if not refresh and cached is not None and time.monotonic() - cached[0] < _BING_SITES_TTL_SECONDS:
+        return cached[1]
+    sites = BingSession(db).list_sites()
+    _bing_sites_cache = (time.monotonic(), sites)
+    return sites
+
+
+def _clear_bing_sites_cache() -> None:
+    global _bing_sites_cache
+    _bing_sites_cache = None
+
+
+def _bing_webmaster_settings(
+    db: Session, customer: CustomerWebsite, *, refresh: bool = False
+) -> BingWebmasterSettingsResponse:
+    response = BingWebmasterSettingsResponse(**bing_connection.status(db))
+    if not response.connected:
+        return response
+    try:
+        sites = _bing_sites(db, refresh=refresh)
+    except BingWebmasterServiceError as exc:
+        response.error = str(exc)
+        if exc.code in {"token_expired", "not_connected", "unauthorized"}:
+            response.connected = False
+        return response
+    response.sites_total = len([site for site in sites if site.get("verified")])
+    response.site, response.site_state = bing_enrich.resolve_site(customer.base_url, sites)
+    return response
+
+
+@router.get("/customers/{customer_id}/bing-webmaster", response_model=BingWebmasterSettingsResponse)
+def get_bing_webmaster_settings(
+    customer_id: str,
+    refresh: bool = Query(default=False),
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Stand van de Bing Webmaster-koppeling en of de site van deze klant in het account staat."""
+    return _bing_webmaster_settings(db, _get_customer(db, customer_id), refresh=refresh)
+
+
+@router.get("/bing-webmaster/authorize-url", response_model=BingWebmasterAuthorizeUrl)
+def get_bing_webmaster_authorize_url(
+    state: str = Query(min_length=16, max_length=200, pattern=r"^[A-Za-z0-9_-]+$"),
+    _user_id: str = Depends(require_user_id),
+):
+    """URL bij Bing waar de gebruiker toestemming geeft.
+
+    `state` is een willekeurige waarde die de frontend in een cookie bewaart en
+    op de callback vergelijkt.
+    """
+    try:
+        return BingWebmasterAuthorizeUrl(url=bing_client.authorize_url(state))
+    except BingWebmasterServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/bing-webmaster/exchange", response_model=BingWebmasterConnectionResponse)
+def exchange_bing_webmaster_code(
+    payload: BingWebmasterExchangeRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Wissel de autorisatiecode van de callback in en bewaar de koppeling."""
+    try:
+        tokens = bing_client.exchange_code(payload.code.strip())
+    except BingWebmasterServiceError as exc:
+        status = 400 if exc.code in {"not_configured", "token_expired", "oauth_error"} else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    bing_connection.save_tokens(db, tokens, user_id)
+    _clear_bing_sites_cache()
+    return BingWebmasterConnectionResponse(connected=True)
+
+
+@router.delete("/bing-webmaster/connection", response_model=BingWebmasterConnectionResponse)
+def disconnect_bing_webmaster(
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Verwijder de OAuth-koppeling. De toestemming bij Bing zelf blijft staan tot die daar wordt ingetrokken."""
+    bing_connection.disconnect(db)
+    _clear_bing_sites_cache()
+    return BingWebmasterConnectionResponse(connected=False)
 
 
 @router.patch("/scans/{scan_id}/pages/{page_id}/page-type")

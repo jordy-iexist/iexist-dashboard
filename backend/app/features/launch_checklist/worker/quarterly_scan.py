@@ -2,7 +2,8 @@
 
 Herhaalt de nulmeting met eigen pagina's (crawl, AI-checks, Ahrefs), haalt de
 HTML opnieuw op voor JSON-LD en schema-validatie, haalt Search Console-data op
-(prestaties, sitemaps, indexstatus van nieuwe pagina's), vergelijkt alles met de
+(prestaties, sitemaps, indexstatus en rich results per pagina) en Bing Webmaster-data
+(index, crawlfouten, sitemaps, klikken), vergelijkt alles met de
 vorige ronde (of de nulmeting), evalueert de fase-4 checklist, maakt
 actiepunten en laat een agent een conceptrapport schrijven.
 
@@ -34,7 +35,7 @@ from app.features.launch_checklist.services.checklist_view import (
 )
 from app.features.launch_checklist.services.discovery import discover_from_sitemaps, root_domain_of
 from app.features.launch_checklist.services.geo_extract import extract_geo
-from app.features.launch_checklist.services import gsc_enrich
+from app.features.launch_checklist.services import bing_enrich, gsc_enrich
 from app.features.launch_checklist.services.geo_rebuild import apply_page_types
 from app.features.launch_checklist.services.inventory import (
     MAX_BODY_BYTES,
@@ -53,6 +54,7 @@ from app.features.launch_checklist.services.issues import (
 )
 from app.features.launch_checklist.services.quarterly_checks import (
     evaluate_ai_scan,
+    evaluate_bing_webmaster,
     evaluate_new_pages,
     evaluate_report,
     evaluate_schema,
@@ -62,6 +64,7 @@ from app.features.launch_checklist.services.quarterly_compare import (
     base_info,
     compare_ahrefs,
     compare_ai,
+    compare_bing_webmaster,
     compare_issues,
     compare_pages,
     compare_rankings,
@@ -75,6 +78,7 @@ from app.features.launch_checklist.services.quarterly_checklist import period_la
 from app.features.launch_checklist.services.schema_validate import validate_html
 from app.features.launch_checklist.services.stats import build_summary_stats
 from app.features.launch_checklist.worker.launch_scan import _enrich_with_ahrefs, _record_to_row
+from app.services.bing_webmaster.connection import BingSession
 from app.services.search_console import client as gsc_client
 from app.worker.celery_app import celery_app
 
@@ -160,22 +164,30 @@ def _copy_page_types(base_pages: list[LaunchScanPage], pages: list[LaunchScanPag
             page.page_type, page.page_type_source = before.page_type, before.page_type_source
 
 
-def _inspection_urls(scan_id: str, base_url: str) -> list[str]:
-    """URL's voor de URL-inspectie: de homepage en nieuwe, werkende, indexeerbare pagina's."""
+def _inspection_urls(scan_id: str, base_url: str) -> tuple[list[str], int]:
+    """(URL's voor de URL-inspectie, aantal dat in aanmerking komt).
+
+    De homepage, daarna nieuwe werkende pagina's en dan alle overige indexeerbare
+    pagina's (sitemap-pagina's eerst), afgekapt op `gsc_inspect_max_urls`. Het
+    tweede getal is het aantal vóór die limiet: zo is te zien of alles is gecontroleerd.
+    """
     limit = settings.gsc_inspect_max_urls
     if limit <= 0:
-        return []
+        return [], 0
     with SessionLocal() as db:
         scan = db.get(LaunchScan, scan_id)
         if scan is None:
-            return []
+            return [], 0
         pages = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == scan_id).all()
         base = comparison_base(db, scan)
         base_pages = db.query(LaunchScanPage).filter(LaunchScanPage.scan_id == base.id).all() if base else []
         new_pages = compare_pages(base_pages, pages)["new"] if base else []
-        candidates = [base_url] + [
-            p.final_url or p.url for p in new_pages if is_working(p) and p.indexable is not False
-        ]
+        indexable = sorted((p for p in pages if p.indexable is True), key=lambda p: (not p.in_sitemap, p.url))
+        candidates = (
+            [base_url]
+            + [p.final_url or p.url for p in new_pages if is_working(p) and p.indexable is not False]
+            + [p.final_url or p.url for p in indexable]
+        )
     urls: list[str] = []
     seen: set[str] = set()
     for url in candidates:
@@ -183,7 +195,16 @@ def _inspection_urls(scan_id: str, base_url: str) -> list[str]:
         if key not in seen:
             seen.add(key)
             urls.append(url)
-    return urls[:limit]
+    return urls[:limit], len(urls)
+
+
+# Waarom de URL-inspectie niet alle pagina's heeft gehaald.
+_INSPECTION_STOP_REASONS = {
+    "quota": "het dagquotum van Search Console is bereikt",
+    "fatal": "Search Console weigerde de aanvraag",
+    "timeout": "de tijdslimiet (GSC_INSPECT_MAX_SECONDS) is bereikt",
+    "stopped": "de scan is gestopt",
+}
 
 
 def _enrich_with_search_console(
@@ -211,17 +232,45 @@ def _enrich_with_search_console(
         return None
     if _is_stopped(scan_id):
         return snapshot
-    urls = _inspection_urls(scan_id, base_url)
+    urls, eligible = _inspection_urls(scan_id, base_url)
     if urls:
         inspection = gsc_enrich.inspect_pages(
-            site_url, urls, service=service, should_continue=lambda: not _is_stopped(scan_id)
+            site_url,
+            urls,
+            service=service,
+            should_continue=lambda: not _is_stopped(scan_id),
+            workers=settings.gsc_inspect_workers,
+            max_seconds=settings.gsc_inspect_max_seconds,
         )
+        inspection["eligible"] = eligible
         snapshot["inspection"] = inspection
-        if inspection["errors"]:
+        if inspection["checked"] < eligible:
+            reason = _INSPECTION_STOP_REASONS.get(inspection.get("stopped_reason") or "")
+            if reason is None and eligible > len(urls):
+                reason = f"de limiet is {len(urls)} per scan (GSC_INSPECT_MAX_URLS)"
+            if reason is None and inspection["errors"]:
+                reason = inspection["errors"][0]
             warnings.append(
-                f"Search Console: {len(urls) - inspection['checked']} van de {len(urls)} URL-inspecties "
-                f"zijn niet gelukt ({inspection['errors'][0]})."
+                f"Search Console: {inspection['checked']} van de {eligible} pagina's geïnspecteerd"
+                + (f" ({reason})." if reason else ".")
             )
+    return snapshot
+
+
+def _enrich_with_bing_webmaster(base_url: str, warnings: list[str]) -> dict[str, Any]:
+    """Bing Webmaster-snapshot van de klantsite; altijd een dict met een `state`.
+
+    Zonder koppeling, of als de site niet in het Bing-account staat, komt er geen
+    waarschuwing bij de scan: dat is voor de meeste klanten de gewone situatie en
+    het checklistpunt zegt dan dat de controle handmatig moet. Alleen echte fouten
+    (verlopen koppeling, mislukte calls) worden gemeld.
+    """
+    with SessionLocal() as db:
+        snapshot = bing_enrich.collect(base_url, lambda: BingSession(db))
+    if snapshot["state"] in {"error", "token_expired"}:
+        warnings.append(f"Bing Webmaster: {snapshot.get('message') or 'data niet opgehaald'}")
+    elif snapshot["state"] == "ok":
+        warnings.extend(f"Bing Webmaster: {error}" for error in snapshot["errors"])
     return snapshot
 
 
@@ -235,6 +284,7 @@ def _comparison_payload(
     ahrefs_after: dict[str, Any] | None,
     rankings: dict[str, Any] | None,
     search_console: dict[str, Any] | None,
+    bing_webmaster: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "base": base_info(base) if base is not None else None,
@@ -251,6 +301,9 @@ def _comparison_payload(
         "ahrefs": compare_ahrefs(base.ahrefs if base else None, ahrefs_after),
         "rankings": rankings,
         "search_console": compare_search_console(search_console),
+        "bing_webmaster": compare_bing_webmaster(
+            bing_webmaster, base.bing_webmaster if base is not None else None
+        ),
     }
 
 
@@ -380,7 +433,7 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
             db.commit()
         _update(scan_id, total_urls=len(records), inventoried_urls=len(records), warnings=warnings)
 
-        # 3b. Search Console: prestaties, sitemaps en indexstatus van nieuwe pagina's
+        # 3b. Search Console: prestaties, sitemaps en per pagina de indexstatus en rich results
         gsc_snapshot: dict[str, Any] | None = None
         try:
             gsc_snapshot = _enrich_with_search_console(scan_id, gsc_property, base_url, warnings)
@@ -391,6 +444,20 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
             return
         if gsc_snapshot is not None:
             _update(scan_id, search_console=gsc_snapshot, warnings=warnings)
+
+        # 3c. Bing Webmaster: index, crawlfouten, sitemaps en klikken
+        bing_snapshot: dict[str, Any]
+        try:
+            bing_snapshot = _enrich_with_bing_webmaster(base_url, warnings)
+        except Exception as exc:  # Bing Webmaster is een verrijking: de scan gaat zonder door
+            logger.warning("Bing Webmaster-verrijking faalde voor fase 4-scan %s: %s", scan_id, exc)
+            warnings.append(f"Bing Webmaster-data niet opgehaald: {exc}")
+            bing_snapshot = bing_enrich.empty_snapshot(
+                "error", message="Bing Webmaster-data is niet opgehaald — voer deze controle handmatig uit."
+            )
+        if _is_stopped(scan_id):
+            return
+        _update(scan_id, bing_webmaster=bing_snapshot, warnings=warnings)
 
         # 4. Vergelijken, checklist en actiepunten
         _update(scan_id, status="checking")
@@ -424,6 +491,7 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
                 ahrefs_after=ahrefs_summary,
                 rankings=rankings,
                 search_console=gsc_snapshot,
+                bing_webmaster=bing_snapshot,
             )
             items = {
                 "c4_ai_scan": evaluate_ai_scan(comparison["ai"], base_label),
@@ -431,6 +499,11 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
                     pages_diff, source, base_label, (gsc_snapshot or {}).get("inspection")
                 ),
                 "c4_schema_validation": evaluate_schema(pages, lost_schema_types(base_pages, pages)),
+                # Altijd een resultaat: zonder koppeling of zonder site in het Bing-account
+                # staat hier dat de controle handmatig moet.
+                "c4_bing_webmaster": evaluate_bing_webmaster(
+                    comparison["bing_webmaster"], settings.gsc_clicks_drop_warn_pct
+                ),
             }
             # Zonder koppeling blijft het Search Console-punt volledig handmatig.
             if comparison["search_console"] is not None:
@@ -455,13 +528,13 @@ def run_quarterly_scan_task(self, scan_id: str) -> None:
             "period_label": period_label(period),
             "items": items,
             "comparison": comparison,
-            # Welke bronnen deze ronde gevuld zijn. GA4 en Bing volgen later.
+            # Welke bronnen deze ronde gevuld zijn. GA4 volgt later.
             "sources": {
                 "ahrefs": bool(ahrefs_summary and ahrefs_summary.get("domain")),
                 "seo_tracker": rankings is not None,
                 "search_console": comparison["search_console"] is not None,
                 "ga4": None,
-                "bing_webmaster": None,
+                "bing_webmaster": bool((comparison["bing_webmaster"] or {}).get("has_data")),
             },
             "generated_at": _now().isoformat(),
             "summary": {

@@ -731,6 +731,29 @@ class UserAISettings(Base):
     )
 
 
+class OAuthConnection(Base):
+    """Eén OAuth-koppeling voor de hele app, per externe dienst (nu: Bing Webmaster)."""
+
+    __tablename__ = "oauth_connections"
+
+    provider: Mapped[str] = mapped_column(String(50), primary_key=True)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # API en worker draaien los van elkaar: het access-token staat hier, niet in het proces.
+    access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    access_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    connected_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    # Gezet als verversen mislukt (toegang ingetrokken): de koppeling moet opnieuw.
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class WebsiteAudit(Base):
     __tablename__ = "website_audits"
 
@@ -893,6 +916,8 @@ class LaunchScan(Base):
     ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Fase 4: Search Console-snapshot (prestaties, sitemaps, URL-inspectie).
     search_console: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Fase 4: Bing Webmaster-snapshot (index, crawlfouten, sitemaps, klikken).
+    bing_webmaster: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Fase 4: de ronde (kwartaal) waar de scan bij hoort, bijv. "2026-Q4".
     period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
