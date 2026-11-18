@@ -53,6 +53,25 @@ export const COMMON_SCHEMA_TYPES = [
   "Restaurant",
 ]
 
+/**
+ * Presets: sets types die vaak samen op één soort pagina horen. Een klik voegt de hele set toe aan de
+ * keuze (nog een klik haalt hem weer weg). Types die al op de pagina staan slaat de generator zelf over.
+ */
+export const SCHEMA_TYPE_PRESETS: { label: string; types: string[] }[] = [
+  { label: "Dienstpagina", types: ["Service", "BreadcrumbList", "FAQPage"] },
+  { label: "Lokale dienst", types: ["Service", "LocalBusiness", "BreadcrumbList", "FAQPage"] },
+  { label: "Blog / artikel", types: ["BlogPosting", "BreadcrumbList"] },
+  { label: "Productpagina", types: ["Product", "Brand", "BreadcrumbList"] },
+  { label: "Categorie", types: ["CollectionPage", "ItemList", "BreadcrumbList"] },
+  { label: "Homepage", types: ["Organization", "WebSite"] },
+  { label: "Lokaal bedrijf", types: ["LocalBusiness", "BreadcrumbList"] },
+  { label: "Vacature", types: ["JobPosting", "BreadcrumbList"] },
+  { label: "Stappenplan", types: ["HowTo", "BreadcrumbList"] },
+  { label: "Evenement", types: ["Event", "BreadcrumbList"] },
+  { label: "FAQ", types: ["FAQPage"] },
+  { label: "Video", types: ["VideoObject"] },
+]
+
 const ALL_TYPES: string[] = SCHEMA_ORG_TYPES
 const ALL_TYPES_LOWER = ALL_TYPES.map((t) => t.toLowerCase())
 const MAX_RESULTS = 50
@@ -149,6 +168,23 @@ export function SchemaTypePicker({
     setNotice(null)
   }
 
+  /** Voegt de types van een preset toe; staan ze er allemaal al in, dan haalt de klik ze weer weg. */
+  function applyPreset(types: string[]) {
+    setError(null)
+    if (types.every((t) => draft.includes(t))) {
+      setDraft(draft.filter((t) => !types.includes(t)))
+      setNotice(null)
+      return
+    }
+    const added = types.filter((t) => !draft.includes(t))
+    if (draft.length + added.length > MAX_SCHEMA_TARGET_TYPES) {
+      setNotice(`Maximaal ${MAX_SCHEMA_TARGET_TYPES} types per pagina; deze preset past er niet meer bij.`)
+      return
+    }
+    setDraft([...draft, ...added])
+    setNotice(null)
+  }
+
   function moveActive(next: number) {
     setActive(next)
     document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" })
@@ -229,6 +265,35 @@ export function SchemaTypePicker({
               </span>
             ))
           )}
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-[11px] text-muted-foreground">Presets: voeg in één klik een set types toe.</p>
+          <div className="flex flex-wrap gap-1">
+            {SCHEMA_TYPE_PRESETS.map((preset) => {
+              const complete = preset.types.every((t) => draft.includes(t))
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  // De focus blijft in het zoekveld, zodat pijltjes en Enter blijven werken.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyPreset(preset.types)}
+                  aria-pressed={complete}
+                  title={`${complete ? "Weghalen" : "Toevoegen"}: ${preset.types.join(", ")}`}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                    complete
+                      ? "border-primary bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  {complete && <Check className="size-3" />}
+                  {preset.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         <div className="relative">
