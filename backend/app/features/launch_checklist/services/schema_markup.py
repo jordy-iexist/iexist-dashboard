@@ -95,20 +95,23 @@ _TYPE_HINTS: dict[str, str] = {
     "BreadcrumbList": "itemListElement met ListItem (position, name, item) van homepage tot deze pagina",
     "Product": "staat er geen prijs op de pagina, zet dan offers met een plaatshouder voor de prijs; "
                "nooit review of aggregateRating verzinnen; ook description (meta description of eerste "
-               "alinea), image (hoofdafbeelding), url, mainEntityOfPage (verwijzing naar de WebPage), brand, "
-               "sku/gtin/mpn als ze op de pagina staan, en in offers: price, priceCurrency, availability en url",
-    "Brand": "name van het merk zoals op de pagina; koppel het via brand aan het Product; logo en url als bekend",
+               "alinea), image (hoofdafbeelding), url, mainEntityOfPage (verwijzing naar de WebPage), brand "
+               "(verwijzing naar de Brand-entiteit als Brand ook gevraagd is), sku/gtin/mpn als ze op de pagina staan, en in offers: price, priceCurrency, availability en url",
+    "Brand": "name van het merk zoals op de pagina; logo en url als bekend; eigen entiteit met @id op het "
+             "hoogste niveau, waar het Product via brand naar verwijst ({\"@id\": …}), niet genest in het Product",
     "ItemList": "itemListElement met ListItem (position, url, name) voor de items op de pagina; numberOfItems",
     "BlogPosting": "headline (hooguit 110 tekens), description (meta description of eerste alinea), image "
                    "(og:image, uitgelichte afbeelding of hoofdafbeelding), datePublished en dateModified "
                    "(uit article:published_time/article:modified_time, WordPress of <time datetime>), author "
-                   "(Person met name en url, uit meta author, Rank Math of WordPress; of een verwijzing naar een "
-                   "bestaande Person die niet vervalt), publisher (verwijzing naar de organisatie), "
+                   "(Person met name en url, uit meta author, Rank Math of WordPress; is Person ook gevraagd, dan "
+                   "als eigen entiteit waar author naar verwijst; of een verwijzing naar een bestaande Person "
+                   "die niet vervalt), publisher (verwijzing naar de organisatie), "
                    "mainEntityOfPage (verwijzing naar de WebPage), inLanguage en articleSection als bekend",
     "Article": "headline (hooguit 110 tekens), description (meta description of eerste alinea), image "
                "(og:image, uitgelichte afbeelding of hoofdafbeelding), datePublished en dateModified (uit "
                "article:published_time/article:modified_time, WordPress of <time datetime>), author (Person met "
-               "name en url, of een verwijzing naar een bestaande Person die niet vervalt), publisher "
+               "name en url, als eigen entiteit als Person ook gevraagd is, of een verwijzing naar een "
+               "bestaande Person die niet vervalt), publisher "
                "(verwijzing naar de organisatie), mainEntityOfPage (verwijzing naar de WebPage), inLanguage",
     "Person": "name zoals op de pagina; jobTitle en worksFor (verwijzing naar de organisatie) als bekend; "
               "ook description, image (foto van de persoon), url (bv. de auteurspagina) en sameAs als ze in "
@@ -499,26 +502,45 @@ def target_types(page_type: str | None, existing_types: set[str], signals: dict[
     return plan_targets(page_type, existing_types, signals, choice)[0]
 
 
+def nested_targets(suggestion: Any) -> bool:
+    """Bevat een opgeslagen voorstel nog gevraagde types die genest staan (van vóór het splitsen)?
+
+    Gevraagd = de opgeslagen `target_types`; zonder die lijst is dat onbekend (False).
+    """
+    if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
+        return False
+    targets = suggestion.get("target_types")
+    if not isinstance(targets, list):
+        return False
+    return has_nested_targets(suggestion["jsonld"], [str(t) for t in targets])
+
+
 def outdated_format(suggestion: Any) -> bool:
-    """Voorstel van vóór de rijkere generator: zonder bewaarde paginamarkup, dus zonder volledige weergave.
+    """Voorstel in een verouderde vorm: van vóór de rijkere generator (zonder bewaarde paginamarkup, dus
+    zonder volledige weergave), of met gevraagde types die nog in een andere entiteit genest staan (dan
+    komen ze niet als eigen schema in Rank Math; zie `split_target_entities`).
 
     Zo'n voorstel wordt bij openen vanzelf opnieuw gemaakt, tenzij het al beoordeeld of geplaatst is:
     dan zou opnieuw maken die beoordeling of de koppeling met de site ongemerkt ongeldig maken.
     """
     if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
         return False
-    return "existing_nodes" not in suggestion and not suggestion.get("placement") and not suggestion.get("review")
+    if suggestion.get("placement") or suggestion.get("review"):
+        return False
+    return "existing_nodes" not in suggestion or nested_targets(suggestion)
 
 
 def is_stale(suggestion: Any, choice: Any) -> bool:
     """Er is een voorstel, maar het moet opnieuw gemaakt worden.
 
     Omdat de typekeuze van de pagina sindsdien is gewijzigd (voorstellen van vóór de eigen keuze zijn
-    automatisch gemaakt), of omdat het voorstel nog van vóór de rijkere generator is.
+    automatisch gemaakt), omdat het voorstel nog van vóór de rijkere generator is, of omdat er nog
+    gevraagde types genest in staan (ook als het al beoordeeld of geplaatst is: dan wordt het niet
+    vanzelf opnieuw gemaakt, maar meldt het scherm dat opnieuw genereren nodig is).
     """
     if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
         return False
-    if outdated_format(suggestion):
+    if outdated_format(suggestion) or nested_targets(suggestion):
         return True
     made_with = normalize_choice(suggestion.get("target_choice"))
     current = normalize_choice(choice)
@@ -791,6 +813,139 @@ def _written_types(jsonld: Any) -> list[str]:
     return _unique([t for node in flatten_jsonld(jsonld) for t in types_of(node)])
 
 
+# --- gevraagde types als eigen entiteit -----------------------------------------------------
+
+DEFAULT_CONTEXT = "https://schema.org"
+# Hoe diep er in de JSON-LD naar geneste entiteiten wordt gezocht.
+_SPLIT_MAX_DEPTH = 16
+
+
+def _requested_set(target_types: Any) -> set[str]:
+    """Gevraagde types; bij "A|B" telt elk alternatief."""
+    return {alt.strip() for t in target_types or [] for alt in str(t).split("|") if alt.strip()}
+
+
+def _graph_parts(jsonld: Any) -> tuple[Any, list[Any], dict[str, Any]]:
+    """(@context, entiteiten op het hoogste niveau, overige sleutels van het buitenste object)."""
+    if isinstance(jsonld, dict) and isinstance(jsonld.get("@graph"), list):
+        outer = {k: v for k, v in jsonld.items() if k not in ("@context", "@graph")}
+        return jsonld.get("@context") or DEFAULT_CONTEXT, list(jsonld["@graph"]), outer
+    if isinstance(jsonld, dict):
+        return jsonld.get("@context") or DEFAULT_CONTEXT, [_without_context(jsonld)], {}
+    if isinstance(jsonld, list):
+        context = next((n["@context"] for n in jsonld if isinstance(n, dict) and n.get("@context")), DEFAULT_CONTEXT)
+        return context, [_without_context(n) if isinstance(n, dict) else n for n in jsonld], {}
+    return DEFAULT_CONTEXT, [], {}
+
+
+def _is_requested(value: Any, requested: set[str]) -> bool:
+    return isinstance(value, dict) and bool(set(types_of(value)) & requested)
+
+
+def _all_ids(value: Any, depth: int = 0) -> set[str]:
+    found: set[str] = set()
+    if depth > _SPLIT_MAX_DEPTH:
+        return found
+    if isinstance(value, dict):
+        if _node_id(value):
+            found.add(_node_id(value))
+        for item in value.values():
+            found |= _all_ids(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            found |= _all_ids(item, depth + 1)
+    return found
+
+
+def has_nested_targets(jsonld: Any, target_types: Any) -> bool:
+    """Staat er een gevraagd type genest in een andere entiteit (en dus niet op het hoogste niveau)?"""
+    requested = _requested_set(target_types)
+    if not requested:
+        return False
+
+    def walk(value: Any, depth: int) -> bool:
+        if depth > _SPLIT_MAX_DEPTH:
+            return False
+        if isinstance(value, list):
+            return any(walk(item, depth + 1) for item in value)
+        if isinstance(value, dict):
+            return _is_requested(value, requested) or any(walk(item, depth + 1) for item in value.values())
+        return False
+
+    return any(isinstance(node, dict) and any(walk(v, 1) for v in node.values())
+               for node in _graph_parts(jsonld)[1])
+
+
+def split_target_entities(jsonld: Any, target_types: Any, page_url: str) -> dict[str, Any]:
+    """Elk gevraagd type als eigen entiteit op het hoogste niveau van `@graph`.
+
+    Rank Math krijgt één schema per entiteit op het hoogste niveau (`rankmath_schema.to_rankmath_schemas`);
+    een gevraagd type dat genest staat (Brand als `brand` van een Product) zou anders geen eigen schema
+    worden. Een geneste entiteit met een gevraagd type verhuist naar het hoogste niveau (achter de
+    bestaande, in de volgorde waarin ze gevonden zijn) en op de oude plek komt `{"@id": …}`. Zonder
+    eigen @id krijgt hij `<pagina-URL>#<type in kleine letters>`, uniek gemaakt met -2, -3. Staat er al
+    een entiteit met die @id (op het hoogste niveau of eerder verhuisd), dan worden alleen de
+    ontbrekende eigenschappen aangevuld. Pure verwijzingen, niet-gevraagde types (Offer, PostalAddress,
+    ListItem, …) en entiteiten op het hoogste niveau blijven zoals ze zijn.
+
+    Vast en zonder model; idempotent. Het resultaat is altijd één object met @context en @graph.
+    """
+    requested = _requested_set(target_types)
+    context, nodes, outer = _graph_parts(jsonld)
+    base = str(page_url or "").split("#", 1)[0]
+    used_ids = _all_ids(nodes)
+    top_index: dict[str, int] = {}
+    for index, node in enumerate(nodes):
+        if isinstance(node, dict) and _node_id(node):
+            top_index.setdefault(_node_id(node), index)
+    moved: list[dict[str, Any]] = []
+    moved_index: dict[str, int] = {}
+    merges: list[tuple[str, dict[str, Any]]] = []
+
+    def new_id(node: dict[str, Any]) -> str:
+        name = next(t for t in types_of(node) if t in requested).lower()
+        candidate, n = f"{base}#{name}", 2
+        while candidate in used_ids:
+            candidate, n = f"{base}#{name}-{n}", n + 1
+        used_ids.add(candidate)
+        return candidate
+
+    def visit(value: Any, depth: int) -> Any:
+        if depth > _SPLIT_MAX_DEPTH:
+            return value
+        if isinstance(value, list):
+            return [visit(item, depth + 1) for item in value]
+        if not isinstance(value, dict):
+            return value
+        if not _is_requested(value, requested):
+            return {k: visit(v, depth + 1) for k, v in value.items()}
+        node_id = _node_id(value) or new_id(value)
+        if node_id in top_index or node_id in moved_index:
+            merges.append((node_id, {k: visit(v, depth + 1) for k, v in value.items() if k != "@id"}))
+            return {"@id": node_id}
+        # Eerst de plek vastleggen: zo blijft de volgorde die van het vinden (ook bij dieper geneste).
+        moved_index[node_id] = len(moved)
+        moved.append({})
+        entity: dict[str, Any] = {}
+        for k, v in value.items():
+            if k == "@id":
+                entity["@id"] = node_id
+                continue
+            entity[k] = visit(v, depth + 1)
+            if k == "@type" and "@id" not in value:
+                entity["@id"] = node_id
+        moved[moved_index[node_id]] = entity
+        return {"@id": node_id}
+
+    top = [{k: visit(v, 1) for k, v in node.items()} if isinstance(node, dict) else node for node in nodes]
+    graph = top + moved
+    for node_id, props in merges:
+        target = graph[top_index[node_id]] if node_id in top_index else moved[moved_index[node_id]]
+        for k, v in props.items():
+            target.setdefault(k, v)
+    return {"@context": context, **outer, "@graph": graph}
+
+
 def _placeholders(jsonld: Any, reported: Any) -> list[str]:
     """Plaatshouders die echt in de JSON-LD staan: eerst die van het model, dan wat er verder in staat."""
     text = json.dumps(jsonld, ensure_ascii=False)
@@ -972,7 +1127,8 @@ def generate_schema_markup(
     (transactie dicht, verbinding terug naar de pool; `page` is daarna losgekoppeld) en de
     pagina pas daarna opnieuw opgehaald om het resultaat op te slaan.
     """
-    # Een voorstel van vóór de rijkere generator telt niet als opgeslagen versie: opnieuw maken.
+    # Een voorstel in een verouderde vorm (van vóór de rijkere generator, of met geneste gevraagde types)
+    # telt niet als opgeslagen versie: opnieuw maken.
     if (not regenerate and isinstance(page.schema_suggestion, dict) and page.schema_suggestion_at
             and not outdated_format(page.schema_suggestion)):
         return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True,
@@ -1035,6 +1191,8 @@ def generate_schema_markup(
             "Probeer het opnieuw."
         )
     jsonld, data = _parse_output(result)
+    # Elk gevraagd type als eigen entiteit (dus als eigen schema in Rank Math), vóór validatie en opslag.
+    jsonld = split_target_entities(jsonld, targets, final_url)
 
     validation = validate_blocks([json.dumps(jsonld, ensure_ascii=False)])
     notes = str(data.get("notes") or "").strip()

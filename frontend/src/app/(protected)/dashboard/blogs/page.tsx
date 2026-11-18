@@ -197,6 +197,7 @@ function mapBlogListItem(blog: {
     isPublic: blog.is_public ?? false,
     isOwner: blog.is_owner ?? true,
     customerName: blog.customer_name ?? null,
+    customerWebsiteId: blog.customer_website_id ?? null,
   }
 }
 

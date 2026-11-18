@@ -900,6 +900,8 @@ function ReviewPane({
   const placement = result?.placement ?? null
   const placementOk = !!placement && placement.verified && placement.current
   const replaces = result?.replaces_default_types ?? []
+  // Elk type op het hoogste niveau wordt een eigen schema in Rank Math.
+  const schemaTypes = result?.types ?? []
   const blockedReason = proposal && !result?.can_place ? (result?.place_blocked_reason ?? "").trim() : ""
   const generating = entry.gen === "wait" || entry.gen === "busy"
 
@@ -995,6 +997,14 @@ function ReviewPane({
                   </p>
                 )}
               </div>
+            )}
+
+            {schemaTypes.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {schemaTypes.length === 1
+                  ? `Komt als één schema in Rank Math: ${schemaTypes[0]}`
+                  : `Komt als ${schemaTypes.length} aparte schema's in Rank Math: ${schemaTypes.join(", ")}`}
+              </p>
             )}
 
             {replaces.length > 0 && (

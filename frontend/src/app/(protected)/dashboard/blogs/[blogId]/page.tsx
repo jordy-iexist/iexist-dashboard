@@ -173,7 +173,10 @@ export default async function BlogDetailPage({ params }: BlogDetailPageProps) {
           <hr className="border-t-2 border-foreground/15" />
           <div className="panel-iexist divide-y divide-foreground/10">
             <BlogImagePanel blogId={blog.id} />
-            <BlogPublishPanel blogId={blog.id} />
+            <BlogPublishPanel
+              blogId={blog.id}
+              customerWebsiteId={blog.customer_website_id ?? null}
+            />
           </div>
         </>
       )}

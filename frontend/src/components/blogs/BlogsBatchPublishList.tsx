@@ -1,7 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react"
 import { useRouter } from "next/navigation"
 import { Check, LayoutGrid, Link2, List, Users } from "lucide-react"
 
@@ -44,6 +51,7 @@ export type BlogListItem = {
   isPublic: boolean
   isOwner: boolean
   customerName: string | null
+  customerWebsiteId: string | null
 }
 
 type SitesResponse =
@@ -82,6 +90,7 @@ type SelectedBlogInfo = {
   shareToken: string
   isOwner: boolean
   isPublic: boolean
+  customerWebsiteId: string | null
 }
 
 type BlogPublishOptions = {
@@ -189,7 +198,7 @@ export function BlogsBatchPublishList({
     }
   }, [])
 
-  // Houd de metadata van geselecteerde blogs (isPublic/isOwner) in sync met verse
+  // Houd de metadata van geselecteerde blogs (isPublic/isOwner/klant) in sync met verse
   // serverdata na router.refresh(), zodat de deel/ontdeel-keuze niet op een stale
   // snapshot draait.
   useEffect(() => {
@@ -201,12 +210,15 @@ export function BlogsBatchPublishList({
         const selected = next[blog.id]
         if (
           selected &&
-          (selected.isPublic !== blog.isPublic || selected.isOwner !== blog.isOwner)
+          (selected.isPublic !== blog.isPublic ||
+            selected.isOwner !== blog.isOwner ||
+            selected.customerWebsiteId !== blog.customerWebsiteId)
         ) {
           next[blog.id] = {
             ...selected,
             isPublic: blog.isPublic,
             isOwner: blog.isOwner,
+            customerWebsiteId: blog.customerWebsiteId,
           }
           changed = true
         }
@@ -274,20 +286,58 @@ export function BlogsBatchPublishList({
     [sites]
   )
 
+  // Actieve sites per klant (customer_website_id -> site ids), voor de
+  // voorselectie van de site van de klant van een blog.
+  const siteIdsByCustomer = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const site of sites) {
+      for (const customerId of site.customer_website_ids) {
+        const siteIds = map.get(customerId)
+        if (siteIds) {
+          siteIds.push(site.id)
+        } else {
+          map.set(customerId, [site.id])
+        }
+      }
+    }
+    return map
+  }, [sites])
+
+  // Standaardopties voor een blog die de gebruiker nog niet heeft aangeraakt:
+  // de site(s) van de klant van die blog staan voorgeselecteerd.
+  const defaultOptionsFor = useCallback(
+    (blogId: string): BlogPublishOptions => {
+      const customerId = selectedBlogs[blogId]?.customerWebsiteId
+      const siteIds = customerId ? siteIdsByCustomer.get(customerId) : undefined
+      return siteIds
+        ? { ...EMPTY_PUBLISH_OPTIONS, siteIds: [...siteIds] }
+        : EMPTY_PUBLISH_OPTIONS
+    },
+    [selectedBlogs, siteIdsByCustomer]
+  )
+
+  // Een entry in publishOptions betekent dat de gebruiker deze blog heeft
+  // aangeraakt; die wint altijd (ook met een lege site-selectie) van de
+  // afgeleide standaard.
+  const optionsFor = useCallback(
+    (blogId: string): BlogPublishOptions =>
+      publishOptions[blogId] ?? defaultOptionsFor(blogId),
+    [publishOptions, defaultOptionsFor]
+  )
+
   const missingSiteCount = useMemo(
     () =>
-      ownedSelectedIds.filter(
-        (blogId) => (publishOptions[blogId]?.siteIds ?? []).length === 0
-      ).length,
-    [ownedSelectedIds, publishOptions]
+      ownedSelectedIds.filter((blogId) => optionsFor(blogId).siteIds.length === 0)
+        .length,
+    [ownedSelectedIds, optionsFor]
   )
 
   const missingScheduleCount = useMemo(() => {
     if (wpStatus !== "future") return 0
     return ownedSelectedIds.filter(
-      (blogId) => !isFutureLocalDateTime(publishOptions[blogId]?.scheduledAt ?? "")
+      (blogId) => !isFutureLocalDateTime(optionsFor(blogId).scheduledAt)
     ).length
-  }, [ownedSelectedIds, publishOptions, wpStatus])
+  }, [ownedSelectedIds, optionsFor, wpStatus])
 
   const updatePublishOptions = (
     blogId: string,
@@ -295,12 +345,12 @@ export function BlogsBatchPublishList({
   ) => {
     setPublishOptions((current) => ({
       ...current,
-      [blogId]: update(current[blogId] ?? EMPTY_PUBLISH_OPTIONS),
+      [blogId]: update(current[blogId] ?? defaultOptionsFor(blogId)),
     }))
   }
 
   const applyOptionsToAll = (sourceBlogId: string) => {
-    const source = publishOptions[sourceBlogId] ?? EMPTY_PUBLISH_OPTIONS
+    const source = optionsFor(sourceBlogId)
     setPublishOptions((current) => {
       const next = { ...current }
       for (const blogId of ownedSelectedIds) {
@@ -321,7 +371,12 @@ export function BlogsBatchPublishList({
       if (checked) {
         return {
           ...current,
-          [blog.id]: { shareToken: blog.shareToken, isOwner: blog.isOwner, isPublic: blog.isPublic },
+          [blog.id]: {
+            shareToken: blog.shareToken,
+            isOwner: blog.isOwner,
+            isPublic: blog.isPublic,
+            customerWebsiteId: blog.customerWebsiteId,
+          },
         }
       }
       const next = { ...current }
@@ -371,6 +426,7 @@ export function BlogsBatchPublishList({
             shareToken: item.share_token,
             isOwner: item.is_owner,
             isPublic: item.is_public ?? false,
+            customerWebsiteId: item.customer_website_id ?? null,
           }
         }
         setSelectedBlogs(next)
@@ -433,7 +489,14 @@ export function BlogsBatchPublishList({
         }
         const nextSites =
           payload && "sites" in payload && Array.isArray(payload.sites)
-            ? payload.sites.filter((site) => site.is_active)
+            ? payload.sites
+                .filter((site) => site.is_active)
+                .map((site) => ({
+                  ...site,
+                  customer_website_ids: Array.isArray(site.customer_website_ids)
+                    ? site.customer_website_ids
+                    : [],
+                }))
             : []
         setSites(nextSites)
       } catch (error) {
@@ -658,7 +721,7 @@ export function BlogsBatchPublishList({
             blog_ids: ownedSelectedIds,
             wp_status: wpStatus,
             items: ownedSelectedIds.map((blogId) => {
-              const options = publishOptions[blogId] ?? EMPTY_PUBLISH_OPTIONS
+              const options = optionsFor(blogId)
               return {
                 blog_id: blogId,
                 site_ids: options.siteIds,
@@ -850,7 +913,7 @@ export function BlogsBatchPublishList({
                 </p>
                 <div className="max-h-[32rem] divide-y overflow-y-auto pr-1">
                   {ownedSelectedIds.map((blogId) => {
-                    const options = publishOptions[blogId] ?? EMPTY_PUBLISH_OPTIONS
+                    const options = optionsFor(blogId)
                     const needsDate =
                       wpStatus === "future" &&
                       !isFutureLocalDateTime(options.scheduledAt)

@@ -638,6 +638,87 @@ class GenerateWithPlacementTest(_Endpoint):
         self.assertNotIn("placement", item)
 
 
+PRODUCT_NESTED = {"@type": "Product", "@id": f"{URL}#product", "name": "Dakpan X",
+                  "brand": {"@type": "Brand", "name": "Merk"},
+                  "offers": {"@type": "Offer", "price": "10", "priceCurrency": "EUR"}}
+
+
+class SplitPlacementTest(_Endpoint):
+    """Elk gevraagd type als eigen schema in Rank Math (zie `schema_markup.split_target_entities`)."""
+
+    page_type = "product"  # verwacht: Product, Brand, BreadcrumbList
+
+    def _agent(self, jsonld):
+        from app.agents.base import AgentRunResult
+        return AgentRunResult(output=json.dumps({"jsonld": json.dumps(jsonld), "types": [], "placeholders": [],
+                                                 "omitted": [], "notes": ""}), model="test", incomplete_reason=None)
+
+    def test_split_suggestion_gives_one_schema_per_type(self):
+        split = schema_markup.split_target_entities(_graph(PRODUCT_NESTED, FAQ), ["Product", "Brand", "FAQPage"], URL)
+        self.store(_suggestion(split, types=["Product", "FAQPage", "Brand"]))
+        response = self.place()
+        self.assertEqual(response.status_code, 200, response.text)
+        writes = self.wp.writes()
+        self.assertEqual(len(writes), 1)
+        schemas = list(writes[0][2]["schemas"].values())
+        self.assertEqual([s["metadata"]["title"] for s in schemas], ["Product", "FAQPage", "Brand"])
+        self.assertEqual(schemas[0]["brand"], {"@id": f"{URL}#brand"})
+        self.assertEqual(schemas[2]["@id"], f"{URL}#brand")
+        self.assertEqual(schemas[0]["offers"]["@type"], "Offer")
+        self.assertEqual([(i["key"], i["meta_id"]) for i in self.placement()["items"]],
+                         [("Product", 500), ("FAQPage", 501), ("Brand", 502)])
+        self.assertTrue(self.placement()["verified"])
+
+    def test_replace_after_earlier_nested_placement(self):
+        # Eerder (vóór het splitsen) geplaatst: één Product-schema met de Brand erin.
+        self.store(_suggestion(_graph(PRODUCT_NESTED), types=["Product", "Brand"],
+                               target_types=["Product", "Brand", "BreadcrumbList"], target_types_source="auto",
+                               target_choice=None))
+        self.assertEqual(self.place().status_code, 200)
+        self.assertEqual([(i["key"], i["meta_id"]) for i in self.placement()["items"]], [("Product", 500)])
+
+        # Bij openen blijft het geplaatste voorstel staan, maar het is verouderd.
+        with patch(RUN_AGENT) as run:
+            opened = self.client.post(self.path, json={}).json()
+        run.assert_not_called()
+        self.assertTrue(opened["cached"])
+        self.assertTrue(opened["stale"])
+
+        # Opnieuw genereren: de Brand in het geplaatste Product telt niet als al aanwezig.
+        with patch(RUN_AGENT, return_value=self._agent(_graph(PRODUCT_NESTED))) as run:
+            body = self.client.post(self.path, json={"regenerate": True}).json()
+        brief = run.call_args.kwargs["input"]
+        self.assertIn("- Product:", brief)
+        self.assertIn("- Brand:", brief)
+        self.assertEqual(body["types"], ["Product", "Brand"])
+        self.assertFalse(body["stale"])
+        self.assertFalse(body["placement"]["current"])
+
+        # Opnieuw plaatsen: Product bijgewerkt (schema-500), Brand erbij, niets verwijderd.
+        self.wp.calls.clear()
+        response = self.place()
+        self.assertEqual(response.status_code, 200, response.text)
+        writes = self.wp.writes()
+        self.assertEqual([w[1] for w in writes], ["rankmath/v1/updateSchemas"])
+        keys = list(writes[0][2]["schemas"])
+        self.assertEqual(keys[0], "schema-500")
+        self.assertEqual(len(keys), 2)
+        self.assertTrue(keys[1].startswith("new-"))
+        self.assertEqual(set(self.wp.schemas), {500, 501})
+        self.assertEqual(self.wp.schemas[500]["brand"], {"@id": f"{URL}#brand"})
+        self.assertEqual(self.wp.schemas[501]["@type"], "Brand")
+        self.assertEqual([(i["key"], i["meta_id"], i["node_id"]) for i in self.placement()["items"]],
+                         [("Product", 500, f"{URL}#product"), ("Brand", 501, f"{URL}#brand")])
+        self.assertTrue(self.placement()["verified"])
+        self.assertTrue(response.json()["placement"]["current"])
+
+        # Nog een keer plaatsen: alleen bijwerken, geen duplicaten.
+        self.wp.calls.clear()
+        self.assertEqual(self.place().status_code, 200)
+        self.assertEqual(set(self.wp.writes()[0][2]["schemas"]), {"schema-500", "schema-501"})
+        self.assertEqual(set(self.wp.schemas), {500, 501})
+
+
 # --- WordPress-feiten en complete markup ---------------------------------------------------------
 
 class WordPressFactsTest(_Endpoint):

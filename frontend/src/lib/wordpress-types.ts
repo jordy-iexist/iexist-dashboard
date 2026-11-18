@@ -4,6 +4,8 @@ export type WordPressSite = {
   base_url: string
   wp_login: string
   is_active: boolean
+  // Klanten (customer_website ids) waarvan de hostnaam bij deze site hoort.
+  customer_website_ids: string[]
   created_by: string
   created_at: string
   updated_at: string

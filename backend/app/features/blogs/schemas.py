@@ -105,6 +105,7 @@ class BlogIdItem(BaseModel):
     share_token: str
     is_owner: bool
     is_public: bool = False
+    customer_website_id: str | None = None
 
 
 class BlogsIdsResponse(BaseModel):
@@ -228,6 +229,8 @@ class WordPressSiteItem(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    # Klanten met dezelfde hostnaam (zie `app.services.site_matching`); meestal 0 of 1.
+    customer_website_ids: list[str] = Field(default_factory=list)
 
 
 class WordPressSitesResponse(BaseModel):

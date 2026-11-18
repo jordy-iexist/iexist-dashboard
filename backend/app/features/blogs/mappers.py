@@ -12,6 +12,7 @@ def to_wordpress_site_item(record: dict) -> WordPressSiteItem:
         created_by=str(record["created_by"]),
         created_at=record["created_at"],
         updated_at=record["updated_at"],
+        customer_website_ids=record.get("customer_website_ids") or [],
     )
 
 

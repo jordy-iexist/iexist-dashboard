@@ -208,6 +208,102 @@ class BriefTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["name"], "a </script> <!-- b")
 
 
+PRODUCT_URL = "https://www.klant.nl/producten/dakpan/"
+
+
+def _product(**extra) -> dict:
+    return {"@type": "Product", "@id": f"{PRODUCT_URL}#product", "name": "Dakpan X",
+            "brand": {"@type": "Brand", "name": "Merk"},
+            "offers": {"@type": "Offer", "price": "10", "priceCurrency": "EUR",
+                       "seller": {"@id": "https://www.klant.nl/#organization"}}, **extra}
+
+
+class SplitTargetEntitiesTest(unittest.TestCase):
+    def split(self, jsonld, targets=("Product", "Brand")):
+        return schema_markup.split_target_entities(jsonld, list(targets), PRODUCT_URL)
+
+    def test_nested_requested_type_becomes_own_entity(self):
+        source = {"@context": "https://schema.org", "@graph": [_product()]}
+        before = json.dumps(source)
+        result = self.split(source)
+        self.assertEqual(json.dumps(source), before)  # invoer niet gewijzigd
+        graph = result["@graph"]
+        self.assertEqual(result["@context"], "https://schema.org")
+        self.assertEqual([n["@type"] for n in graph], ["Product", "Brand"])
+        self.assertEqual(graph[0]["brand"], {"@id": f"{PRODUCT_URL}#brand"})
+        self.assertEqual(graph[1], {"@type": "Brand", "@id": f"{PRODUCT_URL}#brand", "name": "Merk"})
+        # Niet-gevraagd (Offer) en pure verwijzingen blijven genest en ongewijzigd.
+        self.assertEqual(graph[0]["offers"], _product()["offers"])
+        self.assertTrue(schema_markup.has_nested_targets(source, ["Product", "Brand"]))
+        self.assertFalse(schema_markup.has_nested_targets(result, ["Product", "Brand"]))
+
+    def test_list_of_nested_entities_and_unique_ids(self):
+        product = _product(brand=[{"@type": "Brand", "name": "A"}, {"@type": "Brand", "name": "B"}],
+                           isRelatedTo={"@id": f"{PRODUCT_URL}#brand"})  # bestaande verwijzing: id bezet
+        result = self.split({"@context": "https://schema.org", "@graph": [product]})
+        graph = result["@graph"]
+        ids = [f"{PRODUCT_URL}#brand-2", f"{PRODUCT_URL}#brand-3"]
+        self.assertEqual(graph[0]["brand"], [{"@id": i} for i in ids])
+        self.assertEqual([(n["@id"], n["name"]) for n in graph[1:]], list(zip(ids, ["A", "B"])))
+        self.assertEqual(graph[0]["isRelatedTo"], {"@id": f"{PRODUCT_URL}#brand"})
+
+    def test_existing_id_is_reused_and_merged(self):
+        brand = {"@type": "Brand", "@id": f"{PRODUCT_URL}#merk", "name": "Merk"}
+        product = _product(brand={"@type": "Brand", "@id": f"{PRODUCT_URL}#merk", "name": "Ander",
+                                  "logo": "https://www.klant.nl/merk.png"})
+        result = self.split({"@context": "https://schema.org", "@graph": [product, brand]})
+        graph = result["@graph"]
+        self.assertEqual(len(graph), 2)
+        self.assertEqual(graph[0]["brand"], {"@id": f"{PRODUCT_URL}#merk"})
+        # Bestaande eigenschappen blijven, ontbrekende worden aangevuld.
+        self.assertEqual(graph[1], {**brand, "logo": "https://www.klant.nl/merk.png"})
+        # Twee keer dezelfde geneste entiteit: één keer verhuisd, de tweede vult aan.
+        two = {"@context": "https://schema.org", "@graph": [
+            {"@type": "Thing", "a": {"@type": "Brand", "@id": "#m", "name": "M"},
+             "b": {"@type": "Brand", "@id": "#m", "url": "https://m.nl/"}}]}
+        graph = self.split(two)["@graph"]
+        self.assertEqual(graph, [{"@type": "Thing", "a": {"@id": "#m"}, "b": {"@id": "#m"}},
+                                 {"@type": "Brand", "@id": "#m", "name": "M", "url": "https://m.nl/"}])
+
+    def test_not_requested_and_top_level_untouched(self):
+        source = {"@context": "https://schema.org", "@graph": [
+            _product(), {"@type": "Brand", "@id": "#los", "name": "Los"},
+            {"@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "item": PRODUCT_URL}]},
+        ]}
+        self.assertEqual(self.split(source, ["Product", "BreadcrumbList"]), source)
+        self.assertEqual(self.split(source, []), source)
+
+    def test_double_nested(self):
+        item_list = {"@type": "ItemList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "item": _product()},
+        ]}
+        result = self.split({"@context": "https://schema.org", "@graph": [item_list]},
+                            ["ItemList", "Product", "Brand"])
+        graph = result["@graph"]
+        self.assertEqual([n["@type"] for n in graph], ["ItemList", "Product", "Brand"])
+        self.assertEqual(graph[0]["itemListElement"][0], {"@type": "ListItem", "position": 1,
+                                                          "item": {"@id": f"{PRODUCT_URL}#product"}})
+        self.assertEqual(graph[1]["brand"], {"@id": f"{PRODUCT_URL}#brand"})
+        self.assertEqual(graph[2]["@id"], f"{PRODUCT_URL}#brand")
+
+    def test_object_without_graph_and_alternatives(self):
+        result = self.split({"@context": "https://schema.org", **_product()}, ["Product|Thing", "Brand|Organization"])
+        self.assertEqual(set(result), {"@context", "@graph"})
+        self.assertEqual([n["@type"] for n in result["@graph"]], ["Product", "Brand"])
+        self.assertNotIn("@context", result["@graph"][0])
+        # Zonder iets te splitsen ook altijd @context + @graph.
+        self.assertEqual(self.split({"@type": "Service", "name": "X"}, ["Service"]),
+                         {"@context": "https://schema.org", "@graph": [{"@type": "Service", "name": "X"}]})
+
+    def test_idempotent(self):
+        for source in ({"@context": "https://schema.org", "@graph": [_product()]},
+                       {"@context": "https://schema.org", **_product()},
+                       {"@context": "https://schema.org", "@graph": [
+                           {"@type": "ItemList", "itemListElement": [{"@type": "ListItem", "item": _product()}]}]}):
+            once = self.split(source, ["ItemList", "Product", "Brand"])
+            self.assertEqual(self.split(once, ["ItemList", "Product", "Brand"]), once)
+
+
 class FetchPageTest(unittest.TestCase):
     def _fetch(self, handler):
         with patch(f"{MODULE}.new_client", lambda: new_client(httpx.MockTransport(handler))), \
@@ -311,6 +407,61 @@ class GenerateSchemaMarkupTest(_Base):
             fetch.assert_not_called()
             run.assert_not_called()
             self.assertTrue(result.cached)
+
+    def test_nested_requested_types_are_split_before_storing(self):
+        self.page.page_type = "product"  # verwacht: Product, Brand, BreadcrumbList
+        self.db.commit()
+        nested = {"@context": "https://schema.org", "@graph": [
+            {"@type": "Product", "@id": f"{URL}#product", "name": "Dakpan X", "description": "Mooi",
+             "image": "https://www.klant.nl/dakpan.jpg",
+             "brand": {"@type": "Brand", "name": "Merk"},
+             "offers": {"@type": "Offer", "price": "10", "priceCurrency": "EUR"}}]}
+        with patch(FETCH, return_value=(_html(), URL)), \
+                patch(RUN_AGENT, return_value=_result(_agent_output(nested, placeholders=[]))):
+            result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+        self.assertEqual(result.types, ["Product", "Brand"])
+        stored = self.fresh_page().schema_suggestion
+        graph = stored["jsonld"]["@graph"]
+        self.assertEqual([(n["@type"], n["@id"]) for n in graph],
+                         [("Product", f"{URL}#product"), ("Brand", f"{URL}#brand")])
+        self.assertEqual(graph[0]["brand"], {"@id": f"{URL}#brand"})
+        self.assertEqual(graph[0]["offers"]["@type"], "Offer")  # niet gevraagd: blijft genest
+        self.assertEqual(stored["types"], ["Product", "Brand"])
+        self.assertEqual([(r["types"], r["status"]) for r in result.page_graph if r["status"] == "new"],
+                         [(["Product"], "new"), (["Brand"], "new")])
+        self.assertIn('"@id": "https://www.klant.nl/diensten/dakwerk/#brand"', result.script)
+        self.assertFalse(result.stale)
+        self.assertFalse(schema_markup.outdated_format(stored))
+
+    def test_old_suggestion_with_nested_targets(self):
+        nested = {"@context": "https://schema.org", "@graph": [
+            {"@type": "Product", "name": "Dakpan X", "brand": {"@type": "Brand", "name": "Merk"}}]}
+        old = {"jsonld": nested, "types": ["Product", "Brand"], "placeholders": [], "notes": "", "problems": [],
+               "existing_nodes": [], "target_types": ["Product", "Brand"], "target_types_source": "auto"}
+        self.assertTrue(schema_markup.outdated_format(old))
+        self.assertTrue(schema_markup.is_stale(old, None))
+        # Zonder opgeslagen target_types is niet bekend wat gevraagd was: niet verouderd.
+        self.assertFalse(schema_markup.outdated_format({k: v for k, v in old.items() if k != "target_types"}))
+        # Beoordeeld of geplaatst: blijft staan, maar is verouderd (opnieuw genereren nodig).
+        for extra in ({"review": {"status": "approved", "jsonld_hash": "x"}}, {"placement": {"post_id": 1}}):
+            self.store({**old, **extra})
+            with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
+                result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+            fetch.assert_not_called()
+            run.assert_not_called()
+            self.assertTrue(result.cached)
+            self.assertTrue(result.stale)
+            self.assertTrue(schema_markup.stored_result(self.fresh_page()).stale)
+        # Niet beoordeeld of geplaatst: bij openen opnieuw gemaakt, nu gesplitst.
+        self.page.page_type = "product"
+        self.store(old)
+        with patch(FETCH, return_value=(_html(), URL)), \
+                patch(RUN_AGENT, return_value=_result(_agent_output(nested, placeholders=[]))) as run:
+            result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+        run.assert_called_once()
+        self.assertFalse(result.cached)
+        self.assertFalse(result.stale)
+        self.assertEqual(result.types, ["Product", "Brand"])
 
     def test_nothing_missing_skips_model_and_stores_nothing(self):
         present = {"@context": "https://schema.org", "@graph": [

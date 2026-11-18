@@ -43,6 +43,7 @@ from app.features.launch_checklist.services import schema_markup
 from app.features.launch_checklist.services.discovery import url_key
 from app.features.launch_checklist.services.geo_extract import all_types, types_of
 from app.features.launch_checklist.services.page_types import EXPECTED_SCHEMA
+from app.services.site_matching import normalize_host as _host, site_for_customer  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -114,31 +115,7 @@ def jsonld_hash(jsonld: Any) -> str:
 
 # --- gekoppelde site ---------------------------------------------------------------------
 
-def _host(value: str | None) -> str:
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return ""
-    if "://" not in raw:
-        raw = f"https://{raw}"
-    host = urlparse(raw).hostname or ""
-    return host[4:] if host.startswith("www.") else host
-
-
-def site_for_customer(db: Session, customer: CustomerWebsite | None, user_id: str) -> WordPressSite | None:
-    """Actieve WordPress-koppeling van deze gebruiker met hetzelfde domein als de klant (www. genegeerd)."""
-    if customer is None:
-        return None
-    hosts = {h for h in (_host(customer.domain), _host(customer.base_url)) if h}
-    if not hosts:
-        return None
-    rows = (
-        db.query(WordPressSite)
-        .filter(WordPressSite.created_by == user_id, WordPressSite.is_active.is_(True))
-        .order_by(WordPressSite.updated_at.desc())
-        .all()
-    )
-    return next((row for row in rows if _host(row.base_url) in hosts), None)
-
+# `_host` en `site_for_customer` staan in `app.services.site_matching` (ook gebruikt door blogs).
 
 def _placement_site(db: Session, placement: dict[str, Any], user_id: str) -> WordPressSite | None:
     site = db.get(WordPressSite, str(placement.get("site_id") or ""))

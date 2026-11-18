@@ -104,6 +104,7 @@ from app.features.settings.services import (
     MissingUserOpenAIKeyError,
     resolve_openai_api_key,
 )
+from app.services.site_matching import customer_ids_by_site
 from app.worker.tasks import (
     enqueue_blog_image_generation,
     generate_blog_task,
@@ -397,7 +398,9 @@ async def list_blog_ids(
     )
     rows = (
         base_query
-        .with_entities(Blog.id, Blog.share_token, Blog.created_by, Blog.is_public)
+        .with_entities(
+            Blog.id, Blog.share_token, Blog.created_by, Blog.is_public, Blog.customer_website_id
+        )
         .order_by(Blog.created_at.desc())
         .limit(2000)
         .all()
@@ -408,8 +411,9 @@ async def list_blog_ids(
             share_token=str(share_token),
             is_owner=str(created_by or "") == user_id,
             is_public=bool(is_public),
+            customer_website_id=str(customer_id) if customer_id is not None else None,
         )
-        for blog_id, share_token, created_by, is_public in rows
+        for blog_id, share_token, created_by, is_public, customer_id in rows
     ]
     return BlogsIdsResponse(blogs=items, total=len(items))
 
@@ -1598,8 +1602,14 @@ async def list_wordpress_sites(
         .order_by(WordPressSite.created_at.desc())
         .all()
     )
+    customer_ids = customer_ids_by_site(db, sites)
     return WordPressSitesResponse(
-        sites=[to_wordpress_site_item(_row_to_dict(s)) for s in sites]
+        sites=[
+            to_wordpress_site_item(
+                {**_row_to_dict(s), "customer_website_ids": customer_ids.get(str(s.id), [])}
+            )
+            for s in sites
+        ]
     )
 
 

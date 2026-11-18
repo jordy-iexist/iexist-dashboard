@@ -29,6 +29,13 @@ Harde regels
 - Geef nieuwe entiteiten een @id van de vorm <pagina-URL>#<type in kleine letters>, bijv.
   https://www.voorbeeld.nl/diensten/dakwerk/#service.
 - Eén JSON-object met "@context": "https://schema.org" en een "@graph" met de nieuwe entiteiten.
+- Elk gevraagd type is een eigen entiteit op het hoogste niveau van de "@graph", met een eigen @id: elk
+  wordt een apart schema in de SEO-plugin. Hoort een gevraagd type inhoudelijk bij een andere entiteit (Brand
+  bij een Product, Person als auteur, ImageObject als afbeelding), zet het dan als eigen entiteit in de
+  "@graph" en verwijs ernaar met {"@id": "..."} in plaats van het te nesten. Voorbeeld bij Product + Brand:
+  "brand": {"@id": "https://www.voorbeeld.nl/product/x/#brand"} in het Product, en de Brand met die @id
+  als eigen entiteit. Onderdelen die NIET gevraagd zijn (bijv. Offer, PostalAddress, ListItem, Question,
+  Answer, AggregateRating) blijven genest in hun entiteit.
 - Neem per type minimaal de verplichte eigenschappen op (staan bij elk gevraagd type in de invoer).
 - Maak elke entiteit zo volledig als de invoer toelaat: neem naast de verplichte eigenschappen ook alle
   eigenschappen uit de hint bij het type op waarvan de waarde in de invoer staat. Laat alleen weg wat niet in

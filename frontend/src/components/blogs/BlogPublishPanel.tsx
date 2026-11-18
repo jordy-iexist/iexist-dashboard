@@ -105,6 +105,11 @@ function wpStatusLabel(status: WordPressPostStatus) {
   }
 }
 
+// Statussen waarbij opnieuw publiceren naar dezelfde site alleen een
+// duplicaat-blokkade oplevert; die sites selecteren we niet automatisch voor.
+const ACTIVE_PUBLICATION_STATUSES: ReadonlySet<PublicationItem["status"]> =
+  new Set(["succeeded", "pending", "processing"])
+
 function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
@@ -116,11 +121,26 @@ function formatDate(value: string) {
   }).format(date)
 }
 
-export function BlogPublishPanel({ blogId }: { blogId: string }) {
+export function BlogPublishPanel({
+  blogId,
+  customerWebsiteId,
+}: {
+  blogId: string
+  customerWebsiteId: string | null
+}) {
   const [sites, setSites] = useState<WordPressSite[]>([])
+  const [sitesLoaded, setSitesLoaded] = useState(false)
   const [publications, setPublications] = useState<PublicationItem[]>([])
+  const [publicationsLoaded, setPublicationsLoaded] = useState(false)
   const [hasPrimaryImage, setHasPrimaryImage] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
+  // Zodra de gebruiker de site-selectie zelf aanpast (of publiceert) passen we
+  // geen klant-voorselectie meer toe, zodat een handmatige keuze blijft staan.
+  const [selectionTouched, setSelectionTouched] = useState(false)
+  // Klant waarvoor de voorselectie al is toegepast (undefined = nog geen).
+  const [preselectedForCustomer, setPreselectedForCustomer] = useState<
+    string | null | undefined
+  >(undefined)
   const [wpStatus, setWpStatus] = useState<WordPressPostStatus>("draft")
   const [scheduledAt, setScheduledAt] = useState("")
   const [categoryIdsBySite, setCategoryIdsBySite] = useState<
@@ -136,6 +156,40 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
   const siteMap = useMemo(() => {
     return new Map(sites.map((site) => [site.id, site]))
   }, [sites])
+
+  const customerSiteIds = useMemo(() => {
+    if (!customerWebsiteId) return new Set<string>()
+    return new Set(
+      sites
+        .filter((site) => site.customer_website_ids.includes(customerWebsiteId))
+        .map((site) => site.id)
+    )
+  }, [sites, customerWebsiteId])
+
+  // Voorselectie van de site(s) van de klant: eenmalig per klant, pas als sites
+  // en publicaties geladen zijn, en alleen zolang de gebruiker de selectie niet
+  // zelf heeft aangeraakt. Wordt tijdens render bijgewerkt (geen effect), zodat
+  // een klantwissel via router.refresh() direct de nieuwe voorselectie geeft.
+  // Polling en "Vernieuwen" vuren dit niet opnieuw af: de klant is dan al
+  // verwerkt.
+  if (
+    sitesLoaded &&
+    publicationsLoaded &&
+    !selectionTouched &&
+    preselectedForCustomer !== customerWebsiteId
+  ) {
+    const activeSiteIds = new Set(
+      publications
+        .filter((publication) =>
+          ACTIVE_PUBLICATION_STATUSES.has(publication.status)
+        )
+        .map((publication) => publication.wordpress_site_id)
+    )
+    setPreselectedForCustomer(customerWebsiteId)
+    setSelectedSiteIds(
+      [...customerSiteIds].filter((siteId) => !activeSiteIds.has(siteId))
+    )
+  }
 
   const hasInFlightPublications = useMemo(() => {
     return publications.some(
@@ -157,9 +211,17 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
     }
     const nextSites =
       payload && "sites" in payload && Array.isArray(payload.sites)
-        ? payload.sites.filter((site) => site.is_active)
+        ? payload.sites
+            .filter((site) => site.is_active)
+            .map((site) => ({
+              ...site,
+              customer_website_ids: Array.isArray(site.customer_website_ids)
+                ? site.customer_website_ids
+                : [],
+            }))
         : []
     setSites(nextSites)
+    setSitesLoaded(true)
   }, [])
 
   const loadPublications = useCallback(async () => {
@@ -181,6 +243,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
         ? payload.publications
         : []
     setPublications(nextPublications)
+    setPublicationsLoaded(true)
   }, [blogId])
 
   const loadImages = useCallback(async () => {
@@ -240,6 +303,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
   }, [hasInFlightPublications, loadPublications])
 
   const toggleSite = (siteId: string, checked: boolean) => {
+    setSelectionTouched(true)
     setSelectedSiteIds((current) => {
       if (checked) {
         return current.includes(siteId) ? current : [...current, siteId]
@@ -298,6 +362,7 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
           type: "success",
           message: `${payload.queued} publicatie(s) gestart${blockedPart}.`,
         })
+        setSelectionTouched(true)
         setSelectedSiteIds([])
         setCategoryIdsBySite({})
         setScheduledAt("")
@@ -361,7 +426,14 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
               <div key={site.id} className="text-sm">
                 <label className="flex cursor-pointer items-center justify-between gap-3 py-2">
                   <div className="space-y-0.5">
-                    <p className="font-medium">{site.name}</p>
+                    <p className="font-medium">
+                      {site.name}
+                      {customerSiteIds.has(site.id) && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          Site van deze klant
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-muted-foreground">{site.base_url}</p>
                   </div>
                   <input
@@ -376,12 +448,13 @@ export function BlogPublishPanel({ blogId }: { blogId: string }) {
                     <WordPressCategoryPicker
                       siteId={site.id}
                       selectedIds={categoryIdsBySite[site.id] ?? []}
-                      onChange={(ids) =>
+                      onChange={(ids) => {
+                        setSelectionTouched(true)
                         setCategoryIdsBySite((current) => ({
                           ...current,
                           [site.id]: ids,
                         }))
-                      }
+                      }}
                       disabled={isPending}
                     />
                   </div>

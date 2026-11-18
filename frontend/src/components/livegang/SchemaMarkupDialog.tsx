@@ -146,6 +146,8 @@ export function SchemaMarkupDialog({
   const canPlace = hasScript && !!result?.can_place
   const blockedReason = hasScript && !result?.can_place ? (result?.place_blocked_reason ?? "").trim() : ""
   const replacesDefaults = result?.replaces_default_types ?? []
+  // Elk type op het hoogste niveau wordt een eigen schema in Rank Math.
+  const schemaTypes = result?.types ?? []
   // Nog niet geplaatst, of het voorstel is daarna opnieuw gegenereerd: plaatsen is dan de hoofdactie.
   const placePrimary = canPlace && (!placement || !placement.current)
   const working = loading || busy !== null
@@ -269,6 +271,13 @@ export function SchemaMarkupDialog({
                   Dit schema komt via Rank Math direct op de live pagina {pageLink}
                   {placement ? "; het eerder geplaatste schema wordt vervangen." : "."}
                 </p>
+                {schemaTypes.length > 0 && (
+                  <p className="text-xs">
+                    {schemaTypes.length === 1
+                      ? `Komt als één schema in Rank Math: ${schemaTypes[0]}`
+                      : `Komt als ${schemaTypes.length} aparte schema's in Rank Math: ${schemaTypes.join(", ")}`}
+                  </p>
+                )}
                 {replacesDefaults.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-xs">Het standaardschema van Rank Math voor deze pagina vervalt:</p>
