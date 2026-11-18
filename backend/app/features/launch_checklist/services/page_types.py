@@ -196,7 +196,7 @@ def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str,
     """items: [{id, url, title, h1}] → {id: type}. Faalt stil (lege dict)."""
     if not items:
         return {}
-    from app.services.openai.client import _build_openai_client, response_output_text
+    from app.services.openai.client import _build_openai_client, model_supports_reasoning, response_output_text
 
     out: dict[str, str] = {}
     for start in range(0, len(items), 150):
@@ -212,11 +212,16 @@ def classify_with_llm(items: list[dict[str, Any]], *, user_id: str) -> dict[str,
                 timeout=settings.launch_scan_openai_timeout_seconds,
                 max_retries=settings.launch_scan_openai_max_retries,
             )
+            model = settings.launch_scan_openai_model
+            # Expliciet "low": zonder waarde kiest het model zelf (gpt-6.2-sol: medium) en dat
+            # denkwerk telt mee in max_output_tokens. "none" kent gpt-6.2-sol niet.
+            reasoning = {"reasoning": {"effort": "low"}} if model_supports_reasoning(model) else {}
             response = client.responses.create(
-                model=settings.launch_scan_openai_model,
+                model=model,
                 instructions=_LLM_INSTRUCTIONS,
                 input="\n".join(lines),
                 max_output_tokens=4000,
+                **reasoning,
             )
             text = response_output_text(response)
             match = re.search(r"\{.*\}", text, re.DOTALL)

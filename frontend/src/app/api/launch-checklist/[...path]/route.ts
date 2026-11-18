@@ -29,7 +29,7 @@ async function proxy(request: NextRequest, context: RouteContext, method: string
 
   const headers: Record<string, string> = { Authorization: userId }
   let body: string | undefined
-  if (method === "POST" || method === "PATCH") {
+  if (method === "POST" || method === "PATCH" || method === "PUT") {
     body = await request.text()
     headers["Content-Type"] = "application/json"
   }
@@ -75,6 +75,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   return proxy(request, context, "PATCH")
+}
+
+export async function PUT(request: NextRequest, context: RouteContext) {
+  return proxy(request, context, "PUT")
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {

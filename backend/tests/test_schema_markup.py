@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 from app.agents import AGENTS
 from app.agents.base import AgentRunResult
 from app.core.dependencies import require_user_id
-from app.db.models import CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanPage
+from app.db.models import CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanPage, WordPressSite
 from app.db.session import get_db
 from app.features.launch_checklist.mappers import to_page_item
 from app.features.launch_checklist.schema_markup_router import router
@@ -95,7 +95,7 @@ def _agent_output(jsonld: dict | str = SERVICE_JSONLD, placeholders=None, notes=
 class _Base(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanPage):
+        for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanPage, WordPressSite):
             model.__table__.create(engine)
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()
@@ -182,6 +182,10 @@ class BriefTest(unittest.TestCase):
         self.assertIn("- Service: verplicht: name of serviceType", brief)
         self.assertIn("- BreadcrumbList: verplicht: itemListElement", brief)
         self.assertIn("- FAQPage: verplicht: mainEntity", brief)
+        # De hint stuurt op een volledige Service, gekoppeld aan de bestaande WebPage.
+        service_line = next(line for line in brief.splitlines() if line.startswith("- Service:"))
+        for prop in ("description", "serviceType", "mainEntityOfPage", "provider", "image"):
+            self.assertIn(prop, service_line)
         # Bestaande entiteiten om naar te verwijzen.
         self.assertIn("https://www.klant.nl/#organization (Organization): Klant BV", brief)
         # Kruimelpad met linktekst van de pagina.
@@ -250,6 +254,28 @@ class GenerateSchemaMarkupTest(_Base):
         self.assertEqual(stored.schema_suggestion["jsonld"], SERVICE_JSONLD)
         self.assertIsNotNone(stored.schema_suggestion_at)
 
+    def test_existing_types_returned_stored_and_cached(self):
+        with patch(FETCH, return_value=(_html(), URL)), \
+                patch(RUN_AGENT, return_value=_result(_agent_output())):
+            result = schema_markup.generate_schema_markup(self.db, self.page, user_id="user-1")
+        self.assertEqual(result.existing_types, ["Organization", "WebPage"])
+        self.assertEqual(self.fresh_page().schema_suggestion["existing_types"], ["Organization", "WebPage"])
+        with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
+            cached = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+        fetch.assert_not_called()
+        run.assert_not_called()
+        self.assertTrue(cached.cached)
+        self.assertEqual(cached.existing_types, ["Organization", "WebPage"])
+
+    def test_old_stored_suggestion_without_existing_types(self):
+        self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
+                    "problems": []})
+        with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
+            result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+        fetch.assert_not_called()
+        run.assert_not_called()
+        self.assertEqual(result.existing_types, [])
+
     def test_reuses_stored_without_fetch_or_model_call(self):
         self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
                     "problems": ["Service: mist name of serviceType"]})
@@ -273,6 +299,8 @@ class GenerateSchemaMarkupTest(_Base):
         run.assert_not_called()
         self.assertTrue(result.nothing_missing)
         self.assertEqual((result.script, result.types, result.placeholders), ("", [], []))
+        self.assertEqual(result.existing_types,
+                         ["BreadcrumbList", "FAQPage", "Organization", "Service", "WebPage"])
         self.assertIsNotNone(result.generated_at)
         self.assertIsNone(self.fresh_page().schema_suggestion)
         self.assertIsNone(self.fresh_page().schema_suggestion_at)
@@ -361,7 +389,9 @@ class GenerateSchemaMarkupTest(_Base):
 
     def test_agent_is_registered(self):
         agent = AGENTS["schema_markup"]()
-        self.assertEqual((agent.tools, agent.max_steps, agent.reasoning_effort), ([], 1, "low"))
+        self.assertEqual((agent.tools, agent.max_steps, agent.reasoning_effort), ([], 1, "high"))
+        # Ruim, omdat reasoning-tokens bij effort "high" meetellen en een afgekapt antwoord wordt geweigerd.
+        self.assertEqual(agent.max_output_tokens, 20000)
         schema = agent.output_schema
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
         self.assertEqual(set(schema["required"]), {"jsonld", "types", "placeholders", "notes"})
@@ -400,13 +430,29 @@ class SchemaMarkupEndpointTest(_Base):
         self.assertEqual(first.status_code, 200, first.text)
         body = first.json()
         self.assertEqual(set(body), {"script", "types", "placeholders", "notes", "problems", "generated_at",
-                                     "cached", "nothing_missing"})
+                                     "cached", "nothing_missing", "existing_types", "placement", "can_place",
+                                     "place_blocked_reason", "replaces_default_types", "review_status",
+                                     "reviewed_at"})
+        self.assertEqual((body["review_status"], body["reviewed_at"]), ("pending", None))
         self.assertTrue(body["script"].startswith('<script type="application/ld+json">'))
         self.assertFalse(body["cached"])
         self.assertFalse(body["nothing_missing"])
+        self.assertEqual(body["existing_types"], ["Organization", "WebPage"])
         self.assertTrue(second.json()["cached"])
         self.assertEqual(second.json()["script"], body["script"])
+        self.assertEqual(second.json()["existing_types"], ["Organization", "WebPage"])
         self.assertEqual(run.call_count, 1)
+
+    def test_old_stored_suggestion_gives_empty_existing_types(self):
+        self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
+                    "problems": []})
+        with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
+            response = self.client.post(self.path, json={})
+        fetch.assert_not_called()
+        run.assert_not_called()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["cached"])
+        self.assertEqual(response.json()["existing_types"], [])
 
     def test_geo_scan_id_is_accepted(self):
         path = f"/api/launch-checklist/scans/{self.geo_scan.id}/pages/{self.page.id}/schema-markup"
@@ -423,6 +469,7 @@ class SchemaMarkupEndpointTest(_Base):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["nothing_missing"])
         self.assertEqual(response.json()["script"], "")
+        self.assertEqual(response.json()["existing_types"], ["Organization", "WebPage"])
 
     def test_errors(self):
         other_scan = self._scan(phase=1)

@@ -7,9 +7,13 @@ from app.features.settings.services import resolve_openai_api_key_for_user
 
 
 def model_supports_reasoning(model: str) -> bool:
-    """Reasoning-effort wordt alleen ondersteund door gpt-5* en o-serie modellen."""
+    """Reasoning-effort wordt ondersteund door gpt-5 en nieuwer (gpt-6*, …) en de o-serie.
+
+    Welke waarden een model accepteert verschilt: gpt-6.2-sol kent geen "none" of "minimal"
+    (alleen low t/m max), gpt-6-luna geen "minimal". De aanroeper kiest dus een geldige waarde.
+    """
     normalized = (model or "").strip().lower()
-    return normalized.startswith("gpt-5") or bool(re.match(r"^o\d", normalized))
+    return bool(re.match(r"^gpt-[5-9]", normalized)) or bool(re.match(r"^o\d", normalized))
 
 
 def _build_openai_client(user_id: str) -> OpenAI:

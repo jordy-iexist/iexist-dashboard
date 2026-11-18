@@ -13,6 +13,7 @@ from app.features.launch_checklist.schemas import (
 )
 from app.features.launch_checklist.services.geo_extract import all_types
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
+from app.features.launch_checklist.services.rankmath_schema import REVIEW_PENDING, placed_at_of, review_view
 from app.features.launch_checklist.services.sitemap_monitor import snapshot_summary
 
 
@@ -33,8 +34,11 @@ def to_page_item(row: Any, issue_count: int = 0) -> LaunchScanPageItem:
     jsonld = data.pop("jsonld", None)
     data.pop("signals", None)
     data.pop("outlinks", None)
-    # Het gegenereerde schema hoort niet in elke lijstrespons; alleen het tijdstip gaat mee.
-    data.pop("schema_suggestion", None)
+    # Het gegenereerde schema hoort niet in elke lijstrespons; alleen de tijdstippen en de beoordeling gaan mee.
+    suggestion = data.pop("schema_suggestion", None)
+    data["schema_placed_at"] = placed_at_of(suggestion)
+    review_status, _ = review_view(suggestion)
+    data["schema_review_status"] = review_status if review_status != REVIEW_PENDING else None
     data["schema_all"] = sorted(all_types(jsonld)) if jsonld is not None else None
     return LaunchScanPageItem.model_validate({**data, "issue_count": issue_count})
 

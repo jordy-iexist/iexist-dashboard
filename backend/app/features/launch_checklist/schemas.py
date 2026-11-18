@@ -191,6 +191,10 @@ class LaunchScanPageItem(BaseModel):
     ahrefs: Any = None
     # Wanneer er met "Maak schema" JSON-LD is gegenereerd; de inhoud zelf zit niet in de lijst.
     schema_suggestion_at: datetime | None = None
+    # Wanneer het schema in Rank Math op de klantsite is gezet ("Plaats in Rank Math").
+    schema_placed_at: datetime | None = None
+    # Beoordeling van het huidige voorstel; None = geen geldige beoordeling (of geen voorstel).
+    schema_review_status: Literal["approved", "rejected"] | None = None
     issue_count: int = 0
 
 

@@ -56,20 +56,38 @@ MAX_TEXT_CHARS = 300
 _PLACEHOLDER_RE = re.compile(r"\[[^\[\]\n]{2,200}\]")
 
 # Korte vakkennis per type, bovenop de verplichte eigenschappen uit `schema_validate`.
+# Bewust hier en niet in `RECOMMENDED`: die lijst bepaalt ook de waarschuwingen van de scan.
+# De hints noemen alles wat een entiteit volledig maakt; de agent laat weg wat niet in de invoer staat.
 _TYPE_HINTS: dict[str, str] = {
     "Organization": "url, logo, contactPoint/telephone, address en sameAs alleen als ze in de invoer staan",
     "WebSite": "url van de homepage, name, publisher als verwijzing naar de organisatie",
-    "Service": "provider als verwijzing naar de bestaande organisatie; areaServed alleen als de plaats op de pagina staat",
+    "Service": "name (de dienst zoals in de H1 of title); serviceType (de dienst zonder plaatsnaam, "
+               "bv. \"Website laten maken\"); description uit de meta description of de eerste alinea; "
+               "url van deze pagina; provider als verwijzing naar de bestaande organisatie; "
+               "mainEntityOfPage als verwijzing naar de @id van de bestaande WebPage; "
+               "image als er een hoofdafbeelding is (primaryImageOfPage, og:image of een afbeelding in de "
+               "inhoud), bij voorkeur als verwijzing naar een bestaande ImageObject-@id; "
+               "areaServed als City met name alleen als de plaats op de pagina staat; "
+               "offers alleen als er een prijs op de pagina staat; hasOfferCatalog alleen als de pagina "
+               "pakketten, varianten of onderdelen van déze dienst noemt, niet voor andere diensten van "
+               "het bedrijf die ook op de pagina staan",
     "BreadcrumbList": "itemListElement met ListItem (position, name, item) van homepage tot deze pagina",
     "Product": "staat er geen prijs op de pagina, zet dan offers met een plaatshouder voor de prijs; "
-               "nooit review of aggregateRating verzinnen",
+               "nooit review of aggregateRating verzinnen; ook description (meta description of eerste "
+               "alinea), image (hoofdafbeelding), url en mainEntityOfPage (verwijzing naar de WebPage)",
     "Brand": "name van het merk zoals op de pagina; koppel het via brand aan het Product",
     "ItemList": "itemListElement met ListItem (position, url, name) voor de items op de pagina",
     "BlogPosting": "headline, author (Person of verwijzing), datePublished alleen als de datum bekend is, "
-                   "mainEntityOfPage als verwijzing naar de WebPage",
-    "Article": "headline, author (Person of verwijzing), datePublished alleen als de datum bekend is",
-    "Person": "name zoals op de pagina; jobTitle en worksFor (verwijzing naar de organisatie) als bekend",
-    "JobPosting": "title, description, datePosted, hiringOrganization (verwijzing), jobLocation met address",
+                   "mainEntityOfPage als verwijzing naar de WebPage; ook description (meta description of "
+                   "eerste alinea), image (hoofdafbeelding) en publisher (verwijzing naar de organisatie)",
+    "Article": "headline, author (Person of verwijzing), datePublished alleen als de datum bekend is; ook "
+               "description (meta description of eerste alinea), image (hoofdafbeelding), mainEntityOfPage "
+               "(verwijzing naar de WebPage) en publisher (verwijzing naar de organisatie)",
+    "Person": "name zoals op de pagina; jobTitle en worksFor (verwijzing naar de organisatie) als bekend; "
+              "ook description, image (foto van de persoon) en url als ze op de pagina staan",
+    "JobPosting": "title, description, datePosted, hiringOrganization (verwijzing), jobLocation met address; "
+                  "ook url van deze pagina, mainEntityOfPage (verwijzing naar de WebPage) en "
+                  "employmentType als dat op de pagina staat",
     "FAQPage": "mainEntity met Question (name) en acceptedAnswer (Answer met text), alleen vragen van de pagina",
 }
 
@@ -92,6 +110,8 @@ class SchemaMarkupResult:
     generated_at: datetime
     cached: bool
     nothing_missing: bool
+    # Types die al op de pagina stonden en dus niet in het blok zijn herhaald.
+    existing_types: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -182,9 +202,14 @@ def _entities(parsed: list[Any]) -> list[tuple[str, list[str], str | None]]:
     return list(found.values())
 
 
-def analyze_page(html: str, url: str, root_domain: str) -> PageFacts:
+def analyze_page(html: str, url: str, root_domain: str, placement: dict[str, Any] | None = None) -> PageFacts:
+    """Feiten van de pagina. Met `placement` tellen de door ons in Rank Math geplaatste nodes
+    niet mee, zodat opnieuw genereren weer het volledige voorstel oplevert."""
     blocks = extract_jsonld_blocks(html)
     parsed = _parsed_blocks(blocks)
+    if placement:
+        parsed = strip_placed(parsed, placement)
+        blocks = [json.dumps(block, ensure_ascii=False) for block in parsed]
     return PageFacts(
         url=url,
         blocks=blocks,
@@ -192,6 +217,130 @@ def analyze_page(html: str, url: str, root_domain: str) -> PageFacts:
         entities=_entities(parsed),
         content=extract_content(html, url, root_domain),
         signals=extract_geo(html, url, root_domain).signals,
+    )
+
+
+# --- Rank Math op de pagina ---------------------------------------------------------
+
+_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+_LDJSON_ATTR_RE = re.compile(r"\btype\s*=\s*[\"']?application/ld\+json", re.IGNORECASE)
+_RANK_MATH_ATTR_RE = re.compile(r"\bclass\s*=\s*(?:\"[^\"]*|'[^']*|)\brank-math-schema", re.IGNORECASE)
+# Pagina-types die Rank Math als WebPage-node van de graph gebruikt.
+WEBPAGE_TYPES = {"WebPage", "CollectionPage", "ProfilePage", "AboutPage", "ContactPage", "SearchResultsPage",
+                 "ItemPage", "CheckoutPage"}
+
+
+@dataclass
+class RankMathFacts:
+    """Wat er over Rank Math in de HTML van één pagina staat."""
+
+    detected: bool
+    # Types van het standaardschema (`@id` op `#richSnippet`, plus de bijbehorende Person).
+    default_types: list[str] = field(default_factory=list)
+    # De pagina heeft de graph van Rank Math (een WebPage-node).
+    had_graph: bool = False
+    # Alle types op de pagina zonder het standaardschema (en zonder door ons geplaatste nodes).
+    kept_types: set[str] = field(default_factory=set)
+
+
+def _node_id(node: Any) -> str:
+    value = node.get("@id") if isinstance(node, dict) else None
+    return value.strip() if isinstance(value, str) else ""
+
+
+def placed_matcher(placement: dict[str, Any] | None):
+    """Herkent een top-level node die door ons via Rank Math is geplaatst (op `@id`)."""
+    meta_ids: set[str] = set()
+    node_ids: set[str] = set()
+    for item in (placement or {}).get("items") or []:
+        if isinstance(item, dict):
+            if item.get("meta_id") is not None:
+                meta_ids.add(str(item["meta_id"]))
+            if item.get("node_id"):
+                node_ids.add(str(item["node_id"]))
+
+    def matches(node: Any) -> bool:
+        node_id = _node_id(node)
+        if not node_id:
+            return False
+        if node_id in node_ids:
+            return True
+        _, sep, suffix = node_id.rpartition("#schema-")
+        return bool(sep) and suffix in meta_ids
+
+    return matches
+
+
+def _is_webpage(node: dict[str, Any]) -> bool:
+    return bool(set(types_of(node)) & WEBPAGE_TYPES) or _node_id(node).endswith("#webpage")
+
+
+def strip_placed(parsed: list[Any], placement: dict[str, Any] | None) -> list[Any]:
+    """Geparste JSON-LD-blokken zonder de door ons geplaatste nodes.
+
+    Een geplaatste FAQPage voegt Rank Math samen met de WebPage (type FAQPage erbij, plus
+    `mainEntity`); dat wordt bij die WebPage teruggedraaid.
+    """
+    if not placement:
+        return parsed
+    placed = placed_matcher(placement)
+    faq_placed = any(isinstance(i, dict) and i.get("type") == "FAQPage" for i in placement.get("items") or [])
+
+    def clean_node(node: dict[str, Any]) -> dict[str, Any]:
+        types = types_of(node)
+        rest = [t for t in types if t != "FAQPage"]
+        if faq_placed and "FAQPage" in types and (set(rest) & WEBPAGE_TYPES or _node_id(node).endswith("#webpage")):
+            node = {k: v for k, v in node.items() if k != "mainEntity"}
+            node["@type"] = rest[0] if len(rest) == 1 else rest
+        return node
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, list):
+            return [clean(v) for v in value if not (isinstance(v, dict) and placed(v))]
+        if isinstance(value, dict):
+            if isinstance(value.get("@graph"), list):
+                value = {**value, "@graph": clean(value["@graph"])}
+            return clean_node(value)
+        return value
+
+    return [clean(block) for block in parsed if not (isinstance(block, dict) and placed(block))]
+
+
+def _referenced_ids(value: Any, depth: int = 0) -> set[str]:
+    found: set[str] = set()
+    if depth > 8:
+        return found
+    if isinstance(value, dict):
+        node_id = _node_id(value)
+        if node_id and depth > 0:
+            found.add(node_id)
+        for item in value.values():
+            found |= _referenced_ids(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            found |= _referenced_ids(item, depth + 1)
+    return found
+
+
+def rank_math_blocks(html: str) -> list[str]:
+    """JSON-LD-blokken die Rank Math schrijft (`rank-math-schema` in de class)."""
+    return [m.group(2) for m in _SCRIPT_RE.finditer(html or "")
+            if _LDJSON_ATTR_RE.search(m.group(1)) and _RANK_MATH_ATTR_RE.search(m.group(1))]
+
+
+def rank_math_facts(html: str, placement: dict[str, Any] | None = None) -> RankMathFacts:
+    raw_blocks = rank_math_blocks(html)
+    rm_nodes = flatten_jsonld(strip_placed(_parsed_blocks(raw_blocks), placement))
+    default_nodes = [n for n in rm_nodes if _node_id(n).endswith("#richSnippet")]
+    refs = set().union(*(_referenced_ids(n) for n in default_nodes)) if default_nodes else set()
+    default_nodes += [n for n in rm_nodes if "Person" in types_of(n) and _node_id(n) in refs]
+    default_ids = {_node_id(n) for n in default_nodes}
+    all_nodes = flatten_jsonld(strip_placed(_parsed_blocks(extract_jsonld_blocks(html)), placement))
+    return RankMathFacts(
+        detected=bool(raw_blocks),
+        default_types=_unique([t for n in default_nodes for t in types_of(n)]),
+        had_graph=any(_is_webpage(n) for n in rm_nodes),
+        kept_types=all_types([n for n in all_nodes if not (_node_id(n) and _node_id(n) in default_ids)]),
     )
 
 
@@ -419,7 +568,16 @@ def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool
         generated_at=generated_at,
         cached=cached,
         nothing_missing=False,
+        # Ontbreekt bij schema's die vóór dit veld zijn opgeslagen.
+        existing_types=[str(t) for t in stored.get("existing_types") or []],
     )
+
+
+def stored_result(page: LaunchScanPage) -> SchemaMarkupResult | None:
+    """Het opgeslagen voorstel als resultaat (zonder ophalen of modelaanroep), of None."""
+    if not isinstance(page.schema_suggestion, dict) or not page.schema_suggestion_at:
+        return None
+    return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True)
 
 
 def _nothing_missing(page_type: str | None, existing_types: set[str]) -> SchemaMarkupResult:
@@ -430,7 +588,8 @@ def _nothing_missing(page_type: str | None, existing_types: set[str]) -> SchemaM
     else:
         notes = "Voor dit paginatype wordt geen schema verwacht en er is geen FAQ-blok herkend."
     return SchemaMarkupResult(script="", types=[], placeholders=[], notes=notes, problems=[],
-                              generated_at=_now(), cached=False, nothing_missing=True)
+                              generated_at=_now(), cached=False, nothing_missing=True,
+                              existing_types=sorted(existing_types))
 
 
 def _parse_output(output: Any) -> tuple[Any, dict[str, Any]]:
@@ -473,6 +632,8 @@ def generate_schema_markup(
     if not regenerate and isinstance(page.schema_suggestion, dict) and page.schema_suggestion_at:
         return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True)
 
+    previous = page.schema_suggestion if isinstance(page.schema_suggestion, dict) else {}
+    placement = previous.get("placement") if isinstance(previous.get("placement"), dict) else None
     page_id = page.id
     page_type = page.page_type
     fetch_url = page.final_url or page.url
@@ -487,7 +648,10 @@ def generate_schema_markup(
 
     html, final_url = fetch_page_html(fetch_url)
     root_domain = root_domain_of(final_url) or urlparse(final_url).netloc
-    facts = analyze_page(html, final_url, root_domain)
+    # Na een plaatsing tellen de geplaatste nodes niet als "al aanwezig", anders zou een nieuw
+    # voorstel ze missen en zou opnieuw plaatsen ze verwijderen.
+    facts = analyze_page(html, final_url, root_domain, placement=placement)
+    rank_math = rank_math_facts(html, placement)
     targets = target_types(page_type, facts.existing_types, facts.signals)
     if not targets:
         return _nothing_missing(page_type, facts.existing_types)
@@ -516,11 +680,24 @@ def generate_schema_markup(
         "placeholders": _placeholders(jsonld, data.get("placeholders")),
         "notes": str(data.get("notes") or "").strip(),
         "problems": [describe_problem(p) for p in validation["problems"]],
+        # Wat er al op de pagina stond (niet herhaald); de dialog toont het naast het blok.
+        "existing_types": sorted(facts.existing_types),
+        # Voor "Plaats in Rank Math". Na een plaatsing is het standaardschema van Rank Math al
+        # van de pagina verdwenen; dan gelden de waarden van vóór het plaatsen.
+        "rank_math_detected": rank_math.detected,
+        "default_types": list(placement.get("default_types") or []) if placement else rank_math.default_types,
+        "had_graph": bool(placement.get("had_graph")) if placement else rank_math.had_graph,
+        "kept_types": sorted(rank_math.kept_types),
     }
 
     stored = db.get(LaunchScanPage, page_id)
     if stored is None:
         raise SchemaMarkupPageGoneError(page_id)
+    # Een plaatsing op de klantsite blijft bestaan bij opnieuw genereren. De beoordeling ook, maar die
+    # geldt alleen zolang de JSON-LD gelijk is (hash, zie `rankmath_schema.review_view`).
+    for key in ("placement", "review"):
+        if isinstance(stored.schema_suggestion, dict) and isinstance(stored.schema_suggestion.get(key), dict):
+            suggestion[key] = stored.schema_suggestion[key]
     now = _now()
     stored.schema_suggestion = suggestion
     stored.schema_suggestion_at = now

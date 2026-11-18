@@ -5,6 +5,7 @@ niets op de klantsite geschreven. Eén stap, geen tools: de invoer is de pagina 
 de te schrijven types (`services/schema_markup.page_brief`), de uitvoer een
 JSON-object met de JSON-LD als tekst (een strict schema laat geen vrij object toe).
 """
+
 from __future__ import annotations
 
 from app.agents.base import Agent
@@ -27,7 +28,11 @@ Harde regels
   https://www.voorbeeld.nl/diensten/dakwerk/#service.
 - Eén JSON-object met "@context": "https://schema.org" en een "@graph" met de nieuwe entiteiten.
 - Neem per type minimaal de verplichte eigenschappen op (staan bij elk gevraagd type in de invoer).
-  Aanbevolen eigenschappen alleen als de waarde in de invoer staat.
+- Maak elke entiteit zo volledig als de invoer toelaat: neem naast de verplichte eigenschappen ook alle
+  eigenschappen uit de hint bij het type op waarvan de waarde in de invoer staat. Laat alleen weg wat niet in
+  de invoer staat.
+- Koppel nieuwe entiteiten aan de bestaande graph: staat er een WebPage met @id in de invoer, verwijs er dan
+  naar via mainEntityOfPage.
 - Ontbreekt een verplichte waarde in de invoer, zet dan een plaatshouder tussen rechte haken als
   tekstwaarde, bijv. "[naam van de auteur]", en zet precies dezelfde tekst (met haken) in "placeholders".
   Gebruik geen plaatshouders voor eigenschappen die niet verplicht zijn: laat die dan weg.
@@ -66,8 +71,9 @@ def build_schema_markup_agent() -> Agent:
         model=settings.launch_scan_openai_model,
         max_steps=1,
         # Inclusief reasoning-tokens. Een blok met Service + BreadcrumbList is ~500 tokens,
-        # met een FAQPage van tien vragen ~3000. Een afgekapt antwoord wordt geweigerd.
-        max_output_tokens=10000,
-        reasoning_effort="low",
+        # met een FAQPage van tien vragen ~3000; bij effort "high" komt daar het denkwerk bij
+        # (kan enkele duizenden tokens zijn). Een afgekapt antwoord wordt geweigerd, dus ruim.
+        max_output_tokens=20000,
+        reasoning_effort="high",
         output_schema=OUTPUT_SCHEMA,
     )

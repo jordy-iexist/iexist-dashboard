@@ -369,6 +369,10 @@ export type LaunchScanPage = {
   issue_count: number
   /** Moment van de opgeslagen schema-suggestie (JSON-LD); null = nog niet gemaakt. */
   schema_suggestion_at: string | null
+  /** Moment waarop het schema via Rank Math op de klantsite is gezet; null = niet geplaatst. */
+  schema_placed_at: string | null
+  /** Beoordeling van het huidige schemavoorstel; null = nog niet beoordeeld (of geen voorstel). */
+  schema_review_status?: "approved" | "rejected" | null
 }
 
 export type IssueStatus = "open" | "doorgezet" | "opgelost" | "genegeerd"
@@ -455,6 +459,41 @@ export type SchemaMarkupResponse = {
   cached: boolean
   /** True = het verwachte schema staat er al; er is niets gemaakt of opgeslagen. */
   nothing_missing: boolean
+  /** Types die al op de pagina staan en niet in het blok zijn herhaald; [] bij een oude opgeslagen versie. */
+  existing_types: string[]
+  /** Plaatsing via Rank Math op de klantsite; null = niet geplaatst. Kan ook bij `nothing_missing` gevuld zijn. */
+  placement: SchemaPlacement | null
+  /** True = het schema kan via Rank Math op de klantsite gezet worden. */
+  can_place: boolean
+  /** Waarom plaatsen niet kan; "" als `can_place` true is. */
+  place_blocked_reason: string
+  /** Standaardtypes van Rank Math die bij plaatsen voor deze pagina vervallen; [] als geen of onbekend. */
+  replaces_default_types: string[]
+  /** Beoordeling van het huidige voorstel; opnieuw genereren zet hem terug op "pending". */
+  review_status: SchemaReviewStatus
+  reviewed_at: string | null
+}
+
+export type SchemaReviewStatus = "pending" | "approved" | "rejected"
+
+export type SchemaOverviewItem = {
+  page_id: string
+  url: string
+  path: string
+  title: string | null
+  page_type: string | null
+  /** null = nog geen voorstel opgeslagen. */
+  result: SchemaMarkupResponse | null
+}
+
+export type SchemaPlacement = {
+  placed_at: string
+  /** True = de types zijn teruggevonden in de HTML van de pagina. */
+  verified: boolean
+  /** False = het voorstel is na het plaatsen opnieuw gegenereerd. */
+  current: boolean
+  site_name: string
+  post_id: number
 }
 
 /**
@@ -466,6 +505,44 @@ export function createSchemaMarkup(scanId: string, pageId: string, regenerate = 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ regenerate }),
+  })
+}
+
+/**
+ * Zet het opgeslagen schema via Rank Math op de live pagina van de klantsite. Met `requireApproved`
+ * weigert de backend (400) als het huidige voorstel niet door een mens is goedgekeurd.
+ */
+export function placeSchemaMarkup(scanId: string, pageId: string, options?: { requireApproved?: boolean }) {
+  return apiFetch<SchemaMarkupResponse>(`/scans/${scanId}/pages/${pageId}/schema-markup/place`, {
+    method: "POST",
+    ...(options?.requireApproved
+      ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ require_approved: true }) }
+      : {}),
+  })
+}
+
+/** Keurt het huidige schemavoorstel goed of af, of zet de beoordeling terug ("pending"). */
+export function reviewSchemaMarkup(scanId: string, pageId: string, status: SchemaReviewStatus) {
+  return apiFetch<SchemaMarkupResponse>(`/scans/${scanId}/pages/${pageId}/schema-markup/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  })
+}
+
+/** Opgeslagen schemavoorstellen voor meerdere pagina's (max. 200), zonder modelaanroep. */
+export function fetchSchemaOverview(scanId: string, pageIds: string[]) {
+  return apiFetch<{ items: SchemaOverviewItem[] }>(`/scans/${scanId}/schema-markup/overview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ page_ids: pageIds }),
+  })
+}
+
+/** Haalt het geplaatste schema weer uit Rank Math op de live pagina; daarna is `placement` null. */
+export function removeSchemaMarkup(scanId: string, pageId: string) {
+  return apiFetch<SchemaMarkupResponse>(`/scans/${scanId}/pages/${pageId}/schema-markup/place`, {
+    method: "DELETE",
   })
 }
 

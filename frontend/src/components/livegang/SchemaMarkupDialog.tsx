@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertTriangle, Check, CheckCircle2, Copy, Loader2, RefreshCw } from "lucide-react"
+import { AlertTriangle, Check, CheckCircle2, Copy, Loader2, RefreshCw, Trash2, Upload } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -12,16 +12,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Pill } from "@/components/livegang/shared"
+import {
+  ReplacedDefaultTypes,
+  SchemaPlaceholders,
+  SchemaProblems,
+  TypeRow,
+} from "@/components/livegang/SchemaMarkupParts"
 import {
   createSchemaMarkup,
   formatDateTime,
+  placeSchemaMarkup,
+  removeSchemaMarkup,
   type LaunchScanPage,
   type SchemaMarkupResponse,
 } from "@/lib/launch-checklist"
+import { cn } from "@/lib/utils"
+
+type PlacementAction = "place" | "remove"
+
+const pageLinkClass = "break-all font-medium underline underline-offset-2 hover:no-underline"
 
 /**
- * JSON-LD-schema voor één pagina, als kant-en-klaar `<script>`-blok om op de klantsite te plakken.
+ * JSON-LD-schema voor één pagina, als kant-en-klaar `<script>`-blok om op de klantsite te plakken, of om
+ * via Rank Math direct op de live pagina te zetten (en daar weer te verwijderen; beide na bevestiging).
  * Bij openen vraagt de dialog het blok op: de backend geeft de opgeslagen versie direct terug, of maakt
  * er synchroon een (kan tientallen seconden duren). Mount per pagina (met `key`), zodat elke opening
  * met een schone staat begint.
@@ -31,17 +44,26 @@ export function SchemaMarkupDialog({
   page,
   onClose,
   onGenerated,
+  onPlacementChange,
+  onResult,
 }: {
   scanId: string
   page: LaunchScanPage
   onClose: () => void
+  /** Na elk geslaagd antwoord het volledige resultaat (o.a. voor de beoordeling in de lijst). */
+  onResult?: (pageId: string, result: SchemaMarkupResponse) => void
   /** Na een geslaagde aanroep met een blok: zodat de lijst zonder herladen toont dat er schema is. */
   onGenerated: (pageId: string, generatedAt: string) => void
+  /** Na elk antwoord: zodat de lijst zonder herladen toont of het schema op de site staat. */
+  onPlacementChange: (pageId: string, placedAt: string | null) => void
 }) {
   const [result, setResult] = useState<SchemaMarkupResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // Plaatsen/verwijderen gaat pas na een bevestiging in de dialog: het raakt de live klantsite.
+  const [confirm, setConfirm] = useState<PlacementAction | null>(null)
+  const [busy, setBusy] = useState<PlacementAction | null>(null)
   // Alleen het antwoord op de laatste aanvraag telt.
   const requestRef = useRef(0)
   // Eén aanvraag bij openen, ook als React (StrictMode) het effect dubbel draait: anders twee modelaanroepen.
@@ -53,6 +75,8 @@ export function SchemaMarkupDialog({
       (next) => {
         // Ook na sluiten doorgeven, zodat het icoon in de lijst klopt. Niets ontbrekend = niets opgeslagen.
         if (!next.nothing_missing) onGenerated(page.id, next.generated_at)
+        onPlacementChange(page.id, next.placement?.placed_at ?? null)
+        onResult?.(page.id, next)
         if (id !== requestRef.current) return
         setResult(next)
         setError(null)
@@ -80,10 +104,49 @@ export function SchemaMarkupDialog({
     setLoading(true)
     setError(null)
     setCopied(false)
+    setConfirm(null)
     void request(!retry)
   }
 
+  function runPlacement(action: PlacementAction) {
+    const id = ++requestRef.current
+    setBusy(action)
+    setError(null)
+    const call = action === "place" ? placeSchemaMarkup : removeSchemaMarkup
+    call(scanId, page.id).then(
+      (next) => {
+        // Ook na sluiten doorgeven, zodat het icoon in de lijst klopt.
+        onPlacementChange(page.id, next.placement?.placed_at ?? null)
+        onResult?.(page.id, next)
+        if (id !== requestRef.current) return
+        setResult(next)
+        setConfirm(null)
+        setBusy(null)
+      },
+      (err: unknown) => {
+        if (id !== requestRef.current) return
+        setError((err as Error).message)
+        setConfirm(null)
+        setBusy(null)
+      }
+    )
+  }
+
+  function askConfirm(action: PlacementAction) {
+    setError(null)
+    setConfirm(action)
+  }
+
   const hasScript = !!result && !result.nothing_missing && !!result.script
+  const placement = result?.placement ?? null
+  const canPlace = hasScript && !!result?.can_place
+  const blockedReason = hasScript && !result?.can_place ? (result?.place_blocked_reason ?? "").trim() : ""
+  const replacesDefaults = result?.replaces_default_types ?? []
+  // Nog niet geplaatst, of het voorstel is daarna opnieuw gegenereerd: plaatsen is dan de hoofdactie.
+  const placePrimary = canPlace && (!placement || !placement.current)
+  const working = loading || busy !== null
+  const footerDisabled = working || confirm !== null
+  const placementOk = !!placement && placement.verified && placement.current
 
   async function copyScript() {
     if (!result || !hasScript) return
@@ -95,6 +158,12 @@ export function SchemaMarkupDialog({
       setError("Kopiëren naar het klembord is mislukt.")
     }
   }
+
+  const pageLink = (
+    <a href={page.url} target="_blank" rel="noreferrer noopener" className={pageLinkClass}>
+      {page.url}
+    </a>
+  )
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -111,6 +180,40 @@ export function SchemaMarkupDialog({
           </div>
         )}
 
+        {!loading && placement && (
+          <div
+            className={cn(
+              "space-y-1 rounded-md border px-3 py-2 text-sm",
+              placementOk
+                ? "border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200"
+                : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            )}
+          >
+            <p className="flex items-center gap-1.5 font-medium">
+              {placementOk ? <CheckCircle2 className="size-4 shrink-0" /> : <AlertTriangle className="size-4 shrink-0" />}
+              Geplaatst in Rank Math op {formatDateTime(placement.placed_at)}
+              {placement.site_name ? ` (${placement.site_name})` : ""}
+            </p>
+            {placement.verified ? (
+              <p className="text-xs">Zichtbaar op de pagina.</p>
+            ) : (
+              <p className="text-xs">
+                Nog niet teruggevonden op de pagina, mogelijk door caching;{" "}
+                <a href={page.url} target="_blank" rel="noreferrer noopener" className={pageLinkClass}>
+                  controleer de pagina
+                </a>
+                .
+              </p>
+            )}
+            {!placement.current && (
+              <p className="text-xs">
+                Het voorstel is na het plaatsen opnieuw gegenereerd; op de site staat nog de vorige versie. Plaats
+                opnieuw om de site bij te werken.
+              </p>
+            )}
+          </div>
+        )}
+
         {!loading && result?.nothing_missing && (
           <div className="flex items-start gap-2 rounded-md border border-green-300 bg-green-50 px-3 py-3 text-sm text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
@@ -123,38 +226,15 @@ export function SchemaMarkupDialog({
 
         {!loading && result && !result.nothing_missing && (
           <div className="min-w-0 space-y-3">
-            {result.placeholders.length > 0 && (
-              <div className="space-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                <p className="font-medium">Eerst invullen</p>
-                <p className="text-xs">Vervang deze plaatshouders in het blok voordat je het plakt:</p>
-                <ul className="list-disc space-y-0.5 pl-5 font-mono text-xs">
-                  {result.placeholders.map((p) => (
-                    <li key={p} className="break-all">{p}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <SchemaPlaceholders placeholders={result.placeholders} />
 
-            {result.problems.length > 0 && (
-              <div className="space-y-1 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
-                <p className="flex items-center gap-1.5 font-medium">
-                  <AlertTriangle className="size-4 shrink-0" /> Controleer vóór plaatsen
-                </p>
-                <ul className="list-disc space-y-0.5 pl-5 text-xs">
-                  {result.problems.map((p, i) => (
-                    <li key={i}>{p}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <SchemaProblems problems={result.problems} />
 
-            {result.types.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {result.types.map((t) => (
-                  <Pill key={t} tone="blue">{t}</Pill>
-                ))}
-              </div>
+            {/* Het blok bevat alleen wat ontbrak; zonder deze regel lijkt het de complete markup. */}
+            {(result.existing_types ?? []).length > 0 && (
+              <TypeRow label="Staat al op de pagina (niet herhaald):" types={result.existing_types} tone="muted" />
             )}
+            {result.types.length > 0 && <TypeRow label="Nieuw in dit blok:" types={result.types} tone="blue" />}
 
             <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs">
               {result.script}
@@ -169,19 +249,90 @@ export function SchemaMarkupDialog({
           </div>
         )}
 
+        {!loading && blockedReason && (
+          <p className="text-xs text-muted-foreground">{blockedReason}</p>
+        )}
+
+        {!loading && confirm && (
+          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            {confirm === "place" ? (
+              <>
+                <p className="font-medium">Schema op de live site zetten?</p>
+                <p className="text-xs">
+                  Dit schema komt via Rank Math direct op de live pagina {pageLink}
+                  {placement ? "; het eerder geplaatste schema wordt vervangen." : "."}
+                </p>
+                {replacesDefaults.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs">Het standaardschema van Rank Math voor deze pagina vervalt:</p>
+                    <ReplacedDefaultTypes types={replacesDefaults} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="font-medium">Schema van de live site verwijderen?</p>
+                <p className="text-xs">
+                  Het geplaatste schema wordt uit Rank Math op de live pagina {pageLink} verwijderd.
+                </p>
+              </>
+            )}
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setConfirm(null)}>
+                Annuleren
+              </Button>
+              <Button
+                size="sm"
+                variant={confirm === "remove" ? "destructive" : "default"}
+                disabled={busy !== null}
+                onClick={() => runPlacement(confirm)}
+              >
+                {busy ? <Loader2 className="animate-spin" /> : confirm === "remove" ? <Trash2 /> : <Upload />}
+                {confirm === "remove" ? (busy ? "Verwijderen…" : "Verwijderen") : busy ? "Plaatsen…" : "Plaatsen"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <DialogFooter className="sm:items-center">
+        <DialogFooter className="sm:flex-wrap sm:items-center">
           {result && !loading && (
             <p className="text-xs text-muted-foreground sm:mr-auto">
               {result.nothing_missing ? "Gecontroleerd" : result.cached ? "Opgeslagen versie" : "Nieuw gemaakt"} ·{" "}
               {formatDateTime(result.generated_at)}
             </p>
           )}
-          <Button size="sm" variant="outline" disabled={loading} onClick={regenerate}>
+          <Button size="sm" variant="outline" disabled={footerDisabled} onClick={regenerate}>
             <RefreshCw /> {retry ? "Opnieuw proberen" : "Opnieuw genereren"}
           </Button>
-          <Button size="sm" disabled={loading || !hasScript} onClick={() => void copyScript()}>
+          {placement && !loading && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-red-700 hover:text-red-800 dark:text-red-400"
+              disabled={footerDisabled}
+              onClick={() => askConfirm("remove")}
+            >
+              <Trash2 /> Verwijder van site
+            </Button>
+          )}
+          {hasScript && !loading && (
+            <Button
+              size="sm"
+              variant={placePrimary ? "default" : "outline"}
+              disabled={footerDisabled || !canPlace}
+              onClick={() => askConfirm("place")}
+            >
+              <Upload /> {placement ? "Opnieuw plaatsen" : "Plaats in Rank Math"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={placePrimary ? "outline" : "default"}
+            disabled={working || !hasScript}
+            onClick={() => void copyScript()}
+          >
             {copied ? <Check /> : <Copy />} {copied ? "Gekopieerd" : "Kopieer"}
           </Button>
         </DialogFooter>

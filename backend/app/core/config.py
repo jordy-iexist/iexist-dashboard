@@ -188,7 +188,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PAGESPEED_API_KEY", "GOOGLE_PAGESPEED_API_KEY"),
     )
     launch_scan_openai_model: str = Field(
-        default="gpt-5.2",
+        default="gpt-6.2-sol",
         validation_alias="LAUNCH_SCAN_OPENAI_MODEL",
     )
     # Grens per OpenAI-aanroep in de livegang-scans (agentstappen en paginatype-classificatie).
