@@ -403,6 +403,8 @@ export type IssueGroup = {
   severity: IssueSeverity
   count: number
   open: number
+  /** Monday-hoofditem voor dit type (bestaat pas na de eerste keer doorzetten). */
+  monday_url: string | null
 }
 
 export const API_BASE = "/api/launch-checklist"
@@ -628,6 +630,8 @@ export type ContentPage = {
   title: string | null
   meta_description: string | null
   word_count: number | null
+  /** Woorden zonder site-brede blokken (reviews, projecten); null = nog niet berekend. */
+  own_word_count: number | null
   problem_count: number
   checks: Record<string, ContentCheck>
   analysis_status: AnalysisStatus

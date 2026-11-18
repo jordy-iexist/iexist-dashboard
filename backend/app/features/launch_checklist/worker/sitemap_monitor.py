@@ -41,7 +41,11 @@ from app.features.launch_checklist.services.checklist_view import (
     latest_completed_scan,
     manual_states_by_customer,
 )
-from app.features.launch_checklist.services.content_checks import evaluate_pages, problem_count
+from app.features.launch_checklist.services.content_checks import (
+    evaluate_pages,
+    own_word_counts,
+    problem_count,
+)
 from app.features.launch_checklist.services.content_rebuild import recover_stale_analysis
 from app.features.launch_checklist.services.discovery import discover_from_sitemaps, root_domain_of, url_key
 from app.features.launch_checklist.services.geo_rebuild import apply_page_types
@@ -473,9 +477,12 @@ def _scan_targets(
         context, has_phase3 = _content_context(
             db, customer_id, scan_id, keys | known_ok, (e.get("url") or "" for e in plan.entries.values()))
         all_checks = evaluate_pages([*context, *content_rows], link_status)
+        word_counts = own_word_counts([*context, *content_rows])
         page_checks: dict[str, dict[str, Any]] = {}
         for page in content_rows:
             checks = all_checks[page.id]
+            own_words, site_wide = word_counts[page.id]
+            page.signals = {**(page.signals or {}), "own_word_count": own_words, "site_wide_words": site_wide}
             if not has_phase3:
                 # Zonder fase-3-scan kent de monitor de inkomende links van de site niet.
                 checks.pop(INTERNAL_LINKS_KEY, None)

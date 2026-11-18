@@ -8,8 +8,10 @@ from app.features.launch_checklist.services.content_checks import (
     detect_place,
     evaluate_pages,
     generic_filename,
+    own_word_counts,
     problem_count,
     recheck_meta,
+    site_wide_blocks,
 )
 from app.features.launch_checklist.services.content_extract import extract_content
 from app.features.launch_checklist.services.geo_checklist import ITEMS as GEO_ITEMS
@@ -156,6 +158,103 @@ class ChecksTest(unittest.TestCase):
         self.assertNotIn("c3_meta_description", types)
         self.assertIn("c3_blogs", types)
         self.assertTrue(all(i["issue_type"] in ISSUE_TYPES for i in issues))
+
+
+REVIEW_LINES = [
+    "## Wat klanten zeggen",
+    "Super geholpen, snelle levering en een echt prachtig resultaat voor ons bedrijf.",  # 12 woorden
+    "- Projecten",
+]
+REVIEW_WORDS = 3 + 12 + 1  # markdown-voorvoegsels tellen niet mee
+
+
+def site_page(i, page_type, own_text, extra=(), **kw):
+    """Pagina met `own_text` (één regel) + de site-brede reviewregels."""
+    body = "\n".join([f"# Pagina {i}", own_text, *extra, *REVIEW_LINES, "…(ingekort)", ""])
+    own_words = 2 + len(own_text.split()) + sum(len(e.split()) for e in extra)
+    return page(id=f"p{i}", url=f"https://voorbeeld.nl/pagina-{i}/", page_type=page_type, body_text=body,
+                word_count=own_words + REVIEW_WORDS + kw.pop("extra_words", 0),
+                headings=[{"level": 1, "text": f"Pagina {i}"}], **kw)
+
+
+class SiteWideBlocksTest(unittest.TestCase):
+    TYPES = ["dienst", "dienst", "landing", "blog", None, "over_ons"]
+
+    def pages(self, **kw):
+        return [site_page(i, t, f"Eigen tekst nummer {i}.", **kw) for i, t in enumerate(self.TYPES)]
+
+    def test_review_lines_are_site_wide(self):
+        pages = self.pages()
+        self.assertEqual(site_wide_blocks(pages), set(REVIEW_LINES))
+        counts = own_word_counts(pages)
+        self.assertEqual(counts["p0"], (2 + 4, REVIEW_WORDS))
+        # Lege regels en de afkapregel zijn nooit een blok.
+        self.assertNotIn("…(ingekort)", site_wide_blocks(pages))
+        self.assertNotIn("", site_wide_blocks(pages))
+
+    def test_line_twice_on_one_page_counts_twice(self):
+        pages = self.pages()
+        pages[0] = site_page(0, "dienst", "Eigen tekst nummer 0.", extra=[REVIEW_LINES[1]], extra_words=0)
+        own, site_wide = own_word_counts(pages)["p0"]
+        self.assertEqual(site_wide, REVIEW_WORDS + 12)
+        self.assertEqual(own, 2 + 4)
+
+    def test_own_never_below_zero(self):
+        pages = self.pages()
+        pages[0].word_count = 3
+        self.assertEqual(own_word_counts(pages)["p0"], (0, REVIEW_WORDS))
+
+    def test_shared_within_one_type_stays_own_text(self):
+        shared = "Wij zijn al twintig jaar specialist in dakgoten in de hele regio."
+        pages = [site_page(i, "landing", f"Eigen {i}.", extra=[shared]) for i in range(6)]
+        pages.append(site_page(6, "blog", "Blogtekst."))
+        pages.append(site_page(7, "dienst", "Diensttekst."))
+        blocks = site_wide_blocks(pages)
+        self.assertNotIn(shared, blocks)
+        self.assertEqual(blocks, set(REVIEW_LINES))  # 8 pagina's, 3 types
+        own, site_wide = own_word_counts(pages)["p0"]
+        self.assertEqual((own, site_wide), (2 + 2 + 12, REVIEW_WORDS))
+
+    def test_fewer_than_five_pages_unchanged(self):
+        pages = self.pages()[:4]
+        self.assertEqual(site_wide_blocks(pages), set())
+        self.assertEqual(own_word_counts(pages)["p0"], (pages[0].word_count, 0))
+        big = [site_page(i, t, "woord " * 500) for i, t in enumerate(["dienst", "landing", "blog", "overig"])]
+        checks = evaluate_pages(big)["p0"]
+        words = big[0].word_count
+        self.assertEqual(checks["c3_scannable"], {
+            "status": "warning", "message": f"{words} woorden zonder lijsten of tabellen.", "details": None})
+        self.assertEqual(checks["c3_keywords"]["details"], None)
+
+    def test_checks_use_own_words(self):
+        # 450 eigen woorden + 400 site-brede woorden, zonder lijsten.
+        review = " ".join(["review"] * 400)
+        pages = [site_page(i, t, "woord " * 448 if i == 0 else f"Eigen {i}.", extra=[review])
+                 for i, t in enumerate(self.TYPES)]
+        p0 = pages[0]
+        own_words, site_wide = own_word_counts(pages)["p0"]
+        self.assertEqual(site_wide, 400 + REVIEW_WORDS)
+        self.assertEqual(own_words, p0.word_count - site_wide)
+        checks = evaluate_pages(pages)["p0"]
+        scannable = checks["c3_scannable"]
+        self.assertEqual(scannable["status"], "warning")
+        self.assertIn(f"{own_words} woorden eigen tekst zonder lijsten of tabellen", scannable["message"])
+        self.assertIn(f"{site_wide} woorden in blokken", scannable["message"])
+        self.assertEqual(scannable["details"], {"own_words": own_words, "site_wide_words": site_wide})
+
+        # Pagina 1: weinig eigen tekst, maar door de reviews boven de drempels.
+        p1_checks = evaluate_pages(pages)["p1"]
+        own1, site1 = own_word_counts(pages)["p1"]
+        self.assertGreaterEqual(pages[1].word_count, 400)
+        self.assertEqual(p1_checks["c3_scannable"]["status"], "ok")
+        self.assertIn(f"{own1} woorden eigen tekst", p1_checks["c3_scannable"]["message"])
+        self.assertEqual(p1_checks["c3_keywords"]["status"], "warning")
+        self.assertIn(f"Weinig eigen tekst ({own1} woorden; {site1} woorden in blokken",
+                      p1_checks["c3_keywords"]["message"])
+        self.assertEqual(p1_checks["c3_keywords"]["details"], {"own_words": own1, "site_wide_words": site1})
+        # Geen H2 en >300 woorden totaal, maar weinig eigen tekst: geen H2-melding.
+        self.assertNotIn("H2", p1_checks["c3_headings"]["message"])
+        self.assertIn("H2", checks["c3_headings"]["message"])
 
 
 class CatalogTest(unittest.TestCase):

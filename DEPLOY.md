@@ -129,8 +129,10 @@ niets, dus het schedule-bestand staat in de container (`/tmp/celerybeat-schedule
 - **Dagelijkse sitemap-monitor** (livegang): elke dag om `SITEMAP_MONITOR_HOUR`
   (standaard 5, Europe/Amsterdam, na de back-up van 03:00) krijgt elke klant met de
   schakelaar aan en een voltooide nulmeting een korte run die alleen nieuwe en
-  gewijzigde pagina's uit de sitemap scant. De eerste run legt alleen de
-  uitgangssituatie vast. Instellingen in `backend/.env`: `SITEMAP_MONITOR_ENABLED`
+  gewijzigde pagina's uit de sitemap scant. De schakelaar (monitor-tab per klant)
+  staat standaard uit en gaat vanzelf aan zodra de eerste nulmeting (fase 1) van
+  de klant is voltooid; zet iemand hem daarna uit, dan blijft hij uit, ook na een
+  nieuwe nulmeting. De eerste run legt alleen de uitgangssituatie vast. Instellingen in `backend/.env`: `SITEMAP_MONITOR_ENABLED`
   (`false` = noodrem voor de dagelijkse run; "Nu controleren" blijft werken),
   `SITEMAP_MONITOR_MAX_URLS`, `SITEMAP_MONITOR_MAX_PAGES_PER_RUN`.
 - Handmatig één keer starten (alle klanten):

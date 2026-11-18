@@ -25,6 +25,7 @@ from app.features.launch_checklist.services.content_checks import (
     REDIRECTS_KEY,
     aggregate_items,
     evaluate_pages,
+    own_word_counts,
     problem_count,
     recheck_meta,
 )
@@ -84,8 +85,12 @@ def build_content_payload(
     Geeft (payload voor `scan.checklist`, regelresultaat per pagina) terug.
     """
     page_checks = evaluate_pages(pages, link_status)
+    word_counts = own_word_counts(pages)
     for page in pages:
         checks = page_checks[page.id]
+        own_words, site_wide = word_counts[page.id]
+        # JSON-kolom: nieuw dict toewijzen zodat SQLAlchemy de wijziging ziet.
+        page.signals = {**(page.signals or {}), "own_word_count": own_words, "site_wide_words": site_wide}
         if link_status is None and isinstance(page.checks, dict) and REDIRECTS_KEY in page.checks:
             checks[REDIRECTS_KEY] = page.checks[REDIRECTS_KEY]
         page.checks = checks

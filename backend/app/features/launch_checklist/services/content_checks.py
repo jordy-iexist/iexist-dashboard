@@ -38,6 +38,10 @@ SCANNABLE_MIN_WORDS = 400
 FIRST_PARAGRAPH_MAX_WORDS = 90
 MAX_EVIDENCE_URLS = 25
 MAX_LINK_DETAILS = 30
+# Een regel uit `body_text` die letterlijk op zoveel pagina's van zoveel paginatypes staat,
+# is een site-breed blok (reviews, projecten) en telt niet als eigen tekst van de pagina.
+SITE_BLOCK_MIN_PAGES = 5
+SITE_BLOCK_MIN_TYPES = 3
 REDIRECTS_KEY = "c3_redirects_404"
 META_FIXED_KEY = "c3_meta_fixed"
 
@@ -71,6 +75,9 @@ _GENERIC_FILENAME_RE = re.compile(
     r"adobestock|pexels|unsplash|depositphotos|design|canva|banner|header|slide)[-_ ]?[\d\-_ ()]*$",
     re.IGNORECASE,
 )
+_MARKDOWN_PREFIX_RE = re.compile(r"^(?:#+ |- )")
+_TRUNCATED_LINE = "…(ingekort)"
+_SITE_WIDE_NOTE = "woorden in blokken die op veel pagina's terugkomen, zoals reviews, niet meegeteld"
 _REGION_RE = re.compile(r"\b(regio|omgeving|werkgebied|omstreken|omliggende)\b", re.IGNORECASE)
 _FAQ_PATH_RE = re.compile(r"faq|veelgestelde|veel-gestelde", re.IGNORECASE)
 _CASES_PATH_RE = re.compile(r"case|project|referentie|portfolio|klantverhal|ervaring", re.IGNORECASE)
@@ -92,6 +99,47 @@ def _words(text: str | None) -> int:
 
 def _norm(text: str | None) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _body_lines(page: Any) -> list[str]:
+    """Blokregels van `body_text` (één blok per regel), zonder lege regels en afkapregel."""
+    lines = (line.strip() for line in (page.body_text or "").splitlines())
+    return [line for line in lines if line and line != _TRUNCATED_LINE]
+
+
+def site_wide_blocks(pages: list[Any]) -> set[str]:
+    """Regels die letterlijk op minstens `SITE_BLOCK_MIN_PAGES` pagina's van minstens
+    `SITE_BLOCK_MIN_TYPES` paginatypes staan (reviewsliders, projectenblokken)."""
+    if len(pages) < SITE_BLOCK_MIN_PAGES:
+        return set()
+    page_counts: Counter[str] = Counter()
+    types: dict[str, set[str]] = defaultdict(set)
+    for page in pages:
+        page_type = page.page_type or "overig"
+        for line in set(_body_lines(page)):
+            page_counts[line] += 1
+            types[line].add(page_type)
+    return {
+        line for line, count in page_counts.items()
+        if count >= SITE_BLOCK_MIN_PAGES and len(types[line]) >= SITE_BLOCK_MIN_TYPES
+    }
+
+
+def own_word_counts(pages: list[Any]) -> dict[str, tuple[int, int]]:
+    """Per pagina-id (eigen woorden, woorden in site-brede blokken)."""
+    blocks = site_wide_blocks(pages)
+    out: dict[str, tuple[int, int]] = {}
+    for page in pages:
+        total = page.word_count or 0
+        site_wide = sum(
+            _words(_MARKDOWN_PREFIX_RE.sub("", line)) for line in _body_lines(page) if line in blocks
+        ) if blocks else 0
+        out[page.id] = (max(0, total - site_wide), site_wide)
+    return out
+
+
+def _site_wide_details(own: int, site_wide: int) -> dict[str, int] | None:
+    return {"own_words": own, "site_wide_words": site_wide} if site_wide else None
 
 
 def is_bad(check: Check | None) -> bool:
@@ -162,7 +210,8 @@ def _meta_description(page: Any, duplicates: set[str]) -> Check:
     return _c("ok", f"Meta description in orde ({length} tekens, ±{width} px).", details)
 
 
-def _headings(page: Any) -> Check:
+def _headings(page: Any, own_words: int | None = None) -> Check:
+    """`own_words`: eigen tekst zonder site-brede blokken (standaard `page.word_count`)."""
     headings = page.headings or []
     h1_count = sum(1 for h in headings if h.get("level") == 1)
     if h1_count == 0:
@@ -179,21 +228,30 @@ def _headings(page: Any) -> Check:
         previous = level
     if skips:
         problems.append(f"{skips}× een kopniveau overgeslagen")
-    if (page.word_count or 0) >= THIN_WORDS and not any(h.get("level") == 2 for h in headings):
+    words = (page.word_count or 0) if own_words is None else own_words
+    if words >= THIN_WORDS and not any(h.get("level") == 2 for h in headings):
         problems.append("geen tussenkoppen (H2)")
     if problems:
         return _c("warning", "Koppenstructuur: " + ", ".join(problems) + ".")
     return _c("unknown", "Koppenstructuur technisch in orde; duidelijkheid beoordeelt de AI-analyse.")
 
 
-def _scannable(page: Any) -> Check:
+def _scannable(page: Any, own_words: int | None = None, site_wide: int = 0) -> Check:
+    """`own_words`/`site_wide`: eigen tekst en woorden in site-brede blokken."""
     signals = page.signals or {}
-    words = page.word_count or 0
+    words = (page.word_count or 0) if own_words is None else own_words
+    details = _site_wide_details(words, site_wide)
     if words < SCANNABLE_MIN_WORDS:
+        if site_wide:
+            return _c("ok", f"Korte pagina ({words} woorden eigen tekst; {site_wide} {_SITE_WIDE_NOTE}).", details)
         return _c("ok", f"Korte pagina ({words} woorden).")
     if not signals.get("lists") and not signals.get("tables"):
+        if site_wide:
+            return _c("warning",
+                      f"{words} woorden eigen tekst zonder lijsten of tabellen ({site_wide} {_SITE_WIDE_NOTE}).",
+                      details)
         return _c("warning", f"{words} woorden zonder lijsten of tabellen.")
-    return _c("unknown", "Lijsten/tabellen aanwezig; of het genoeg is beoordeelt de AI-analyse.")
+    return _c("unknown", "Lijsten/tabellen aanwezig; of het genoeg is beoordeelt de AI-analyse.", details)
 
 
 def _answer_first(page: Any) -> Check:
@@ -206,11 +264,15 @@ def _answer_first(page: Any) -> Check:
     return _c("unknown", "Of de eerste alinea direct antwoord geeft, beoordeelt de AI-analyse.")
 
 
-def _keywords(page: Any) -> Check:
-    words = page.word_count or 0
+def _keywords(page: Any, own_words: int | None = None, site_wide: int = 0) -> Check:
+    """`own_words`/`site_wide`: eigen tekst en woorden in site-brede blokken."""
+    words = (page.word_count or 0) if own_words is None else own_words
+    details = _site_wide_details(words, site_wide)
     if words < THIN_WORDS:
+        if site_wide:
+            return _c("warning", f"Weinig eigen tekst ({words} woorden; {site_wide} {_SITE_WIDE_NOTE}).", details)
         return _c("warning", f"Weinig tekst ({words} woorden).")
-    return _c("unknown", "Zoekwoord, intentie en leesbaarheid beoordeelt de AI-analyse.")
+    return _c("unknown", "Zoekwoord, intentie en leesbaarheid beoordeelt de AI-analyse.", details)
 
 
 def _faq(page: Any) -> Check:
@@ -409,10 +471,12 @@ def evaluate_pages(
             if target in service_keys:
                 links_to_service.add(own)
 
+    word_counts = own_word_counts(pages)
     out: dict[str, dict[str, Check]] = {}
     for page in pages:
         page_type = page.page_type or "overig"
         own = url_key(page.url)
+        own_words, site_wide = word_counts[page.id]
         results: dict[str, Check] = {
             "c3_meta_title": _meta_title(page, dup_titles),
             "c3_meta_description": _meta_description(page, dup_descriptions),
@@ -421,9 +485,9 @@ def evaluate_pages(
             REDIRECTS_KEY: _redirects(page, link_status),
         }
         rules = {
-            "c3_keywords": lambda: _keywords(page),
-            "c3_headings": lambda: _headings(page),
-            "c3_scannable": lambda: _scannable(page),
+            "c3_keywords": lambda: _keywords(page, own_words, site_wide),
+            "c3_headings": lambda: _headings(page, own_words),
+            "c3_scannable": lambda: _scannable(page, own_words, site_wide),
             "c3_answer_first": lambda: _answer_first(page),
             "c3_faq": lambda: _faq(page),
             "c3_eeat": lambda: _eeat(page),

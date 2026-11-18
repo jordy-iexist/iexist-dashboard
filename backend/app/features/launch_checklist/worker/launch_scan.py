@@ -26,6 +26,7 @@ from app.features.launch_checklist.services.issue_state import (
 from app.features.launch_checklist.services.issues import generate_issues
 from app.features.launch_checklist.services.pagespeed import measure_vitals
 from app.features.launch_checklist.services.scan_recovery import heartbeat
+from app.features.launch_checklist.services.sitemap_monitor import enable_after_first_nulmeting
 from app.features.launch_checklist.services.stats import build_summary_stats
 from app.services.ahrefs import is_configured as ahrefs_is_configured
 from app.worker.celery_app import celery_app
@@ -349,6 +350,17 @@ def run_launch_scan_task(self, scan_id: str) -> None:
             warnings=warnings,
             completed_at=_now(),
         )
+
+        # 7. Eerste voltooide nulmeting: dagelijkse sitemapcontrole aanzetten. Eigen
+        # try/except: een fout hier mag de voltooide scan niet alsnog op 'failed' zetten.
+        try:
+            with SessionLocal() as db:
+                scan = db.get(LaunchScan, scan_id)
+                customer_id = scan.customer_website_id if scan is not None else None
+                if customer_id and enable_after_first_nulmeting(db, customer_id, scan_id):
+                    logger.info("Dagelijkse sitemapcontrole aangezet voor klant %s.", customer_id)
+        except Exception as exc:
+            logger.warning("Dagelijkse sitemapcontrole niet aangezet na scan %s: %s", scan_id, exc)
     except SoftTimeLimitExceeded:
         _update(scan_id, status="failed", error_message="Scan duurde te lang en is afgebroken.", warnings=warnings)
     except Exception as exc:

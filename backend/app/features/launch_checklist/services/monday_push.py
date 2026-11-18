@@ -7,9 +7,10 @@ bijbehorende `geo_<key>`-actiepunt delen één Monday-item.
 
 Actiepunten per pagina (fase 1, 3 en 4) worden op onderwerp gegroepeerd: per
 issue_type één hoofditem (bijv. "Meta description ontbreekt"), met elk
-actiepunt als subitem. Sitebrede punten en fase-2 punten blijven losse items.
-Bij fase-3 actiepunten gaan de AI-voorstellen voor die pagina mee in de
-toelichting.
+actiepunt als subitem. Een subitem heet naar de volledige URL van de pagina;
+de titel van het actiepunt staat bovenaan zijn toelichting. Sitebrede punten
+en fase-2 punten blijven losse items, met de titel als naam. Bij fase-3
+actiepunten gaan de AI-voorstellen voor die pagina mee in de toelichting.
 
 Fase-4 checklistpunten horen bij een ronde (kwartaal): elke ronde krijgt eigen
 items, met de ronde in de naam.
@@ -277,6 +278,13 @@ def issue_item_name(issue: LaunchScanIssue) -> str:
     return (issue.title or issue.issue_type)[:MAX_ITEM_NAME]
 
 
+def subitem_name(issue: LaunchScanIssue) -> str:
+    """Naam van een subitem onder een onderwerp: de volledige URL van de pagina."""
+    if not issue.url:
+        return issue_item_name(issue)
+    return issue.url[:MAX_ITEM_NAME]
+
+
 def issue_suggestions(db: Session, issue: LaunchScanIssue) -> list[LaunchContentSuggestion]:
     """AI-voorstellen (fase 3) voor de pagina en het checklistpunt van dit actiepunt.
 
@@ -325,10 +333,17 @@ def source_label(phase: int) -> str:
 
 
 def issue_body(
-    issue: LaunchScanIssue, customer: CustomerWebsite, phase: int, *, extra_html: str = ""
+    issue: LaunchScanIssue, customer: CustomerWebsite, phase: int, *, extra_html: str = "",
+    with_title: bool = False,
 ) -> str:
+    """Toelichting bij een actiepunt.
+
+    `with_title` zet de titel bovenaan: voor subitems, die naar de URL heten en
+    anders de extra informatie uit de titel ("Title te lang (72 tekens)") missen.
+    """
     label = ISSUE_TYPES.get(issue.issue_type, {}).get("label", issue.issue_type)
-    parts = [f"<p>{html.escape(issue.description or '')}</p>"]
+    parts = [_p("Actiepunt", issue.title)] if with_title and issue.title else []
+    parts.append(f"<p>{html.escape(issue.description or '')}</p>")
     if issue.recommendation:
         parts.append(_p("Aanpak", issue.recommendation))
     if issue.url:
@@ -477,6 +492,27 @@ def _topic(db: Session, customer_id: str, issue_type: str) -> LaunchMondayTopic 
     )
 
 
+def topic_urls(db: Session, customer_id: str, phase: int) -> dict[str, str | None]:
+    """Monday-link van het hoofditem per issue_type, voor de onderwerpen van deze fase.
+
+    De monitor heeft eigen hoofditems (sleutel met MONITOR_TOPIC_PREFIX); fase 1, 3
+    en 4 delen die zonder prefix. Leeg voor fases zonder hoofditems.
+    """
+    if phase not in GROUPED_PHASES:
+        return {}
+    monitor = phase == MONITOR_PHASE
+    rows = (
+        db.query(LaunchMondayTopic.issue_type, LaunchMondayTopic.item_url)
+        .filter(LaunchMondayTopic.customer_website_id == customer_id)
+        .all()
+    )
+    return {
+        key.removeprefix(MONITOR_TOPIC_PREFIX): url
+        for key, url in rows
+        if key.startswith(MONITOR_TOPIC_PREFIX) == monitor
+    }
+
+
 def _create_topic(
     db: Session, board: MondayBoard, customer: CustomerWebsite, issue: LaunchScanIssue,
     existing: LaunchMondayTopic | None, phase: int = 1,
@@ -511,7 +547,7 @@ def _create_grouped(
     if topic is None:
         topic = _create_topic(db, board, customer, issue, None, phase)
         fresh_topics.add(key)
-    name = issue_item_name(issue)
+    name = subitem_name(issue)
     try:
         sub = monday.create_subitem(topic.item_id, name)
     except MondayServiceError as exc:
@@ -525,7 +561,7 @@ def _create_grouped(
         sub = monday.MondayItem(id=sub.id, url=topic.item_url)
     try:
         extra = suggestions_html(db, issue) if phase == 3 else ""
-        monday.create_update(sub.id, issue_body(issue, customer, phase, extra_html=extra))
+        monday.create_update(sub.id, issue_body(issue, customer, phase, extra_html=extra, with_title=True))
     except MondayServiceError as exc:
         return sub, f"Subitem aangemaakt, maar de toelichting is niet geplaatst: {exc}"
     return sub, None

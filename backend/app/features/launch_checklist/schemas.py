@@ -228,6 +228,8 @@ class IssueGroup(BaseModel):
     severity: str
     count: int
     open: int
+    # Hoofditem van dit onderwerp in Monday (fase 1, 3, 4 en de monitor); None = nog niet doorgezet.
+    monday_url: str | None = None
 
 
 class LaunchScanIssueListResponse(BaseModel):
@@ -366,6 +368,8 @@ class ContentPageItem(BaseModel):
     title: str | None = None
     meta_description: str | None = None
     word_count: int | None = None
+    # Woorden zonder site-brede blokken (reviews, projecten); None = nog niet berekend.
+    own_word_count: int | None = None
     problem_count: int
     # item_key → {status, message, details}
     checks: dict[str, Any] = {}

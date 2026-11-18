@@ -475,6 +475,75 @@ class MonitorMondayTest(_Base):
         self.assertEqual(monday_push.topic_key("x", 1), "x")
 
 
+class GroupedSubitemTest(_Base):
+    """Fase 1: één hoofditem per onderwerp, subitems heten naar de URL; sitebrede punten blijven los."""
+
+    def add_issue(self, phase, issue_type="h1_missing", url="https://www.klant.nl/a/", title=None):
+        scan = _scan(self.customer_id, phase)
+        self.db.add(scan)
+        issue = LaunchScanIssue(
+            id=str(uuid.uuid4()), scan_id=scan.id, issue_type=issue_type, category="on-page", severity="hoog",
+            title=title or f"H1 ontbreekt op {url}", description="De pagina heeft geen H1-kop.",
+            recommendation="Voeg een H1 toe.", url=url, status="open", created_at=NOW, updated_at=NOW,
+        )
+        self.db.add(issue)
+        self.db.commit()
+        return issue
+
+    def test_two_pages_one_parent_subitems_named_by_url(self):
+        urls = ["https://www.klant.nl/a/", "https://www.klant.nl/diensten/b/?x=1"]
+        issues = [self.add_issue(1, url=u, title=f"H1 ontbreekt op {u[len('https://www.klant.nl'):]}") for u in urls]
+        result = monday_push.push_issues(self.db, [i.id for i in issues], "user-1")
+
+        self.assertEqual([o.status for o in result.outcomes], ["pushed", "pushed"], result.outcomes)
+        parents = [i for i in self.fake.items if "parent_id" not in i]
+        subs = [i for i in self.fake.items if "parent_id" in i]
+        self.assertEqual([p["name"] for p in parents], ["H1 ontbreekt"])
+        self.assertEqual([s["name"] for s in subs], urls)
+        self.assertEqual({s["parent_id"] for s in subs}, {parents[0]["id"]})
+        for issue, sub in zip(issues, subs):
+            body = self.fake.updates[sub["id"]]
+            # De titel (met de extra informatie) staat bovenaan de toelichting.
+            self.assertTrue(body.startswith(f"<p><b>Actiepunt:</b> {html.escape(issue.title)}</p>"), body)
+
+    def test_long_url_is_truncated(self):
+        url = "https://www.klant.nl/" + "x" * 400
+        monday_push.push_issues(self.db, [self.add_issue(1, url=url).id], "user-1")
+        sub = next(i for i in self.fake.items if "parent_id" in i)
+        self.assertEqual(sub["name"], url[:monday_push.MAX_ITEM_NAME])
+
+    def test_site_wide_issue_stays_a_standalone_item_named_by_title(self):
+        issue = self.add_issue(1, issue_type="robots_txt_missing", url=None, title="robots.txt ontbreekt")
+        result = monday_push.push_issues(self.db, [issue.id], "user-1")
+
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        self.assertEqual(len(self.fake.items), 1)
+        item = self.fake.items[0]
+        self.assertNotIn("parent_id", item)
+        self.assertEqual(item["name"], "robots.txt ontbreekt")
+        self.assertEqual(item["group_id"], self.customer().monday_group_fase1_id)
+        # Losse items heten al naar de titel; die staat niet nog eens in de toelichting.
+        self.assertNotIn("<b>Actiepunt:</b>", self.fake.updates[item["id"]])
+        self.assertEqual(self.db.query(LaunchMondayTopic).count(), 0)
+
+    def test_topic_urls_per_phase(self):
+        monday_push.push_issues(self.db, [self.add_issue(1).id], "user-1")
+        monday_push.push_issues(self.db, [self.add_issue(6, url="https://www.klant.nl/nieuw/").id], "user-1")
+        parents = [i for i in self.fake.items if "parent_id" not in i]
+        self.assertEqual(len(parents), 2)
+        phase1_id, monitor_id = (p["id"] for p in parents)
+        urls = {t.item_id: t.item_url for t in self.db.query(LaunchMondayTopic).all()}
+
+        self.assertEqual(monday_push.topic_urls(self.db, self.customer_id, 1), {"h1_missing": urls[phase1_id]})
+        # Fase 3 en 4 delen de hoofditems van fase 1.
+        self.assertEqual(monday_push.topic_urls(self.db, self.customer_id, 3), {"h1_missing": urls[phase1_id]})
+        self.assertEqual(monday_push.topic_urls(self.db, self.customer_id, 6), {"h1_missing": urls[monitor_id]})
+        self.assertNotEqual(urls[phase1_id], urls[monitor_id])
+        self.assertEqual(monday_push.topic_urls(self.db, self.customer_id, 2), {})
+        self.assertEqual(monday_push.topic_urls(self.db, self.customer_id, 5), {})
+        self.assertEqual(monday_push.topic_urls(self.db, str(uuid.uuid4()), 1), {})
+
+
 class CreateGroupPositionTest(unittest.TestCase):
     """Monday-client: de positie van een nieuwe groep (relative_to + position_relative_method)."""
 
@@ -621,6 +690,28 @@ class GoLiveEndpointTest(_Base):
         # De checklist toont de Monday-link.
         items = {i["key"]: i for s in self.client.get(self.base).json()["sections"] for i in s["items"]}
         self.assertEqual(items["gl_https"]["external_url"], data["outcomes"][0]["external_url"])
+
+    def test_issue_groups_carry_monday_url(self):
+        scan = _scan(self.customer_id, 1)
+        self.db.add(scan)
+        issues = [
+            LaunchScanIssue(
+                id=str(uuid.uuid4()), scan_id=scan.id, issue_type=t, category="on-page", severity="hoog",
+                title=f"{t} op /a/", description="d", url="https://www.klant.nl/a/", status="open",
+                created_at=NOW, updated_at=NOW,
+            )
+            for t in ("h1_missing", "title_missing")
+        ]
+        self.db.add_all(issues)
+        self.db.commit()
+        monday_push.push_issues(self.db, [issues[0].id], "user-1")
+
+        response = self.client.get(f"/api/launch-checklist/scans/{scan.id}/issues")
+        self.assertEqual(response.status_code, 200, response.text)
+        groups = {g["issue_type"]: g for g in response.json()["groups"]}
+        topic = self.db.query(LaunchMondayTopic).one()
+        self.assertEqual(groups["h1_missing"]["monday_url"], topic.item_url)
+        self.assertIsNone(groups["title_missing"]["monday_url"])
 
     def test_export_of_a_golive_scan(self):
         scan = self.add_golive_scan()

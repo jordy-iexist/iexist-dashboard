@@ -192,7 +192,8 @@ export function MonitorWorkspace({ customerId }: { customerId: string }) {
         {!status.has_nulmeting && (
           <PanelRow tone="warning">
             Er is nog geen voltooide nulmeting (fase 1). Zonder nulmeting slaat de dagelijkse controle deze klant over en
-            kan &quot;Nu controleren&quot; niet worden gestart.
+            kan &quot;Nu controleren&quot; niet worden gestart. De dagelijkse controle gaat vanzelf aan zodra de eerste
+            nulmeting is voltooid.
           </PanelRow>
         )}
 
@@ -250,7 +251,7 @@ function MonitorDescription() {
     <>
       Vergelijkt elke ochtend de sitemap met de vorige stand. Nieuwe en gewijzigde pagina&apos;s worden gescand en
       leveren actiepunten op; open punten van verwijderde pagina&apos;s worden afgesloten. Gebruikt de nulmeting (fase 1)
-      als uitgangspunt.
+      als uitgangspunt. De controle staat standaard uit en gaat vanzelf aan zodra de eerste nulmeting is voltooid.
     </>
   )
 }

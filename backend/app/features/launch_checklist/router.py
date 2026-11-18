@@ -525,8 +525,10 @@ async def list_launch_scan_issues(
     _user_id: str = Depends(require_user_id),
     db: Session = Depends(get_db),
 ):
-    _get_scan(db, scan_id)
+    scan = _get_scan(db, scan_id)
     base = db.query(LaunchScanIssue).filter(LaunchScanIssue.scan_id == scan_id)
+    # Link naar het Monday-hoofditem per onderwerp (alleen bij gegroepeerd doorzetten).
+    monday_urls = monday_push.topic_urls(db, scan.customer_website_id, scan.phase or 1)
 
     # Groepen over alle issues van de scan (los van filters), voor de zijbalk.
     group_counter: dict[str, dict[str, Any]] = {}
@@ -549,6 +551,7 @@ async def list_launch_scan_issues(
             severity=min(g["severities"], key=lambda s: _SEVERITY_ORDER.get(s, 9)),
             count=g["count"],
             open=g["open"],
+            monday_url=monday_urls.get(t),
         )
         for t, g in group_counter.items()
     ]

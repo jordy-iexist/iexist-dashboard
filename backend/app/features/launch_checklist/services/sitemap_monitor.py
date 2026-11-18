@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
 from app.core.redis_client import get_redis
-from app.db.models import LaunchScan, LaunchScanIssue
+from app.db.models import CustomerWebsite, LaunchScan, LaunchScanIssue
 from app.features.launch_checklist.services.content_checks import F1_META_TYPES
 from app.features.launch_checklist.services.discovery import DiscoveryResult, url_key
 from app.features.launch_checklist.services.golive_checklist import MONITOR_PHASE
@@ -296,6 +296,42 @@ def open_issue_count(db: Session, scan_id: str | None) -> int:
         .filter(LaunchScanIssue.scan_id == scan_id, LaunchScanIssue.status == "open")
         .count()
     )
+
+
+def enable_after_first_nulmeting(db: Session, customer_id: str, scan_id: str) -> bool:
+    """Zet de dagelijkse controle aan als `scan_id` de eerste voltooide fase-1-scan van de klant is.
+
+    Alleen de eerste: heeft de klant al een andere voltooide nulmeting, dan blijft de
+    schakelaar zoals hij staat (wie hem handmatig uitzette, houdt hem uit). Een
+    geannuleerde of mislukte scan telt niet. Geeft True als de schakelaar is aangezet.
+    """
+    scan = db.get(LaunchScan, scan_id)
+    if (
+        scan is None
+        or scan.customer_website_id != customer_id
+        or scan.phase != 1
+        or str(scan.status).lower() != "completed"
+    ):
+        return False
+    earlier = (
+        db.query(LaunchScan.id)
+        .filter(
+            LaunchScan.customer_website_id == customer_id,
+            LaunchScan.phase == 1,
+            LaunchScan.status == "completed",
+            LaunchScan.id != scan_id,
+        )
+        .first()
+    )
+    if earlier is not None:
+        return False
+    customer = db.get(CustomerWebsite, customer_id)
+    if customer is None:
+        return False
+    customer.sitemap_monitor_enabled = True
+    customer.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
 
 
 # --- lock per klant (Redis) -----------------------------------------------------------

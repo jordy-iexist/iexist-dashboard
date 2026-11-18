@@ -79,13 +79,23 @@ def applicable_keys(item_keys: list[str], checks: dict[str, Any] | None) -> list
 def page_brief(page: LaunchContentPage, *, customer_name: str, body: bool = True) -> str:
     """Pagina-inhoud als tekstblok voor in de opdracht van een agent."""
     signals = page.signals or {}
+    total_words = page.word_count or 0
+    own_words = signals.get("own_word_count")
+    if own_words is not None and own_words != total_words:
+        site_wide = signals.get("site_wide_words") or (total_words - own_words)
+        word_line = (
+            f"Aantal woorden eigen tekst: {own_words} (plus {site_wide} woorden in blokken die op veel "
+            f"pagina's van de site terugkomen, zoals reviews; totaal {total_words})"
+        )
+    else:
+        word_line = f"Aantal woorden in de inhoud: {total_words}"
     lines = [
         f"Klant: {customer_name}",
         f"URL: {page.url}",
         f"Paginatype: {page.page_type or 'onbekend'}",
         f"Meta titel: {page.title or '(leeg)'}",
         f"Meta description: {page.meta_description or '(leeg)'}",
-        f"Aantal woorden in de inhoud: {page.word_count or 0}",
+        word_line,
     ]
     if page.focus_keyword:
         lines.append(f"Focuszoekwoord: {page.focus_keyword} (zoekintentie: {page.intent or 'onbekend'})")

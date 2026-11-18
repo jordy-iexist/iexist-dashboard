@@ -321,9 +321,10 @@ class CustomerWebsite(Base):
     monday_group_fase5_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Groep van de sitemap-monitor (monitorscans hebben phase = 6).
     monday_group_fase6_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Dagelijkse sitemap-monitor aan/uit voor deze klant.
+    # Dagelijkse sitemap-monitor aan/uit voor deze klant. Standaard uit; gaat aan na de
+    # eerste voltooide nulmeting (fase 1).
     sitemap_monitor_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("true")
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     # Handmatig gekozen Search Console-property (bijv. "sc-domain:example.nl").
     # Leeg = automatisch zoeken op domein.

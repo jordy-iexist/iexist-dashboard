@@ -346,7 +346,10 @@ function PageDetail({
           )}
           <dt className="text-muted-foreground">Pagina</dt>
           <dd className="text-xs text-muted-foreground sm:pt-0.5">
-            {detail.word_count ?? 0} woorden · {detail.images_total} afbeeldingen · {detail.links_total} interne links
+            {detail.own_word_count != null && detail.own_word_count !== (detail.word_count ?? 0)
+              ? `${detail.own_word_count} woorden eigen tekst · ${detail.word_count ?? 0} totaal`
+              : `${detail.word_count ?? 0} woorden`}{" "}
+            · {detail.images_total} afbeeldingen · {detail.links_total} interne links
             {detail.analyzed_at ? ` · geanalyseerd ${formatDateTime(detail.analyzed_at)}` : ""}
           </dd>
         </dl>

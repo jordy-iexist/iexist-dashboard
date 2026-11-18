@@ -507,6 +507,10 @@ class SitemapMonitorWorkerTest(_WorkerBase):
             self.assertEqual(content_page.source_page_id, page.id)
             # Zonder fase-3-scan geen oordeel over interne links.
             self.assertNotIn("c3_internal_links", content_page.checks)
+            # Eigen woordtelling staat in de signalen (te weinig pagina's voor site-brede blokken).
+            self.assertEqual(content_page.signals["own_word_count"], content_page.word_count)
+            self.assertEqual(content_page.signals["site_wide_words"], 0)
+            self.assertEqual(content_page.signals["lists"], 2)
 
         snapshot = self.snapshot()
         self.assertIn(url_key(NIEUW), snapshot.entries)
@@ -797,6 +801,63 @@ class DispatchTest(_WorkerBase):
         self._patch(worker.settings, "sitemap_monitor_enabled", False)
         self.assertEqual(worker.run_sitemap_monitor_dispatch_task.run(), [])
         delay.assert_not_called()
+
+
+class EnableAfterFirstNulmetingTest(_WorkerBase):
+    def enabled(self, customer_id):
+        with self.Session() as db:
+            return db.get(CustomerWebsite, customer_id).sitemap_monitor_enabled
+
+    def enable(self, customer_id, scan_id):
+        with self.Session() as db:
+            return service.enable_after_first_nulmeting(db, customer_id, scan_id)
+
+    def test_new_customer_starts_disabled(self):
+        customer_id = str(uuid.uuid4())
+        with self.Session() as db:
+            db.add(CustomerWebsite(
+                id=customer_id, name="Nieuw", base_url=BASE, domain="klant.nl", created_by="user-1",
+                created_at=NOW, updated_at=NOW,
+            ))
+            db.commit()
+        self.assertFalse(self.enabled(customer_id))
+
+    def test_first_completed_nulmeting_enables(self):
+        customer_id = self.add_customer("Nieuw", enabled=False)
+        scan_id = self.add_scan(phase=1, status="completed", customer_id=customer_id)
+        self.assertTrue(self.enable(customer_id, scan_id))
+        self.assertTrue(self.enabled(customer_id))
+        with self.Session() as db:
+            self.assertNotEqual(db.get(CustomerWebsite, customer_id).updated_at.replace(tzinfo=None),
+                                NOW.replace(tzinfo=None))
+
+    def test_later_nulmeting_keeps_manual_off(self):
+        customer_id = self.add_customer("Nieuw", enabled=False)
+        first = self.add_scan(phase=1, status="completed", customer_id=customer_id)
+        self.assertTrue(self.enable(customer_id, first))
+        with self.Session() as db:  # handmatig uitgezet
+            db.get(CustomerWebsite, customer_id).sitemap_monitor_enabled = False
+            db.commit()
+        second = self.add_scan(phase=1, status="completed", customer_id=customer_id)
+        self.assertFalse(self.enable(customer_id, second))
+        self.assertFalse(self.enabled(customer_id))
+
+    def test_only_completed_phase1_counts(self):
+        customer_id = self.add_customer("Nieuw", enabled=False)
+        for phase, status in ((1, "failed"), (1, "canceled"), (1, "analyzing"), (2, "completed"), (6, "completed")):
+            scan_id = self.add_scan(phase=phase, status=status, customer_id=customer_id)
+            self.assertFalse(self.enable(customer_id, scan_id), (phase, status))
+            self.assertFalse(self.enabled(customer_id), (phase, status))
+        # Mislukte en andere scans tellen niet als "eerdere nulmeting".
+        scan_id = self.add_scan(phase=1, status="completed", customer_id=customer_id)
+        self.assertTrue(self.enable(customer_id, scan_id))
+        self.assertTrue(self.enabled(customer_id))
+
+    def test_scan_of_other_customer_or_unknown_does_nothing(self):
+        customer_id = self.add_customer("Nieuw", enabled=False)
+        self.assertFalse(self.enable(customer_id, self.nulmeting_id))  # scan van een andere klant
+        self.assertFalse(self.enable(customer_id, "onbekend"))
+        self.assertFalse(self.enabled(customer_id))
 
 
 # --- API -----------------------------------------------------------------------------
