@@ -17,6 +17,12 @@ items, met de ronde in de naam.
 De livegangchecklist (oplevering van een nieuwe website, scans met phase = 5)
 heeft een eigen groep op hetzelfde bord. Die scan levert geen actiepunten op,
 alleen checklistpunten; de bevindingen staan in het automatische resultaat.
+
+De sitemap-monitor (scans met phase = 6) heeft ook een eigen groep. Zijn
+actiepunten per pagina worden net als in fase 1 op onderwerp gegroepeerd, met
+eigen hoofditems in de monitorgroep. Die groep wordt pas aangemaakt bij het
+eerste monitor-actiepunt dat wordt doorgezet, onder de livegangsgroep; klanten
+zonder monitorpunten krijgen hem niet op hun bord.
 """
 from __future__ import annotations
 
@@ -49,6 +55,7 @@ from app.features.launch_checklist.services.checklist_view import (
     merged_quarterly_checklist,
 )
 from app.features.launch_checklist.services.geo_checklist import ITEMS
+from app.features.launch_checklist.services.golive_checklist import MONITOR_PHASE
 from app.features.launch_checklist.services.golive_checklist import PHASE as GOLIVE_PHASE
 from app.features.launch_checklist.services.quarterly_checklist import period_label
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
@@ -63,8 +70,12 @@ GROUP_TITLES = {
     3: "Fase 3 – Content & onpage",
     4: "Fase 4 – Kwartaal GEO-werkzaamheden",
     GOLIVE_PHASE: "Livegang – Oplevering nieuwe website",
+    MONITOR_PHASE: "Monitor – Nieuwe & gewijzigde pagina's",
 }
 PHASES = tuple(sorted(GROUP_TITLES))
+# Fases waarvan de groep vooraf (bij koppelen of aanmaken van het bord) wordt aangemaakt.
+# De monitorgroep pas bij het eerste monitor-actiepunt, zie _ensure_monitor_group.
+BOARD_PHASES = tuple(p for p in PHASES if p != MONITOR_PHASE)
 CHECKLIST_SOURCE = {
     2: "Livegang fase 2 – GEO/SEO-checklist",
     3: "Livegang fase 3 – Contentcreatie & onpage optimalisatie",
@@ -74,7 +85,10 @@ CHECKLIST_SOURCE = {
 # Fases met actiepunten (LaunchScanIssue); de livegangscan maakt die niet aan.
 ISSUE_PHASES = frozenset(PHASES) - {GOLIVE_PHASE}
 # Fases waarvan actiepunten per pagina onder een onderwerp (hoofditem) hangen.
-GROUPED_PHASES = {1, 3, 4}
+GROUPED_PHASES = {1, 3, 4, MONITOR_PHASE}
+# Hoofditems van de sitemap-monitor staan in de monitorgroep, los van die van fase 1-4
+# (anders zou een monitorpunt onder een bestaand fase-1-onderwerp belanden).
+MONITOR_TOPIC_PREFIX = "monitor:"
 MAX_SUGGESTIONS_IN_BODY = 10
 GEO_ISSUE_PREFIX = "geo_"
 MAX_ITEM_NAME = 250
@@ -118,21 +132,45 @@ def _folder():
     return monday.find_folder(settings.monday_folder_name)
 
 
+def _existing_group(customer: CustomerWebsite, board: MondayBoard, phase: int) -> str | None:
+    """Id van de fasegroep op het bord: het opgeslagen id als dat nog bestaat, anders op titel."""
+    current = _group_id(customer, phase)
+    if current and any(g.id == current for g in board.groups):
+        return current
+    title = GROUP_TITLES[phase].casefold()
+    return next((g.id for g in board.groups if g.title.strip().casefold() == title), None)
+
+
 def _ensure_groups(db: Session, customer: CustomerWebsite, board: MondayBoard) -> None:
-    """Zorg dat alle fasegroepen bestaan en hun id's bij de klant staan."""
-    by_id = {g.id: g for g in board.groups}
-    by_title = {g.title.strip().casefold(): g for g in board.groups}
+    """Zorg dat de fasegroepen bestaan en hun id's bij de klant staan.
+
+    De monitorgroep wordt hier niet aangemaakt, alleen herkend: staat hij al op
+    het bord dan wordt zijn id vastgelegd, anders wordt een verouderd id gewist.
+    """
     # Laatste fase eerst: Monday zet een nieuwe groep bovenaan, zo komt fase 1 bovenaan.
-    for phase in reversed(PHASES):
-        title = GROUP_TITLES[phase]
-        current = _group_id(customer, phase)
-        if current and current in by_id:
-            resolved = current
-        elif title.casefold() in by_title:
-            resolved = by_title[title.casefold()].id
-        else:
-            resolved = monday.create_group(board.id, title).id
+    for phase in reversed(BOARD_PHASES):
+        resolved = _existing_group(customer, board, phase)
+        if resolved is None:
+            resolved = monday.create_group(board.id, GROUP_TITLES[phase]).id
         setattr(customer, _group_attr(phase), resolved)
+    setattr(customer, _group_attr(MONITOR_PHASE), _existing_group(customer, board, MONITOR_PHASE))
+
+
+def _ensure_monitor_group(db: Session, customer: CustomerWebsite, board: MondayBoard) -> str:
+    """De monitorgroep; bij het eerste monitor-actiepunt aangemaakt onder de laatste fasegroep.
+
+    Verwacht dat _ensure_groups al gedraaid heeft (via ensure_customer_board), zodat een
+    bestaande monitorgroep al herkend is en een verouderd id gewist.
+    """
+    current = _group_id(customer, MONITOR_PHASE)
+    if current:
+        return current
+    after = next((gid for p in reversed(BOARD_PHASES) if (gid := _group_id(customer, p))), None)
+    group = monday.create_group(board.id, GROUP_TITLES[MONITOR_PHASE], after_group_id=after)
+    setattr(customer, _group_attr(MONITOR_PHASE), group.id)
+    # Meteen vastleggen: een rollback na een mislukt punt zou anders een tweede groep opleveren.
+    db.commit()
+    return group.id
 
 
 def _group_attr(phase: int) -> str:
@@ -239,11 +277,15 @@ def issue_item_name(issue: LaunchScanIssue) -> str:
     return (issue.title or issue.issue_type)[:MAX_ITEM_NAME]
 
 
-def suggestions_html(db: Session, issue: LaunchScanIssue) -> str:
-    """AI-voorstellen (fase 3) voor de pagina en het checklistpunt van dit actiepunt."""
+def issue_suggestions(db: Session, issue: LaunchScanIssue) -> list[LaunchContentSuggestion]:
+    """AI-voorstellen (fase 3) voor de pagina en het checklistpunt van dit actiepunt.
+
+    Niet-afgewezen voorstellen uit dezelfde scan, oudste eerst, hooguit
+    MAX_SUGGESTIONS_IN_BODY. Leeg als het punt geen pagina heeft.
+    """
     if not issue.url:
-        return ""
-    rows = (
+        return []
+    return (
         db.query(LaunchContentSuggestion)
         .join(LaunchContentPage, LaunchContentPage.id == LaunchContentSuggestion.content_page_id)
         .filter(
@@ -256,6 +298,11 @@ def suggestions_html(db: Session, issue: LaunchScanIssue) -> str:
         .limit(MAX_SUGGESTIONS_IN_BODY)
         .all()
     )
+
+
+def suggestions_html(db: Session, issue: LaunchScanIssue) -> str:
+    """AI-voorstellen (fase 3) voor de pagina en het checklistpunt van dit actiepunt."""
+    rows = issue_suggestions(db, issue)
     if not rows:
         return ""
     parts = ["<p><b>AI-voorstellen:</b></p>"]
@@ -268,6 +315,13 @@ def suggestions_html(db: Session, issue: LaunchScanIssue) -> str:
         if row.rationale:
             parts.append(_p("Waarom", row.rationale))
     return "".join(parts)
+
+
+def source_label(phase: int) -> str:
+    """Herkomst van een actiepunt in de Monday-toelichting."""
+    if phase == MONITOR_PHASE:
+        return "Sitemap-monitor"
+    return f"Livegang-scan fase {phase}"
 
 
 def issue_body(
@@ -287,14 +341,23 @@ def issue_body(
     if isinstance(evidence, list):
         parts.append(_evidence_html(evidence))
     parts.append(extra_html)
-    parts.append(_p("Bron", f"Livegang-scan fase {phase}"))
+    parts.append(_p("Bron", source_label(phase)))
     parts.append(_dashboard_link(customer, phase))
     return "".join(p for p in parts if p)
 
 
 def is_grouped(issue: LaunchScanIssue, phase: int) -> bool:
-    """Punten per pagina (fase 1 en 3) gaan als subitem onder een onderwerp."""
+    """Punten per pagina (fase 1, 3, 4 en de monitor) gaan als subitem onder een onderwerp."""
     return phase in GROUPED_PHASES and bool(issue.url)
+
+
+def topic_key(issue_type: str, phase: int) -> str:
+    """Sleutel van het hoofditem in LaunchMondayTopic.issue_type.
+
+    De monitor krijgt eigen hoofditems (in zijn eigen groep); fase 1, 3 en 4
+    delen per issue_type één hoofditem, zoals voorheen.
+    """
+    return f"{MONITOR_TOPIC_PREFIX}{issue_type}" if phase == MONITOR_PHASE else issue_type
 
 
 def topic_name(issue_type: str) -> str:
@@ -307,7 +370,7 @@ def topic_body(issue: LaunchScanIssue, customer: CustomerWebsite, phase: int = 1
     if issue.recommendation:
         parts.append(_p("Aanpak", issue.recommendation))
     parts.append(_p("Categorie", issue.category))
-    parts.append(_p("Bron", f"Livegang-scan fase {phase}"))
+    parts.append(_p("Bron", source_label(phase)))
     parts.append(_dashboard_link(customer, phase))
     return "".join(p for p in parts if p)
 
@@ -422,7 +485,8 @@ def _create_topic(
         board.id, topic_name(issue.issue_type), group_id=_group_id(customer, phase)
     )
     topic = existing or LaunchMondayTopic(
-        id=str(uuid.uuid4()), customer_website_id=customer.id, issue_type=issue.issue_type
+        id=str(uuid.uuid4()), customer_website_id=customer.id,
+        issue_type=topic_key(issue.issue_type, phase),
     )
     topic.item_id = parent.id
     topic.item_url = parent.url
@@ -442,19 +506,20 @@ def _create_grouped(
     fresh_topics: set[str], phase: int = 1,
 ) -> tuple[Any, str | None]:
     """Maak het actiepunt als subitem onder het hoofditem van zijn onderwerp."""
-    topic = _topic(db, customer.id, issue.issue_type)
+    key = topic_key(issue.issue_type, phase)
+    topic = _topic(db, customer.id, key)
     if topic is None:
         topic = _create_topic(db, board, customer, issue, None, phase)
-        fresh_topics.add(issue.issue_type)
+        fresh_topics.add(key)
     name = issue_item_name(issue)
     try:
         sub = monday.create_subitem(topic.item_id, name)
     except MondayServiceError as exc:
-        if exc.code != "monday_error" or issue.issue_type in fresh_topics:
+        if exc.code != "monday_error" or key in fresh_topics:
             raise
         # Een eerder hoofditem kan in Monday verwijderd zijn: één keer opnieuw aanmaken.
         topic = _create_topic(db, board, customer, issue, topic, phase)
-        fresh_topics.add(issue.issue_type)
+        fresh_topics.add(key)
         sub = monday.create_subitem(topic.item_id, name)
     if sub.url is None:
         sub = monday.MondayItem(id=sub.id, url=topic.item_url)
@@ -601,7 +666,7 @@ def sync_links(db: Session, customer: CustomerWebsite) -> int:
 # --- doorzetten ------------------------------------------------------------
 
 def push_issues(db: Session, issue_ids: list[str], user_id: str | None) -> PushResult:
-    """Zet actiepunten (fase 1 t/m 4) door. Alle punten moeten van één klant zijn."""
+    """Zet actiepunten (fase 1 t/m 4 en de sitemap-monitor) door. Alle punten moeten van één klant zijn."""
     ids = list(dict.fromkeys(issue_ids))
     issues = {i.id: i for i in db.query(LaunchScanIssue).filter(LaunchScanIssue.id.in_(ids)).all()}
     scans = {
@@ -651,6 +716,8 @@ def push_issues(db: Session, issue_ids: list[str], user_id: str | None) -> PushR
                 issue_id, "skipped", "Al doorgezet via de checklist.", state.external_url))
             continue
         try:
+            if phase == MONITOR_PHASE:
+                _ensure_monitor_group(db, customer, board)
             if is_grouped(issue, phase):
                 item, warning = _create_grouped(db, board, customer, issue, fresh_topics, phase)
             else:

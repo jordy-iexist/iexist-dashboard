@@ -132,6 +132,10 @@ class LaunchCustomerItem(BaseModel):
     # (None = nog niet gescand en niets afgevinkt).
     latest_golive_scan: LaunchScanItem | None = None
     golive_progress: "ChecklistProgress | None" = None
+    # Sitemap-monitor (phase = 6): open actiepunten in de monitor-scan en de laatste
+    # keer dat de sitemap veranderde (None = nog nooit een wijziging gezien).
+    monitor_open_issues: int = 0
+    monitor_changed_at: datetime | None = None
 
 
 class LaunchCustomerListResponse(BaseModel):
@@ -211,6 +215,8 @@ class LaunchScanIssueItem(BaseModel):
     external_item_id: str | None = None
     external_url: str | None = None
     pushed_at: datetime | None = None
+    # Wanneer er een "Maak prompt"-opdracht is gegenereerd; de tekst zelf zit niet in de lijst.
+    fix_prompt_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -552,6 +558,43 @@ class BingWebmasterExchangeRequest(BaseModel):
 
 class BingWebmasterConnectionResponse(BaseModel):
     connected: bool
+
+
+# --- sitemap-monitor (phase = 6) -----------------------------------------------------
+
+class SitemapChangeItem(BaseModel):
+    kind: Literal["new", "changed", "removed"]
+    url: str
+    lastmod: str | None = None
+    detected_at: datetime
+
+
+class SitemapMonitorStatus(BaseModel):
+    customer_id: str
+    # Schakelaar per klant (dagelijkse run); `global_enabled` is de noodrem SITEMAP_MONITOR_ENABLED.
+    enabled: bool
+    global_enabled: bool
+    # Voltooide nulmeting aanwezig: zonder die slaat de dagelijkse run de klant over en
+    # weigert "Nu controleren" (400).
+    has_nulmeting: bool
+    # De doorlopende monitor-scan; None tot de eerste run met nieuwe/gewijzigde pagina's.
+    scan_id: str | None = None
+    scan_status: ScanStatus | None = None
+    # De monitor-scan verwerkt nu pagina's (status in ACTIVE_STATUSES).
+    running: bool = False
+    checked_at: datetime | None = None
+    changed_at: datetime | None = None
+    last_error: str | None = None
+    # Aantal URL's in de laatst bekende sitemap-stand (0 = nog geen uitgangssituatie).
+    total_urls: int = 0
+    has_lastmod: bool = False
+    # Nieuwste eerst, hooguit 300.
+    recent_changes: list[SitemapChangeItem] = []
+    open_issues: int = 0
+
+
+class SitemapMonitorUpdate(BaseModel):
+    enabled: bool
 
 
 LaunchCustomerItem.model_rebuild()

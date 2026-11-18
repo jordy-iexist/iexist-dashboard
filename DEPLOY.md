@@ -9,6 +9,7 @@ Internet ──────▶│ Caddy (80/443, automatische HTTPS)            
                 │   api.iexist.nl ──▶ api (FastAPI, :8000)            │
                 │                      │                             │
                 │   worker (Celery) ◀─┤── redis ── db (Postgres 16)  │
+                │   beat (Celery, planning) ──▶ redis                │
                 └─────────────────────────────────────────────────────┘
 ```
 
@@ -116,8 +117,24 @@ Controleren:
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f api worker caddy
+docker compose -f docker-compose.prod.yml logs -f api worker beat caddy
 ```
+
+### Geplande taken (Celery beat)
+
+De service `beat` plant periodieke taken in; het werk zelf doet `worker` (queue
+`audit`). Draai er **precies één** van, anders gaat elke taak dubbel. Redis bewaart
+niets, dus het schedule-bestand staat in de container (`/tmp/celerybeat-schedule`).
+
+- **Dagelijkse sitemap-monitor** (livegang): elke dag om `SITEMAP_MONITOR_HOUR`
+  (standaard 5, Europe/Amsterdam, na de back-up van 03:00) krijgt elke klant met de
+  schakelaar aan en een voltooide nulmeting een korte run die alleen nieuwe en
+  gewijzigde pagina's uit de sitemap scant. De eerste run legt alleen de
+  uitgangssituatie vast. Instellingen in `backend/.env`: `SITEMAP_MONITOR_ENABLED`
+  (`false` = noodrem voor de dagelijkse run; "Nu controleren" blijft werken),
+  `SITEMAP_MONITOR_MAX_URLS`, `SITEMAP_MONITOR_MAX_PAGES_PER_RUN`.
+- Handmatig één keer starten (alle klanten):
+  `docker compose -f docker-compose.prod.yml exec worker celery -A app.worker.celery_app call app.worker.tasks.run_sitemap_monitor_dispatch_task`
 
 ## 6. Updaten (nieuwe release)
 
@@ -155,3 +172,6 @@ Bewaar backups bij voorkeur ook buiten de server (bv. Hetzner Storage Box).
   zijn (zet compose automatisch) en `api.iexist.nl` moet publiek bereikbaar zijn.
 - **Jobs blijven op `pending`:** draait de worker? Staat de juiste queue in
   `CELERY_QUEUES`? Check `docker compose ... logs worker`.
+- **Sitemap-monitor draait niet:** toont `docker compose ... logs beat` het schema
+  (`sitemap-monitor-dagelijks`)? Staat `SITEMAP_MONITOR_ENABLED` niet op `false`, en
+  heeft de worker de queue `audit`?

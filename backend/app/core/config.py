@@ -253,6 +253,37 @@ class Settings(BaseSettings):
         validation_alias="LAUNCH_CONTENT_MAX_IMAGES_PER_PAGE",
     )
 
+    # Livegang: dagelijkse sitemap-monitor (Celery beat). Vergelijkt per klant de sitemap
+    # met de vorige stand en scant alleen nieuwe en gewijzigde pagina's.
+    # Globale noodrem; per klant staat er daarnaast een eigen schakelaar.
+    sitemap_monitor_enabled: bool = Field(
+        default=True,
+        validation_alias="SITEMAP_MONITOR_ENABLED",
+    )
+    # Uur (Europe/Amsterdam) waarop de dagelijkse run start; na de pg_dump van 03:00.
+    sitemap_monitor_hour: int = Field(
+        default=5,
+        ge=0,
+        le=23,
+        validation_alias="SITEMAP_MONITOR_HOUR",
+    )
+    # Ruim eigen maximum voor het ophalen van de sitemap. Niet de max_pages van de
+    # nulmeting: een afgekapte lijst geeft valse "nieuwe" pagina's als de volgorde verschuift.
+    sitemap_monitor_max_urls: int = Field(
+        default=20000,
+        ge=1,
+        le=200000,
+        validation_alias="SITEMAP_MONITOR_MAX_URLS",
+    )
+    # Plafond op het aantal nieuwe/gewijzigde pagina's dat per run wordt gescand;
+    # de rest komt de volgende dag aan de beurt.
+    sitemap_monitor_max_pages_per_run: int = Field(
+        default=40,
+        ge=1,
+        le=500,
+        validation_alias="SITEMAP_MONITOR_MAX_PAGES_PER_RUN",
+    )
+
     # Monday.com: actiepunten en checklistpunten uit de livegang doorzetten.
     monday_api_token: str = Field(default="", validation_alias="MONDAY_API_TOKEN")
     monday_api_version: str = Field(

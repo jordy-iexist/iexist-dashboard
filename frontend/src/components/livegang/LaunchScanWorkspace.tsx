@@ -1,6 +1,6 @@
 "use client"
 
-import { Download, Loader2, Play, RefreshCw, Square, Trash2 } from "lucide-react"
+import { Download, Loader2, Play, Radar, RefreshCw, Square, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { GeoWorkspace } from "@/components/livegang/GeoWorkspace"
 import { InventoryTab } from "@/components/livegang/InventoryTab"
 import { IssuesTab } from "@/components/livegang/IssuesTab"
 import { MondayBoardSetting } from "@/components/livegang/MondayBoardSetting"
+import { MonitorWorkspace } from "@/components/livegang/MonitorWorkspace"
 import { OverviewTab } from "@/components/livegang/OverviewTab"
 import { QuarterlyWorkspace } from "@/components/livegang/QuarterlyWorkspace"
 import {
@@ -35,6 +36,7 @@ import {
 } from "@/lib/launch-checklist"
 import { usePolling } from "@/hooks/use-polling"
 import { readUrlChoice, readUrlParam, writeUrlParams } from "@/lib/url-state"
+import { cn } from "@/lib/utils"
 
 const TABS = [
   { key: "overview", label: "Overzicht" },
@@ -47,6 +49,9 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"]
 const TAB_KEYS = TABS.map((t) => t.key)
+
+/** Sitemap-monitor: zelfde nummer als `LaunchScan.phase` in de backend; in de URL `?fase=monitor`. */
+const MONITOR_PHASE = 6
 
 async function fetchPhaseState(customerId: string) {
   const query = `customer_website_id=${encodeURIComponent(customerId)}&limit=20`
@@ -120,7 +125,9 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
                 ? 2
                 : 1
         const initial =
-          fromUrl === "1"
+          fromUrl === "monitor"
+            ? MONITOR_PHASE
+            : fromUrl === "1"
             ? 1
             : fromUrl === "2" && state.done[1]
               ? 2
@@ -175,21 +182,30 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 space-y-2">{header}</div>
         <div className="space-y-2 lg:shrink-0">
-          <PhaseStepper
-            active={phase ?? 1}
-            completed={done}
-            outdated={outdated}
-            locked={{
-              2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
-              3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
-              4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
-            }}
-            onSelect={(next) => {
-              setPhase(next)
-              // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
-              writeUrlParams({ fase: String(next), tab: null, ronde: null })
-            }}
-          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <PhaseStepper
+              active={phase ?? 1}
+              completed={done}
+              outdated={outdated}
+              locked={{
+                2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
+                3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
+                4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
+              }}
+              onSelect={(next) => {
+                setPhase(next)
+                // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
+                writeUrlParams({ fase: String(next), tab: null, ronde: null })
+              }}
+            />
+            <MonitorStep
+              active={phase === MONITOR_PHASE}
+              onSelect={() => {
+                setPhase(MONITOR_PHASE)
+                writeUrlParams({ fase: "monitor", tab: null, ronde: null })
+              }}
+            />
+          </div>
           {refreshError && (
             <p className="text-xs text-amber-800 lg:text-right dark:text-amber-300">
               De fasestatus kon niet worden ververst; de fases hierboven kunnen verouderd zijn.
@@ -202,7 +218,39 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
       {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
       {phase === 4 && <QuarterlyWorkspace customerId={customerId} onChange={refreshPhases} />}
+      {phase === MONITOR_PHASE && <MonitorWorkspace customerId={customerId} />}
     </div>
+  )
+}
+
+/** Stap "Monitor" naast de fasekiezer, in dezelfde stijl: doorlopend, dus zonder nummer of afgerond-status. */
+function MonitorStep({ active, onSelect }: { active: boolean; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="Monitor — dagelijkse sitemapcontrole op nieuwe en gewijzigde pagina's"
+      aria-current={active ? "step" : undefined}
+      className={cn(
+        "flex w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors sm:w-40",
+        active ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/60"
+      )}
+    >
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center rounded-full",
+            active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+          )}
+        >
+          <Radar className="size-2.5" strokeWidth={3} />
+        </span>
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Doorlopend</span>
+      </span>
+      <span className={cn("block truncate text-sm leading-snug", active ? "font-semibold" : "font-medium")}>
+        Monitor
+      </span>
+    </button>
   )
 }
 

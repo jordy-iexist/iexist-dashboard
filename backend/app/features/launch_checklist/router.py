@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.dependencies import require_user_id
 from app.core.url_guard import UnsafeURLError, validate_external_url
@@ -29,6 +29,7 @@ from app.db.models import (
     LaunchScan,
     LaunchScanIssue,
     LaunchScanPage,
+    LaunchSitemapSnapshot,
 )
 from app.db.session import get_db
 from app.features.launch_checklist.mappers import (
@@ -38,6 +39,7 @@ from app.features.launch_checklist.mappers import (
     to_page_item,
     to_scan_detail,
     to_scan_item,
+    to_sitemap_monitor_status,
 )
 from app.features.launch_checklist.schemas import (
     ACTIVE_STATUSES,
@@ -86,6 +88,8 @@ from app.features.launch_checklist.schemas import (
     LaunchScanListResponse,
     LaunchScanPageListResponse,
     PrtPromptDetail,
+    SitemapMonitorStatus,
+    SitemapMonitorUpdate,
 )
 from app.core.config import settings
 from app.features.launch_checklist.services import ahrefs_enrich, bing_enrich, gsc_enrich, monday_push, prt_enrich
@@ -129,6 +133,7 @@ from app.features.launch_checklist.services.content_checklist import (
 )
 from app.features.launch_checklist.services.golive_checklist import (
     ITEMS as GOLIVE_ITEMS,
+    MONITOR_PHASE,
     PHASE as GOLIVE_PHASE,
 )
 from app.features.launch_checklist.services.content_rebuild import (
@@ -140,6 +145,12 @@ from app.features.launch_checklist.services.geo_rebuild import rebuild_checklist
 from app.features.launch_checklist.services.issues import ISSUE_TYPES
 from app.features.launch_checklist.services.page_types import PAGE_TYPES
 from app.features.launch_checklist.services.scan_recovery import recover_stale_scan
+from app.features.launch_checklist.services.sitemap_monitor import (
+    acquire_lock as acquire_monitor_lock,
+    monitor_scan,
+    open_issue_count,
+    release_lock as release_monitor_lock,
+)
 
 router = APIRouter(prefix="/api/launch-checklist", tags=["launch-checklist"])
 
@@ -207,6 +218,20 @@ async def list_launch_customers(
     # Livegang (fase 5): staat los van fase 1-4.
     latest_golive = _latest_scans(db, phase=GOLIVE_PHASE)
     completed_golive = _latest_scans(db, phase=GOLIVE_PHASE, completed_only=True)
+    # Sitemap-monitor: open actiepunten in de monitor-scan en de laatste wijziging per klant.
+    monitor_scans = _latest_scans(db, phase=MONITOR_PHASE, options=(
+        load_only(LaunchScan.id, LaunchScan.customer_website_id, LaunchScan.created_at),))
+    monitor_open = dict(
+        db.query(LaunchScanIssue.scan_id, func.count(LaunchScanIssue.id))
+        .filter(LaunchScanIssue.scan_id.in_([s.id for s in monitor_scans.values()]),
+                LaunchScanIssue.status == "open")
+        .group_by(LaunchScanIssue.scan_id)
+        .all()
+    ) if monitor_scans else {}
+    monitor_changed = {
+        row[0]: row[1]
+        for row in db.query(LaunchSitemapSnapshot.customer_website_id, LaunchSitemapSnapshot.changed_at).all()
+    }
 
     items: list[LaunchCustomerItem] = []
     for c in customers:
@@ -252,6 +277,9 @@ async def list_launch_customers(
             quarterly_period=quarterly.period if quarterly is not None else None,
             latest_golive_scan=to_scan_item(latest_golive[c.id]) if c.id in latest_golive else None,
             golive_progress=golive_progress,
+            monitor_open_issues=(
+                int(monitor_open.get(monitor_scans[c.id].id, 0)) if c.id in monitor_scans else 0),
+            monitor_changed_at=monitor_changed.get(c.id),
         ))
     return LaunchCustomerListResponse(customers=items)
 
@@ -319,8 +347,8 @@ async def start_launch_scan(
 @router.get("/scans", response_model=LaunchScanListResponse)
 async def list_launch_scans(
     customer_website_id: str | None = Query(default=None),
-    # 1-4: SEO/GEO-scan; 5: livegang. Zonder fase: alle scans van alle fases.
-    phase: int | None = Query(default=None, ge=1, le=GOLIVE_PHASE),
+    # 1-4: SEO/GEO-scan; 5: livegang; 6: sitemap-monitor. Zonder fase: alle scans van alle fases.
+    phase: int | None = Query(default=None, ge=1, le=MONITOR_PHASE),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     _user_id: str = Depends(require_user_id),
@@ -1824,6 +1852,87 @@ async def export_golive_checklist(
     return _csv_response(buffer, f"livegang-{_export_slug(customer)}-checklist-{stamp:%Y%m%d}.csv")
 
 
+# --- sitemap-monitor (phase = 6) -------------------------------------------------
+# Eén doorlopende monitor-scan per klant; de dagelijkse run (Celery beat) scant alleen
+# nieuwe en gewijzigde pagina's uit de sitemap. Zie worker/sitemap_monitor.py.
+
+def _sitemap_monitor_status(db: Session, customer: CustomerWebsite) -> SitemapMonitorStatus:
+    scan = monitor_scan(db, customer.id)
+    if scan is not None:
+        # De UI pollt deze endpoint na "Nu controleren": hier herstellen we een vastgelopen run.
+        recover_stale_scan(db, scan)
+    return to_sitemap_monitor_status(
+        customer,
+        db.get(LaunchSitemapSnapshot, customer.id),
+        scan,
+        open_issues=open_issue_count(db, scan.id if scan is not None else None),
+        has_nulmeting=latest_completed_scan(db, customer.id, 1) is not None,
+        global_enabled=settings.sitemap_monitor_enabled,
+    )
+
+
+@router.get("/customers/{customer_id}/sitemap-monitor", response_model=SitemapMonitorStatus)
+async def get_sitemap_monitor(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    return _sitemap_monitor_status(db, _get_customer(db, customer_id))
+
+
+@router.patch("/customers/{customer_id}/sitemap-monitor", response_model=SitemapMonitorStatus)
+async def update_sitemap_monitor(
+    customer_id: str,
+    payload: SitemapMonitorUpdate,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    customer = _get_customer(db, customer_id)
+    customer.sitemap_monitor_enabled = payload.enabled
+    customer.updated_at = _now()
+    db.commit()
+    return _sitemap_monitor_status(db, customer)
+
+
+@router.post("/customers/{customer_id}/sitemap-monitor/run", response_model=SitemapMonitorStatus)
+async def run_sitemap_monitor(
+    customer_id: str,
+    _user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Knop "Nu controleren": zet één monitor-run in de wachtrij (ook als de schakelaar uit staat).
+
+    De run zelf loopt op de achtergrond; `checked_at` verandert als hij klaar is.
+    """
+    from app.worker.tasks import run_sitemap_monitor_task  # voorkom circulaire import
+
+    customer = _get_customer(db, customer_id)
+    if not customer.base_url:
+        raise HTTPException(status_code=400, detail="Deze klant heeft geen website-URL.")
+    if latest_completed_scan(db, customer.id, 1) is None:
+        raise HTTPException(status_code=400, detail="Voer eerst een voltooide fase-1 scan (nulmeting) uit.")
+
+    _recover_stale_scans(db, customer.id)
+    running = (
+        db.query(LaunchScan)
+        .filter(LaunchScan.customer_website_id == customer.id, LaunchScan.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if running:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+    # De lock per klant geldt al vanaf het inplannen: ook een run die nog in de wachtrij
+    # staat of de sitemap ophaalt (nog geen actieve scan) houdt een tweede klik tegen.
+    token = acquire_monitor_lock(customer.id)
+    if token is None:
+        raise HTTPException(status_code=409, detail="Er loopt al een scan voor deze klant.")
+    try:
+        run_sitemap_monitor_task.delay(customer.id, token)
+    except Exception:
+        release_monitor_lock(customer.id, token)
+        raise
+    return _sitemap_monitor_status(db, customer)
+
+
 # --- export ---------------------------------------------------------------
 
 _CHECKLIST_STATUS_LABELS = {"done": "Afgerond", "open": "Open", "nvt": "N.v.t."}
@@ -1990,6 +2099,6 @@ async def export_launch_scan(
     slug = _export_slug(customer)
     prefix = {
         2: "geo-seo-checklist", 3: "content-onpage", 4: f"kwartaal-geo-{scan.period or ''}".rstrip("-"),
-        GOLIVE_PHASE: "livegang",
+        GOLIVE_PHASE: "livegang", MONITOR_PHASE: "sitemap-monitor",
     }.get(scan.phase, "nulmeting")
     return _csv_response(buffer, f"{prefix}-{slug}-{kind}-{scan.created_at:%Y%m%d}.csv")

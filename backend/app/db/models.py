@@ -319,6 +319,12 @@ class CustomerWebsite(Base):
     monday_group_fase4_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Groep van de livegangchecklist (livegangscans hebben phase = 5).
     monday_group_fase5_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Groep van de sitemap-monitor (monitorscans hebben phase = 6).
+    monday_group_fase6_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Dagelijkse sitemap-monitor aan/uit voor deze klant.
+    sitemap_monitor_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     # Handmatig gekozen Search Console-property (bijv. "sc-domain:example.nl").
     # Leeg = automatisch zoeken op domein.
     gsc_property: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -1124,6 +1130,49 @@ class LaunchScanIssue(Base):
     pushed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Gegenereerde opdracht voor Claude Code ("Maak prompt"); gaat niet mee naar een rescan.
+    fix_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fix_prompt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class LaunchSitemapSnapshot(Base):
+    """Laatst bekende sitemap-stand per klant voor de dagelijkse sitemap-monitor.
+
+    `entries` is `{url_key: {"url": ..., "lastmod": ... | None}}`; `recent_changes`
+    is een lijst `{"kind": "new" | "changed" | "removed", "url", "lastmod",
+    "detected_at"}`, nieuwste eerst en begrensd (zie de monitorservice).
+    """
+
+    __tablename__ = "launch_sitemap_snapshots"
+
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    entries: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'")
+    )
+    recent_changes: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Laatste controle (ook zonder wijzigingen) en laatste keer dat er iets veranderde.
+    checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Fout van de laatste run (lege/onbereikbare sitemap); leeg na een geslaagde run.
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

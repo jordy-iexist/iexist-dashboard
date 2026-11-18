@@ -17,7 +17,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.dependencies import require_user_id
-from app.db.models import CustomerCategory, CustomerWebsite, LaunchChecklistState, LaunchScan
+from app.db.models import (
+    CustomerCategory,
+    CustomerWebsite,
+    LaunchChecklistState,
+    LaunchScan,
+    LaunchSitemapSnapshot,
+)
 from app.db.session import get_db
 from app.features.launch_checklist.router import router
 from app.features.launch_checklist.services import golive_checklist
@@ -133,7 +139,8 @@ class GoLiveEndpointTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine(
             "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchChecklistState):
+        # LaunchSitemapSnapshot: het klantoverzicht toont ook de sitemap-monitor.
+        for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchChecklistState, LaunchSitemapSnapshot):
             model.__table__.create(engine)
         Session = sessionmaker(bind=engine)
         self.db = Session()
@@ -256,7 +263,8 @@ class GoLiveEndpointTest(unittest.TestCase):
         response = self.client.get(f"/api/launch-checklist/scans?customer_website_id={self.customer_id}&phase=5")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["total"], 0)
-        self.assertEqual(self.client.get("/api/launch-checklist/scans?phase=6").status_code, 422)
+        # 6 is de sitemap-monitor; daarboven bestaat geen fase.
+        self.assertEqual(self.client.get("/api/launch-checklist/scans?phase=7").status_code, 422)
 
 
 # --- automatische scan: extractie en evaluatie -------------------------------------

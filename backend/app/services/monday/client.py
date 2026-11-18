@@ -283,13 +283,33 @@ def create_board(
     return _to_board(raw)
 
 
-def create_group(board_id: str, name: str, *, client: httpx.Client | None = None) -> MondayGroup:
-    query = """
-    mutation ($board: ID!, $name: String!) {
-      create_group(board_id: $board, group_name: $name) { id title }
-    }
-    """
-    data = _graphql(query, {"board": board_id, "name": name}, client=client)
+def create_group(
+    board_id: str,
+    name: str,
+    *,
+    after_group_id: str | None = None,
+    client: httpx.Client | None = None,
+) -> MondayGroup:
+    """Maak een groep. Zonder `after_group_id` kiest Monday de plek (bovenaan het bord);
+    met `after_group_id` komt de groep direct onder die groep."""
+    if after_group_id:
+        query = """
+        mutation ($board: ID!, $name: String!, $after: String) {
+          create_group(
+            board_id: $board, group_name: $name,
+            relative_to: $after, position_relative_method: after_at
+          ) { id title }
+        }
+        """
+        variables = {"board": board_id, "name": name, "after": after_group_id}
+    else:
+        query = """
+        mutation ($board: ID!, $name: String!) {
+          create_group(board_id: $board, group_name: $name) { id title }
+        }
+        """
+        variables = {"board": board_id, "name": name}
+    data = _graphql(query, variables, client=client)
     raw = data.get("create_group")
     if not isinstance(raw, dict) or raw.get("id") is None:
         raise MondayServiceError("Monday gaf geen groep terug.", code="monday_error")

@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight, RefreshCw, Search } from "lucide-react"
+import { ChevronRight, Radar, RefreshCw, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,22 @@ function OutdatedPill() {
     <span title="Gebaseerd op een oudere nulmeting — scan opnieuw.">
       <Pill tone="amber">
         <RefreshCw className="size-3" /> Verouderd
+      </Pill>
+    </span>
+  )
+}
+
+/** Open actiepunten uit de sitemap-monitor; alleen zichtbaar als er iets te doen is. */
+function MonitorPill({ customer }: { customer: LaunchCustomer }) {
+  const open = customer.monitor_open_issues ?? 0
+  if (open <= 0) return null
+  const title = customer.monitor_changed_at
+    ? `Sitemap-monitor · laatste wijziging ${formatDateTime(customer.monitor_changed_at)}`
+    : "Sitemap-monitor"
+  return (
+    <span title={title}>
+      <Pill tone="amber">
+        <Radar className="size-3" /> {open} monitor-actiepunt{open === 1 ? "" : "en"}
       </Pill>
     </span>
   )
@@ -182,6 +198,7 @@ export function LivegangOverview({ variant = "seo-geo" }: { variant?: "seo-geo" 
                         )}
                       </>
                     )}
+                    <MonitorPill customer={customer} />
                   </div>
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </Link>

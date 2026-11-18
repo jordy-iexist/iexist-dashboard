@@ -50,6 +50,10 @@ class AgentRunResult:
     output_tokens: int = 0
     model: str = ""
     stopped_reason: str = "completed"
+    # Reden waarom het eindantwoord is afgekapt (Responses API `status == "incomplete"`,
+    # bv. "max_output_tokens"); None = volledig. Alleen informatief: `run_agent` gedraagt
+    # zich er niet anders door, de aanroeper beslist of een afgekapt antwoord bruikbaar is.
+    incomplete_reason: str | None = None
 
     def parsed(self) -> dict[str, Any]:
         """Eindantwoord als dict (voor agents met `output_schema`)."""
@@ -141,6 +145,9 @@ def run_agent(
         if not calls:
             result.output = (response.output_text or "").strip()
             result.stopped_reason = "completed"
+            if getattr(response, "status", None) == "incomplete":
+                details = getattr(response, "incomplete_details", None)
+                result.incomplete_reason = getattr(details, "reason", None) or "onbekend"
             return result
 
         # Model-output (incl. reasoning-items) terug in de context zetten.

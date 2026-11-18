@@ -15,6 +15,7 @@ from app.agents.content_meta.agent import build_content_meta_agent
 from app.agents.content_report.agent import build_content_report_agent
 from app.agents.content_text.agent import build_content_text_agent
 from app.agents.content_trust.agent import build_content_trust_agent
+from app.agents.fix_prompt.agent import build_fix_prompt_agent
 from app.agents.geo.agent import build_geo_agent
 from app.agents.nulmeting.agent import build_nulmeting_agent
 from app.agents.quarterly_report.agent import build_quarterly_report_agent
@@ -32,6 +33,8 @@ AGENTS: dict[str, Callable[[], Agent]] = {
     "content_report": build_content_report_agent,
     # Fase 4 (kwartaal GEO-werkzaamheden): conceptrapport.
     "quarterly_report": build_quarterly_report_agent,
+    # Actiepunten: opdracht voor Claude Code (handmatig per punt, "Maak prompt").
+    "fix_prompt": build_fix_prompt_agent,
 }
 
 __all__ = ["AGENTS", "Agent", "AgentRunResult", "Tool", "run_agent", "tool"]

@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Queue
 
 from app.core.config import settings, validate_required_secrets
@@ -45,6 +46,17 @@ celery_app.conf.update(
         "app.worker.tasks.run_content_analysis_task": {"queue": "audit"},
         "app.worker.tasks.run_quarterly_scan_task": {"queue": "audit"},
         "app.worker.tasks.run_golive_scan_task": {"queue": "audit"},
+        "app.worker.tasks.run_sitemap_monitor_dispatch_task": {"queue": "audit"},
+        "app.worker.tasks.run_sitemap_monitor_task": {"queue": "audit"},
+    },
+    # Celery beat (service `beat`, precies één instantie). Tijden in `timezone` hierboven.
+    beat_schedule={
+        # Dagelijkse sitemap-monitor: na de pg_dump van 03:00. De dispatcher kijkt zelf
+        # naar SITEMAP_MONITOR_ENABLED (noodrem) en de schakelaar per klant.
+        "sitemap-monitor-dagelijks": {
+            "task": "app.worker.tasks.run_sitemap_monitor_dispatch_task",
+            "schedule": crontab(hour=settings.sitemap_monitor_hour, minute=0),
+        },
     },
 )
 

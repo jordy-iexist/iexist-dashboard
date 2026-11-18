@@ -35,6 +35,13 @@ class DiscoveryResult:
     # Sitemap-URL's op een ander domein: worden niet gecrawld, wel geteld (livegang, gl_sitemap).
     foreign_total: int = 0
     foreign_sample: list[str] = field(default_factory=list)
+    # <lastmod> per gevonden pagina (alleen voor URL's in `urls`): url_key(url) → ruwe
+    # tekst, gestript. Pagina's zonder (lege) lastmod staan er niet in.
+    lastmod: dict[str, str] = field(default_factory=dict)
+    # Expliciet aangewezen sitemaps (robots.txt of een sitemapindex) die geen 200 gaven,
+    # niet te parsen waren of door `max_sitemaps` niet meer zijn opgehaald. De gok-paden
+    # (DEFAULT_SITEMAP_PATHS) tellen niet mee: een 404 daarop is normaal.
+    failed_sitemaps: list[str] = field(default_factory=list)
 
 
 def clean_url(raw: str, base: str | None = None) -> str | None:
@@ -84,6 +91,13 @@ def _is_plain_loc(tag: str) -> bool:
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _is_plain_lastmod(tag: str) -> bool:
+    """<lastmod> zonder namespace of in de standaard sitemap-namespace (niet uit extensies)."""
+    if "}" not in tag:
+        return tag == "lastmod"
+    return tag == f"{{{_SITEMAP_NS}}}lastmod"
 
 
 def _fetch(client: httpx.Client, url: str) -> httpx.Response | None:
@@ -147,6 +161,8 @@ def discover_from_sitemaps(
                 result.robots_txt = robots.text[:200_000]
 
         candidates = parse_robots_sitemaps(result.robots_txt or "", origin)
+        # Sitemaps die expliciet zijn aangewezen; alleen die tellen als mislukt (failed_sitemaps).
+        explicit: set[str] = set(candidates)
         if not candidates:
             candidates = [f"{origin}{p}" for p in DEFAULT_SITEMAP_PATHS]
 
@@ -154,6 +170,10 @@ def discover_from_sitemaps(
         visited: set[str] = set()
         seen_keys: set[str] = set()
         total_found = 0
+
+        def failed(url: str) -> None:
+            if url in explicit and url not in result.failed_sitemaps:
+                result.failed_sitemaps.append(url)
 
         while queue and len(visited) < max_sitemaps:
             sitemap_url = queue.popleft()
@@ -165,10 +185,12 @@ def discover_from_sitemaps(
             if on_progress is not None:
                 on_progress()
             if response is None or response.status_code != 200:
+                failed(sitemap_url)
                 continue
             try:
                 root = ET.fromstring(_decode_sitemap(response))
             except ET.ParseError:
+                failed(sitemap_url)
                 continue
 
             root_tag = _local_name(root.tag)
@@ -178,10 +200,13 @@ def discover_from_sitemaps(
                     loc = next((c for c in sitemap_node if _is_plain_loc(c.tag)), None)
                     if loc is not None and loc.text:
                         child = clean_url(loc.text)
+                        if child:
+                            explicit.add(child)
                         if child and child not in visited:
                             queue.append(child)
                 continue
             if root_tag != "urlset":
+                failed(sitemap_url)
                 continue
 
             result.sitemaps.append(sitemap_url)
@@ -210,6 +235,17 @@ def discover_from_sitemaps(
                 total_found += 1
                 if len(result.urls) < max_urls:
                     result.urls.append(page_url)
+                    lastmod = next(
+                        (c for c in url_node if _is_plain_lastmod(c.tag)),
+                        None,
+                    )
+                    if lastmod is not None and lastmod.text and lastmod.text.strip():
+                        result.lastmod[key] = lastmod.text.strip()
+
+        # Door max_sitemaps niet meer opgehaald: de URL's daarin ontbreken in het resultaat.
+        for sitemap_url in queue:
+            if sitemap_url not in visited:
+                failed(sitemap_url)
 
     result.skipped_due_to_limit = max(0, total_found - len(result.urls))
     return result

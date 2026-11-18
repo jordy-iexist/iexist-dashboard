@@ -22,6 +22,7 @@ from app.db.models import (
     LaunchChecklistState,
     LaunchScan,
     LaunchScanPage,
+    LaunchSitemapSnapshot,
     SerpScanResult,
     WebsiteKeyword,
 )
@@ -267,7 +268,7 @@ class _DbTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanPage, LaunchChecklistState,
-                      WebsiteKeyword, SerpScanResult):
+                      WebsiteKeyword, SerpScanResult, LaunchSitemapSnapshot):
             model.__table__.create(engine)
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()

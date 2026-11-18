@@ -74,6 +74,25 @@ services:
     volumes:
       - backend_media:/app/media
 
+  # Celery beat: plant de dagelijkse sitemap-monitor in. Precies één instantie
+  # (niet schalen), anders gaat elke taak dubbel. Het werk zelf doet `worker`.
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://csv_blog_generator:${POSTGRES_PASSWORD}@db:5432/csv_blog_generator
+      REDIS_URL: redis://redis:6379/0
+    command: ["sh", "/app/scripts/start-beat.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:

@@ -18,6 +18,9 @@ from app.features.launch_checklist.services.geo_checklist import (
 )
 
 PHASE = 5
+# De dagelijkse sitemap-monitor: één doorlopende `LaunchScan` per klant met `phase = 6`.
+# Staat hier naast PHASE zodat alle fasenummers buiten 1-4 op één plek staan.
+MONITOR_PHASE = 6
 KEY_PREFIX = "gl_"
 
 SECTIONS: list[tuple[str, str]] = [

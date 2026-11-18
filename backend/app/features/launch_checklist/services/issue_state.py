@@ -6,7 +6,7 @@ zou hetzelfde punt opnieuw naar Monday gaan.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -44,6 +44,17 @@ def previous_issue_state(db: Session, scan: LaunchScan) -> dict[IssueKey, dict[s
         )
         .all()
     )
+    return carried_state_from_rows(rows)
+
+
+def carried_state_from_rows(rows: Iterable[LaunchScanIssue]) -> dict[IssueKey, dict[str, Any]]:
+    """Over te nemen velden per (issue_type, url) uit bestaande issue-rijen.
+
+    Genegeerd blijft genegeerd; een punt met Monday-koppeling wordt 'doorgezet'
+    (met de koppeling); al het andere (open, of opgelost zonder koppeling)
+    levert niets op en begint dus weer als 'open'. Bij dubbele sleutels wint
+    de eerste rij. Rijen hoeven niet vooraf gefilterd te zijn.
+    """
     carried: dict[IssueKey, dict[str, Any]] = {}
     for row in rows:
         linked = bool(row.external_item_id)

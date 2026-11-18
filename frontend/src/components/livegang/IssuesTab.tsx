@@ -1,10 +1,11 @@
 "use client"
 
-import { ChevronDown, ExternalLink, Loader2, Send } from "lucide-react"
+import { Bot, ChevronDown, ExternalLink, Loader2, Send } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { CheckDetails, DETAIL_ITEM_KEYS } from "@/components/livegang/CheckDetails"
+import { FixPromptDialog } from "@/components/livegang/FixPromptDialog"
 import { IssueDetails } from "@/components/livegang/IssueDetails"
 import { Pill, SeverityBadge } from "@/components/livegang/shared"
 import {
@@ -45,6 +46,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
   const [busy, setBusy] = useState(false)
   const [pushing, setPushing] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ text: string; details: string[]; boardUrl: string | null } | null>(null)
+  const [promptIssue, setPromptIssue] = useState<LaunchScanIssue | null>(null)
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: "2000" })
@@ -121,6 +123,16 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
       setBusy(false)
     }
   }
+
+  // Na het maken van een prompt het icoon direct bijwerken, zonder de lijst te herladen.
+  const markFixPrompt = useCallback((issueId: string, generatedAt: string) => {
+    setData((prev) =>
+      prev && {
+        ...prev,
+        issues: prev.issues.map((i) => (i.id === issueId ? { ...i, fix_prompt_at: generatedAt } : i)),
+      }
+    )
+  }, [])
 
   const issues = data?.issues ?? []
   // Al doorgezette punten slaat de backend over; hier tellen we wat echt nieuw is.
@@ -282,6 +294,16 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                     </a>
                   )}
                   </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2"
+                    title="Maak prompt"
+                    aria-label="Maak prompt"
+                    onClick={() => setPromptIssue(issue)}
+                  >
+                    <Bot className={cn(issue.fix_prompt_at && "text-primary")} />
+                  </Button>
                   {issue.external_url ? (
                     <a
                       href={issue.external_url}
@@ -337,6 +359,14 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
           )}
         </ul>
       </div>
+      {promptIssue && (
+        <FixPromptDialog
+          key={promptIssue.id}
+          issue={promptIssue}
+          onClose={() => setPromptIssue(null)}
+          onGenerated={markFixPrompt}
+        />
+      )}
     </div>
   )
 }

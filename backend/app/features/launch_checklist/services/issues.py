@@ -852,6 +852,39 @@ def generate_issues(pages: list[LaunchScanPage], ai_checks: dict[str, Any] | Non
     return issues
 
 
+# Regels die per pagina iets zeggen, zonder de rest van de site te kennen (sitemap-monitor).
+# Buiten de monitor: regels die over de hele site kijken (dubbele titels, hreflang,
+# robots.txt, AI-checks) en regels zonder data in de monitor (Core Web Vitals, Ahrefs).
+PAGE_RULES: list[Rule] = [
+    rule_status,
+    rule_redirects,
+    rule_indexability,
+    rule_onpage,
+    rule_links_and_speed,
+    rule_lang,
+    rule_open_graph,
+]
+
+
+def generate_page_issues(pages: list[LaunchScanPage]) -> list[Issue]:
+    """Actiepunten per pagina met PAGE_RULES (sitemap-monitor).
+
+    Elke pagina wordt los beoordeeld. Regels die normaal één sitebreed punt geven
+    (lang, Open Graph) leveren zo een punt op die ene pagina op, met `page_id` en
+    `url` van die pagina: de monitor vervangt actiepunten per URL.
+    """
+    ctx: dict[str, Any] = {"ai_checks": {}}
+    issues: list[Issue] = []
+    for page in pages:
+        for rule in PAGE_RULES:
+            for issue in rule([page], ctx):
+                if issue.get("page_id") is None:
+                    issue = {**issue, "page_id": page.id, "url": page.url}
+                issues.append(issue)
+    apply_value_boost(issues, pages)
+    return issues
+
+
 # --- fase 2: GEO/SEO-checklist ---------------------------------------------
 from app.features.launch_checklist.services.geo_checklist import (  # noqa: E402
     ITEMS as _GEO_ITEMS,

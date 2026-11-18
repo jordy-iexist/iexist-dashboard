@@ -8,15 +8,17 @@ import csv
 import html
 import io
 import itertools
+import json
 import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -35,12 +37,14 @@ from app.features.launch_checklist.services import monday_push
 from app.features.launch_checklist.services.content_checklist import ITEMS as CONTENT_ITEMS
 from app.features.launch_checklist.services.geo_checklist import ITEMS as GEO_ITEMS
 from app.features.launch_checklist.services.quarterly_checklist import ITEMS as QUARTERLY_ITEMS
+from app.services.monday import client as monday_client
 from app.services.monday.client import MondayBoard, MondayFolder, MondayGroup, MondayItem
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 DASHBOARD = "https://dashboard.example"
 GOLIVE_SOURCE = "Livegangchecklist – oplevering nieuwe website"
 GOLIVE_GROUP = "Livegang – Oplevering nieuwe website"
+MONITOR_GROUP = "Monitor – Nieuwe & gewijzigde pagina's"
 OLD_GROUPS = {phase: monday_push.GROUP_TITLES[phase] for phase in (1, 2, 3, 4)}
 
 
@@ -53,6 +57,7 @@ class FakeMonday:
         self._ids = itertools.count(100)
         self.boards: dict[str, MondayBoard] = {}
         self.groups_created: list[tuple[str, str]] = []
+        self.groups_after: dict[str, str | None] = {}  # titel -> after_group_id
         self.items: list[dict] = []
         self.updates: dict[str, str] = {}
 
@@ -79,13 +84,22 @@ class FakeMonday:
     def get_board(self, board_id):
         return self.boards[board_id]
 
-    def create_group(self, board_id, title):
+    def create_group(self, board_id, title, *, after_group_id=None):
         group = MondayGroup(id=f"group-{self._id()}", title=title)
         board = self.boards[board_id]
-        self.boards[board_id] = MondayBoard(id=board.id, name=board.name, url=board.url,
-                                            groups=[*board.groups, group])
+        groups = list(board.groups)
+        # Zoals Monday: zonder positie bovenaan, met after_group_id direct eronder.
+        ids = [g.id for g in groups]
+        groups.insert(ids.index(after_group_id) + 1 if after_group_id in ids else 0, group)
+        self.boards[board_id] = MondayBoard(id=board.id, name=board.name, url=board.url, groups=groups)
         self.groups_created.append((board_id, title))
+        self.groups_after[title] = after_group_id
         return group
+
+    def remove_group(self, board_id, group_id):
+        board = self.boards[board_id]
+        self.boards[board_id] = MondayBoard(id=board.id, name=board.name, url=board.url,
+                                            groups=[g for g in board.groups if g.id != group_id])
 
     def create_item(self, board_id, name, *, group_id=None):
         item = MondayItem(id=self._id(), url=f"https://monday.example/items/{len(self.items) + 1}")
@@ -147,6 +161,8 @@ GOLIVE_RESULTS = {
 class _Base(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        # server_default now() (bijv. LaunchMondayTopic.created_at) kent SQLite niet.
+        event.listen(engine, "connect", lambda conn, _: conn.create_function("now", 0, NOW.isoformat))
         for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanIssue,
                       LaunchChecklistState, LaunchMondayTopic):
             model.__table__.create(engine)
@@ -193,8 +209,9 @@ class GoLivePushTest(_Base):
 
         self.assertEqual([o.status for o in result.outcomes], ["pushed"] * 3, result.outcomes)
         customer = self.customer()
-        # Nieuw bord: alle vijf groepen, met de livegang als eigen groep.
-        self.assertEqual({t for _, t in self.fake.groups_created}, set(monday_push.GROUP_TITLES.values()))
+        # Nieuw bord: de vijf fasegroepen, met de livegang als eigen groep; de monitorgroep nog niet.
+        self.assertEqual({t for _, t in self.fake.groups_created},
+                         set(monday_push.GROUP_TITLES.values()) - {MONITOR_GROUP})
         self.assertIsNotNone(customer.monday_group_fase5_id)
         self.assertEqual({i["group_id"] for i in self.fake.items}, {customer.monday_group_fase5_id})
         self.assertNotIn(customer.monday_group_fase5_id,
@@ -253,6 +270,7 @@ class GoLivePushTest(_Base):
         result = monday_push.push_checklist_items(self.db, self.customer(), ["gl_favicon"], "user-1", phase=5)
 
         self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        # Alleen de livegang erbij; de monitorgroep komt pas bij het eerste monitorpunt.
         self.assertEqual(self.fake.groups_created, [(board.id, GOLIVE_GROUP)])
         customer = self.customer()
         self.assertEqual({p: getattr(customer, f"monday_group_fase{p}_id") for p in OLD_GROUPS}, old_ids)
@@ -293,7 +311,7 @@ class GoLivePushTest(_Base):
         monday_push.unlink_board(self.db, self.customer())
         customer = self.customer()
         self.assertIsNone(customer.monday_board_id)
-        self.assertEqual([getattr(customer, f"monday_group_fase{p}_id") for p in range(1, 6)], [None] * 5)
+        self.assertEqual([getattr(customer, f"monday_group_fase{p}_id") for p in range(1, 7)], [None] * 6)
 
     def test_issues_of_a_golive_scan_are_not_pushed(self):
         scan = self.add_golive_scan()
@@ -306,6 +324,245 @@ class GoLivePushTest(_Base):
         result = monday_push.push_issues(self.db, [issue.id], "user-1")
         self.assertEqual(result.outcomes[0].status, "failed")
         self.assertEqual(self.fake.items, [])
+
+
+class MonitorMondayTest(_Base):
+    """Sitemap-monitor (fase 6): eigen groep, eigen hoofditems, bron 'Sitemap-monitor'."""
+
+    def add_issue(self, phase, issue_type="missing_meta_description", url="https://www.klant.nl/nieuw/"):
+        scan = _scan(self.customer_id, phase)
+        self.db.add(scan)
+        issue = LaunchScanIssue(
+            id=str(uuid.uuid4()), scan_id=scan.id, issue_type=issue_type, category="onpage", severity="middel",
+            title=f"Meta description ontbreekt: {url}", description="Geen meta description.",
+            recommendation="Schrijf een meta description.", url=url, status="open", created_at=NOW, updated_at=NOW,
+        )
+        self.db.add(issue)
+        self.db.commit()
+        return issue
+
+    def test_constants(self):
+        self.assertEqual(monday_push.MONITOR_PHASE, 6)
+        self.assertEqual(monday_push.GROUP_TITLES[6], MONITOR_GROUP)
+        self.assertIn(6, monday_push.ISSUE_PHASES)
+        self.assertNotIn(5, monday_push.ISSUE_PHASES)
+        self.assertIn(6, monday_push.GROUPED_PHASES)
+        self.assertEqual(monday_push._group_attr(6), "monday_group_fase6_id")
+        self.assertNotIn(6, monday_push.CHECKLIST_SOURCE)
+
+    def monitor_groups(self):
+        return [t for _, t in self.fake.groups_created if t == MONITOR_GROUP]
+
+    def test_new_board_gets_five_groups_without_monitor(self):
+        monday_push.ensure_customer_board(self.db, self.customer())
+        self.assertEqual(len(self.fake.groups_created), 5)
+        self.assertEqual(self.monitor_groups(), [])
+        customer = self.customer()
+        ids = [getattr(customer, f"monday_group_fase{p}_id") for p in range(1, 6)]
+        self.assertTrue(all(ids))
+        self.assertEqual(len(set(ids)), 5)
+        self.assertIsNone(customer.monday_group_fase6_id)
+
+    def test_linking_a_board_creates_no_monitor_group(self):
+        board = self.fake.add_board({})
+        monday_push.link_board(self.db, self.customer(), board)
+        self.assertEqual(len(self.fake.groups_created), 5)
+        self.assertEqual(self.monitor_groups(), [])
+        self.assertIsNone(self.customer().monday_group_fase6_id)
+
+    def test_phase_1_push_creates_no_monitor_group(self):
+        result = monday_push.push_issues(self.db, [self.add_issue(1).id], "user-1")
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        self.assertEqual(self.monitor_groups(), [])
+        self.assertIsNone(self.customer().monday_group_fase6_id)
+
+    def test_first_monitor_issue_creates_group_below_last_phase_group_second_reuses_it(self):
+        monday_push.push_issues(self.db, [self.add_issue(1, url="https://www.klant.nl/oud/").id], "user-1")
+        before = len(self.fake.groups_created)
+
+        first = monday_push.push_issues(self.db, [self.add_issue(6).id], "user-1")
+        self.assertEqual(first.outcomes[0].status, "pushed", first.outcomes)
+        self.assertEqual(self.fake.groups_created[before:], [(self.customer().monday_board_id, MONITOR_GROUP)])
+        customer = self.customer()
+        self.assertIsNotNone(customer.monday_group_fase6_id)
+        # Onder de livegangsgroep (de onderste fasegroep), niet bovenaan het bord.
+        self.assertEqual(self.fake.groups_after[MONITOR_GROUP], customer.monday_group_fase5_id)
+        board = self.fake.boards[customer.monday_board_id]
+        self.assertEqual([g.title for g in board.groups],
+                         [*(monday_push.GROUP_TITLES[p] for p in range(1, 6)), MONITOR_GROUP])
+
+        second = monday_push.push_issues(
+            self.db, [self.add_issue(6, issue_type="missing_title", url="https://www.klant.nl/ander/").id], "user-1")
+        self.assertEqual(second.outcomes[0].status, "pushed", second.outcomes)
+        self.assertEqual(self.monitor_groups(), [MONITOR_GROUP])
+        self.assertEqual(self.customer().monday_group_fase6_id, customer.monday_group_fase6_id)
+        monitor_parents = [i for i in self.fake.items if "parent_id" not in i][1:]
+        self.assertEqual(len(monitor_parents), 2)
+        self.assertEqual({p["group_id"] for p in monitor_parents}, {customer.monday_group_fase6_id})
+
+    def test_existing_group_with_the_same_title_is_reused(self):
+        groups = {f"g{p}": t for p, t in monday_push.GROUP_TITLES.items()}
+        groups["g6"] = MONITOR_GROUP.upper()  # titel hoofdletterongevoelig herkend
+        board = self.fake.add_board(groups)
+        monday_push.link_board(self.db, self.customer(), board)
+        self.assertEqual(self.customer().monday_group_fase6_id, "g6")
+
+        result = monday_push.push_issues(self.db, [self.add_issue(6).id], "user-1")
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        self.assertEqual(self.fake.groups_created, [])
+        self.assertEqual(self.fake.items[0]["group_id"], "g6")
+
+    def test_deleted_monitor_group_does_not_break_other_phases_and_is_recreated(self):
+        monday_push.push_issues(self.db, [self.add_issue(6).id], "user-1")
+        customer = self.customer()
+        old = customer.monday_group_fase6_id
+        self.fake.remove_group(customer.monday_board_id, old)
+
+        result = monday_push.push_issues(self.db, [self.add_issue(1).id], "user-1")
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        self.assertIsNone(self.customer().monday_group_fase6_id)
+        self.assertEqual(self.monitor_groups(), [MONITOR_GROUP])
+
+        result = monday_push.push_issues(
+            self.db, [self.add_issue(6, url="https://www.klant.nl/ander/").id], "user-1")
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        new = self.customer().monday_group_fase6_id
+        self.assertNotIn(new, (None, old))
+        self.assertEqual(self.monitor_groups(), [MONITOR_GROUP, MONITOR_GROUP])
+
+    def test_unlink_clears_the_monitor_group(self):
+        monday_push.push_issues(self.db, [self.add_issue(6).id], "user-1")
+        self.assertIsNotNone(self.customer().monday_group_fase6_id)
+        monday_push.unlink_board(self.db, self.customer())
+        self.assertIsNone(self.customer().monday_group_fase6_id)
+
+    def test_monitor_issue_goes_under_own_topic_in_monitor_group(self):
+        # Fase 1 heeft al een hoofditem voor hetzelfde onderwerp.
+        first = monday_push.push_issues(self.db, [self.add_issue(1, url="https://www.klant.nl/oud/").id], "user-1")
+        self.assertEqual(first.outcomes[0].status, "pushed", first.outcomes)
+        monitor_issue = self.add_issue(6)
+        result = monday_push.push_issues(self.db, [monitor_issue.id], "user-1")
+
+        self.assertEqual(result.outcomes[0].status, "pushed", result.outcomes)
+        customer = self.customer()
+        parents = [i for i in self.fake.items if "parent_id" not in i]
+        self.assertEqual([p["group_id"] for p in parents],
+                         [customer.monday_group_fase1_id, customer.monday_group_fase6_id])
+        self.assertEqual(parents[0]["name"], parents[1]["name"])  # zelfde onderwerp, eigen hoofditem
+        sub = self.fake.items[-1]
+        self.assertEqual(sub["parent_id"], parents[1]["id"])
+        body = self.fake.updates[sub["id"]]
+        self.assertIn("<b>Bron:</b> Sitemap-monitor", body)
+        self.assertNotIn("Livegang-scan fase", body)
+        self.assertIn(f"{DASHBOARD}/dashboard/livegang/seo-geo/{self.customer_id}", body)
+        self.assertIn("<b>Bron:</b> Sitemap-monitor", self.fake.updates[parents[1]["id"]])
+        topics = {t.issue_type for t in self.db.query(LaunchMondayTopic).all()}
+        self.assertEqual(topics, {"missing_meta_description", "monitor:missing_meta_description"})
+        self.db.expire_all()
+        self.assertEqual(self.db.get(LaunchScanIssue, monitor_issue.id).status, "doorgezet")
+
+    def test_second_monitor_issue_reuses_monitor_topic(self):
+        monday_push.push_issues(self.db, [self.add_issue(6).id], "user-1")
+        monday_push.push_issues(self.db, [self.add_issue(6, url="https://www.klant.nl/ander/").id], "user-1")
+        parents = [i for i in self.fake.items if "parent_id" not in i]
+        self.assertEqual(len(parents), 1)
+        self.assertEqual(len([i for i in self.fake.items if "parent_id" in i]), 2)
+
+    def test_source_label(self):
+        self.assertEqual(monday_push.source_label(6), "Sitemap-monitor")
+        self.assertEqual(monday_push.source_label(1), "Livegang-scan fase 1")
+        self.assertEqual(monday_push.topic_key("x", 6), "monitor:x")
+        self.assertEqual(monday_push.topic_key("x", 1), "x")
+
+
+class CreateGroupPositionTest(unittest.TestCase):
+    """Monday-client: de positie van een nieuwe groep (relative_to + position_relative_method)."""
+
+    def setUp(self):
+        patcher = patch.object(monday_client, "settings", SimpleNamespace(
+            monday_api_token="test-token", monday_api_version="2026-10", monday_request_timeout_seconds=5.0))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def send(self, **kwargs):
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.content)
+            return httpx.Response(200, json={"data": {"create_group": {"id": "g9", "title": "T"}}})
+
+        http = httpx.Client(transport=httpx.MockTransport(handler))
+        group = monday_client.create_group("1", "T", client=http, **kwargs)
+        self.assertEqual(group.id, "g9")
+        return seen["body"]
+
+    def test_without_position(self):
+        body = self.send()
+        self.assertNotIn("relative_to", body["query"])
+        self.assertEqual(body["variables"], {"board": "1", "name": "T"})
+
+    def test_below_a_group(self):
+        body = self.send(after_group_id="g5")
+        self.assertIn("relative_to: $after", body["query"])
+        self.assertIn("position_relative_method: after_at", body["query"])
+        self.assertEqual(body["variables"], {"board": "1", "name": "T", "after": "g5"})
+
+
+class IssueSuggestionsTest(unittest.TestCase):
+    def setUp(self):
+        from app.db.models import LaunchContentPage, LaunchContentSuggestion
+
+        self.Page, self.Suggestion = LaunchContentPage, LaunchContentSuggestion
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        for model in (CustomerCategory, CustomerWebsite, LaunchScan, LaunchScanIssue,
+                      LaunchContentPage, LaunchContentSuggestion):
+            model.__table__.create(engine)
+        self.db = sessionmaker(bind=engine)()
+        self.addCleanup(self.db.close)
+        self.customer_id = str(uuid.uuid4())
+        self.db.add(CustomerWebsite(id=self.customer_id, name="Klant", base_url="https://www.klant.nl/",
+                                    domain="klant.nl", created_by="user-1", created_at=NOW, updated_at=NOW))
+        self.scan = _scan(self.customer_id, 3)
+        self.db.add(self.scan)
+        self.db.commit()
+
+    def page(self, url):
+        page = self.Page(id=str(uuid.uuid4()), scan_id=self.scan.id, url=url, path="/", created_at=NOW)
+        self.db.add(page)
+        return page
+
+    def suggestion(self, page, item_key, value, status="open", minute=0):
+        at = NOW.replace(minute=minute)
+        self.db.add(self.Suggestion(
+            id=str(uuid.uuid4()), scan_id=self.scan.id, customer_website_id=self.customer_id,
+            content_page_id=page.id, item_key=item_key, agent="content_meta", title=f"Titel {value}",
+            proposed_value=value, status=status, created_at=at, updated_at=at,
+        ))
+
+    def test_filters_and_order(self):
+        url = "https://www.klant.nl/a/"
+        page, other = self.page(url), self.page("https://www.klant.nl/b/")
+        self.suggestion(page, "c3_meta_description", "tweede", minute=2)
+        self.suggestion(page, "c3_meta_description", "eerste", minute=1)
+        self.suggestion(page, "c3_meta_description", "afgewezen", status="afgewezen")
+        self.suggestion(page, "c3_title", "ander punt")
+        self.suggestion(other, "c3_meta_description", "andere pagina")
+        issue = LaunchScanIssue(
+            id=str(uuid.uuid4()), scan_id=self.scan.id, issue_type="c3_meta_description", category="content",
+            severity="middel", title="t", description="d", url=url, status="open", created_at=NOW, updated_at=NOW,
+        )
+        self.db.add(issue)
+        self.db.commit()
+
+        rows = monday_push.issue_suggestions(self.db, issue)
+        self.assertEqual([r.proposed_value for r in rows], ["eerste", "tweede"])
+        body = monday_push.suggestions_html(self.db, issue)
+        self.assertIn("<b>Voorstel:</b> eerste", body)
+        self.assertNotIn("afgewezen", body)
+
+        issue.url = None
+        self.assertEqual(monday_push.issue_suggestions(self.db, issue), [])
+        self.assertEqual(monday_push.suggestions_html(self.db, issue), "")
 
 
 class GoLiveDetailsHtmlTest(unittest.TestCase):

@@ -292,6 +292,9 @@ export type LaunchCustomer = {
   /** Livegang (fase 5): laatste scan en voortgang; null = nog niet gescand en niets afgevinkt. */
   latest_golive_scan?: LaunchScan | null
   golive_progress?: ChecklistProgress | null
+  /** Sitemap-monitor: open actiepunten en de laatste sitemapwijziging (null = nog nooit gezien). */
+  monitor_open_issues?: number
+  monitor_changed_at?: string | null
 }
 
 export type CwvMetric = { value: number | null; rating: CwvRating | null }
@@ -387,6 +390,8 @@ export type LaunchScanIssue = {
   external_item_id: string | null
   external_url: string | null
   pushed_at: string | null
+  /** Moment waarop de opgeslagen prompt voor Claude Code is gemaakt; null = nog geen prompt. */
+  fix_prompt_at: string | null
   created_at: string
   updated_at: string
 }
@@ -409,6 +414,25 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new Error(payload?.error?.trim() || "Er ging iets mis.")
   }
   return payload as T
+}
+
+export type FixPromptResponse = {
+  prompt: string
+  generated_at: string
+  /** True = de opgeslagen prompt, zonder nieuwe modelaanroep. */
+  cached: boolean
+}
+
+/**
+ * Prompt voor Claude Code bij één actiepunt. Zonder `regenerate` geeft de backend de opgeslagen
+ * prompt terug als die er is; anders maakt het model een nieuwe (synchroon, kan even duren).
+ */
+export function createFixPrompt(issueId: string, regenerate = false) {
+  return apiFetch<FixPromptResponse>(`/issues/${issueId}/fix-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ regenerate }),
+  })
 }
 
 export const STATUS_LABELS: Record<ScanStatus, string> = {
