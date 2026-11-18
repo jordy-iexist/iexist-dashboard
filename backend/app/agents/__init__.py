@@ -19,6 +19,7 @@ from app.agents.fix_prompt.agent import build_fix_prompt_agent
 from app.agents.geo.agent import build_geo_agent
 from app.agents.nulmeting.agent import build_nulmeting_agent
 from app.agents.quarterly_report.agent import build_quarterly_report_agent
+from app.agents.schema_markup.agent import build_schema_markup_agent
 from app.agents.tools import Tool, tool
 
 AGENTS: dict[str, Callable[[], Agent]] = {
@@ -35,6 +36,8 @@ AGENTS: dict[str, Callable[[], Agent]] = {
     "quarterly_report": build_quarterly_report_agent,
     # Actiepunten: opdracht voor Claude Code (handmatig per punt, "Maak prompt").
     "fix_prompt": build_fix_prompt_agent,
+    # Livegang: ontbrekende JSON-LD per pagina (handmatig per pagina, "Maak schema").
+    "schema_markup": build_schema_markup_agent,
 }
 
 __all__ = ["AGENTS", "Agent", "AgentRunResult", "Tool", "run_agent", "tool"]

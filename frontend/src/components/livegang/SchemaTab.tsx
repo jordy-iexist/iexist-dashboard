@@ -1,9 +1,11 @@
 "use client"
 
-import { Search } from "lucide-react"
+import { Braces, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SchemaMarkupDialog } from "@/components/livegang/SchemaMarkupDialog"
 import { Pill } from "@/components/livegang/shared"
 import {
   apiFetch,
@@ -48,6 +50,7 @@ export function SchemaTab({
   const [search, setSearch] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
+  const [schemaPage, setSchemaPage] = useState<LaunchScanPage | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +67,11 @@ export function SchemaTab({
   useEffect(() => {
     void load()
   }, [load])
+
+  // Na het maken van schema het icoon direct bijwerken, zonder de lijst te herladen.
+  const markSchema = useCallback((pageId: string, generatedAt: string) => {
+    setPages((current) => current && current.map((p) => (p.id === pageId ? { ...p, schema_suggestion_at: generatedAt } : p)))
+  }, [])
 
   const indexable = useMemo(() => (pages ?? []).filter((p) => p.indexable), [pages])
 
@@ -195,6 +203,9 @@ export function SchemaTab({
                 <th className="px-3 py-2 text-right font-medium" title="Klikdiepte vanaf de homepage">Diepte</th>
                 <th className="px-3 py-2 text-right font-medium" title="Aantal pagina's dat hiernaar linkt">Inlinks</th>
                 <th className="px-3 py-2 text-left font-medium">Schema</th>
+                <th className="px-3 py-2">
+                  <span className="sr-only">Acties</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -247,12 +258,35 @@ export function SchemaTab({
                       {page.schema_all !== null && page.schema_all.length === 0 && <Pill tone="red">Geen schema</Pill>}
                     </div>
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    {page.indexable && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2"
+                        title="Maak schema"
+                        aria-label="Maak schema"
+                        onClick={() => setSchemaPage(page)}
+                      >
+                        <Braces className={cn(page.schema_suggestion_at && "text-primary")} />
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </section>
+      {schemaPage && (
+        <SchemaMarkupDialog
+          key={schemaPage.id}
+          scanId={sourceScanId}
+          page={schemaPage}
+          onClose={() => setSchemaPage(null)}
+          onGenerated={markSchema}
+        />
+      )}
     </div>
   )
 }

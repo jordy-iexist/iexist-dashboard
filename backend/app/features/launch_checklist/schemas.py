@@ -189,6 +189,8 @@ class LaunchScanPageItem(BaseModel):
     org_traffic: int | None = None
     refdomains: int | None = None
     ahrefs: Any = None
+    # Wanneer er met "Maak schema" JSON-LD is gegenereerd; de inhoud zelf zit niet in de lijst.
+    schema_suggestion_at: datetime | None = None
     issue_count: int = 0
 
 

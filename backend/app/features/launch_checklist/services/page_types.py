@@ -31,6 +31,21 @@ PAGE_TYPES: dict[str, str] = {
     "overig": "Overig",
 }
 
+# Verwachte schema-types per paginatype; gelijk aan `EXPECTED_SCHEMA` in
+# frontend/src/lib/launch-checklist.ts (wijzig ze samen). "A|B" = één van beide volstaat.
+# Paginatypes die hier ontbreken hebben geen verwacht schema.
+EXPECTED_SCHEMA: dict[str, list[str]] = {
+    "home": ["Organization", "WebSite"],
+    "dienst": ["Service", "BreadcrumbList"],
+    "landing": ["Service", "BreadcrumbList"],
+    "product": ["Product", "Brand", "BreadcrumbList"],
+    "categorie": ["ItemList", "BreadcrumbList"],
+    "blog": ["BlogPosting|Article", "Person", "BreadcrumbList"],
+    "vacature": ["JobPosting", "BreadcrumbList"],
+    "over_ons": ["Person", "BreadcrumbList"],
+    "contact": ["BreadcrumbList"],
+}
+
 # Volgorde telt: eerste match wint.
 _SEGMENT_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("archief", ("tag", "tags", "author", "auteur", "category", "categorie-blog")),

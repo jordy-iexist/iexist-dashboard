@@ -33,6 +33,8 @@ def to_page_item(row: Any, issue_count: int = 0) -> LaunchScanPageItem:
     jsonld = data.pop("jsonld", None)
     data.pop("signals", None)
     data.pop("outlinks", None)
+    # Het gegenereerde schema hoort niet in elke lijstrespons; alleen het tijdstip gaat mee.
+    data.pop("schema_suggestion", None)
     data["schema_all"] = sorted(all_types(jsonld)) if jsonld is not None else None
     return LaunchScanPageItem.model_validate({**data, "issue_count": issue_count})
 

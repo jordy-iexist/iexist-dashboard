@@ -367,6 +367,8 @@ export type LaunchScanPage = {
   refdomains: number | null
   ahrefs: AhrefsPage | null
   issue_count: number
+  /** Moment van de opgeslagen schema-suggestie (JSON-LD); null = nog niet gemaakt. */
+  schema_suggestion_at: string | null
 }
 
 export type IssueStatus = "open" | "doorgezet" | "opgelost" | "genegeerd"
@@ -431,6 +433,36 @@ export type FixPromptResponse = {
  */
 export function createFixPrompt(issueId: string, regenerate = false) {
   return apiFetch<FixPromptResponse>(`/issues/${issueId}/fix-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ regenerate }),
+  })
+}
+
+export type SchemaMarkupResponse = {
+  /** Volledig `<script type="application/ld+json">`-blok; "" als `nothing_missing`. */
+  script: string
+  /** Schema-types in het blok. */
+  types: string[]
+  /** Plaatshouders die nog ingevuld moeten worden vóór plaatsen. */
+  placeholders: string[]
+  /** Korte toelichting; kan leeg zijn. */
+  notes: string
+  /** Validatieproblemen als leesbare regels. */
+  problems: string[]
+  generated_at: string
+  /** True = de opgeslagen versie, zonder nieuwe modelaanroep. */
+  cached: boolean
+  /** True = het verwachte schema staat er al; er is niets gemaakt of opgeslagen. */
+  nothing_missing: boolean
+}
+
+/**
+ * JSON-LD-schema voor één pagina van een scan. Zonder `regenerate` geeft de backend de opgeslagen
+ * versie terug als die er is; anders maakt het model een nieuwe (synchroon, kan even duren).
+ */
+export function createSchemaMarkup(scanId: string, pageId: string, regenerate = false) {
+  return apiFetch<SchemaMarkupResponse>(`/scans/${scanId}/pages/${pageId}/schema-markup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ regenerate }),

@@ -1006,6 +1006,12 @@ class LaunchScanPage(Base):
     org_traffic: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     refdomains: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Gegenereerde JSON-LD ("Maak schema"): {jsonld, types, placeholders, notes, problems}.
+    # Gaat niet mee naar een rescan.
+    schema_suggestion: Mapped[Any] = mapped_column(JSON, nullable=True)
+    schema_suggestion_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
