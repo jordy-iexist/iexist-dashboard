@@ -373,6 +373,8 @@ export type LaunchScanPage = {
   schema_placed_at: string | null
   /** Beoordeling van het huidige schemavoorstel; null = nog niet beoordeeld (of geen voorstel). */
   schema_review_status?: "approved" | "rejected" | null
+  /** Eigen keuze van schema-types voor deze pagina; null = automatisch op paginatype. Ontbreekt bij een oude backend. */
+  schema_target_types?: string[] | null
 }
 
 export type IssueStatus = "open" | "doorgezet" | "opgelost" | "genegeerd"
@@ -472,9 +474,51 @@ export type SchemaMarkupResponse = {
   /** Beoordeling van het huidige voorstel; opnieuw genereren zet hem terug op "pending". */
   review_status: SchemaReviewStatus
   reviewed_at: string | null
+  // De velden hieronder ontbreken bij een oude backend; de weergave moet zonder ze werken.
+  /** Types waarvoor het voorstel is gemaakt (of gemaakt zou worden). */
+  target_types?: string[]
+  /** "manual" = eigen keuze per pagina; "auto" = afgeleid van het paginatype. */
+  target_types_source?: SchemaTargetTypesSource
+  /** True = er is een voorstel, maar de typekeuze is daarna gewijzigd; opnieuw genereren nodig. */
+  stale?: boolean
+  /** Aanbevolen eigenschappen die niet in te vullen waren, als "Type.eigenschap". */
+  omitted?: string[]
+  /** Alle entiteiten van de pagina zoals die na plaatsen worden: bestaand, nieuw en wat vervalt. */
+  page_graph?: SchemaGraphEntity[]
+  /** Compleet `<script>`-blok met bestaand plus nieuw (zonder wat vervalt); "" als onbekend. */
+  full_script?: string
+}
+
+export type SchemaTargetTypesSource = "manual" | "auto"
+
+export type SchemaGraphEntity = {
+  types: string[]
+  id: string | null
+  /** existing = staat al op de pagina; new = in het nieuwe blok; lapses = standaardschema dat bij plaatsen vervalt. */
+  status: "existing" | "new" | "lapses"
+  properties: string[]
 }
 
 export type SchemaReviewStatus = "pending" | "approved" | "rejected"
+
+/** Maximaal aantal eigen schema-types per pagina (zelfde grens als de backend). */
+export const MAX_SCHEMA_TARGET_TYPES = 8
+
+/**
+ * Zet de eigen keuze van schema-types voor één of meer pagina's (max. 200) in één aanvraag; `null` = terug
+ * naar automatisch op paginatype. Een bestaand voorstel blijft staan en is daarna `stale` tot het opnieuw
+ * gemaakt is.
+ */
+export function setSchemaTargetTypes(scanId: string, pageIds: string[], types: string[] | null) {
+  return apiFetch<{ updated: number; pages: { page_id: string; schema_target_types: string[] | null }[] }>(
+    `/scans/${scanId}/schema-markup/target-types`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page_ids: pageIds, types }),
+    }
+  )
+}
 
 export type SchemaOverviewItem = {
   page_id: string

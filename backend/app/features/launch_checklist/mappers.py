@@ -40,6 +40,8 @@ def to_page_item(row: Any, issue_count: int = 0) -> LaunchScanPageItem:
     review_status, _ = review_view(suggestion)
     data["schema_review_status"] = review_status if review_status != REVIEW_PENDING else None
     data["schema_all"] = sorted(all_types(jsonld)) if jsonld is not None else None
+    chosen = data.get("schema_target_types")
+    data["schema_target_types"] = [str(t) for t in chosen] if isinstance(chosen, list) and chosen else None
     return LaunchScanPageItem.model_validate({**data, "issue_count": issue_count})
 
 

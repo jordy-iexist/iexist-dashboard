@@ -5,6 +5,10 @@ ingekort en ruwe HTML wordt niet bewaard), bepaalt welke verwachte schema-types
 ontbreken (`target_types`) en laat de schema-agent alleen die schrijven. Het
 resultaat wordt gevalideerd en opgeslagen bij de pagina; een collega kopieert
 het blok en plakt het zelf. Er wordt niets op de klantsite geschreven.
+
+Per pagina kan een collega zelf de schema-types kiezen (`LaunchScanPage.schema_target_types`);
+zonder keuze volgen ze uit het paginatype. Het voorstel bewaart ook de bestaande JSON-LD van de
+pagina, zodat de response de complete markup na plaatsen kan tonen (`page_graph_of`).
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -28,6 +33,7 @@ from app.features.launch_checklist.services.discovery import clean_url, root_dom
 from app.features.launch_checklist.services.geo_checks import ARTICLE_TYPES, PRODUCT_TYPES, is_org_type
 from app.features.launch_checklist.services.geo_extract import all_types, extract_geo, flatten_jsonld, types_of
 from app.features.launch_checklist.services.golive_probes import new_client
+from app.features.launch_checklist.services.html_extract import extract_page
 from app.features.launch_checklist.services.inventory import MAX_BODY_BYTES
 from app.features.launch_checklist.services.page_types import EXPECTED_SCHEMA, PAGE_TYPES
 from app.features.launch_checklist.services.schema_validate import (
@@ -51,6 +57,18 @@ MAX_ENTITIES = 30
 MAX_IMAGES = 8
 MAX_CRUMBS = 6
 MAX_TEXT_CHARS = 300
+# Bestaande JSON-LD in het voorstel (voor de complete markup na plaatsen), samen begrensd.
+MAX_EXISTING_JSONLD_BYTES = 60_000
+MAX_OMITTED = 40
+
+# Eigen keuze van schema-types per pagina.
+TYPE_NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9]{1,60}$")
+MAX_TARGET_TYPES = 8
+SOURCE_MANUAL = "manual"
+SOURCE_AUTO = "auto"
+_OMITTED_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z@][A-Za-z0-9]*)+$")
+# Labels van Rank Math (twitter:labelN) waarvan twitter:dataN de auteur is.
+_AUTHOR_LABELS = {"geschreven door", "written by", "auteur", "author"}
 
 # Een tekst tussen rechte haken in de JSON-LD is een plaatshouder ("[naam van de auteur]").
 _PLACEHOLDER_RE = re.compile(r"\[[^\[\]\n]{2,200}\]")
@@ -59,8 +77,11 @@ _PLACEHOLDER_RE = re.compile(r"\[[^\[\]\n]{2,200}\]")
 # Bewust hier en niet in `RECOMMENDED`: die lijst bepaalt ook de waarschuwingen van de scan.
 # De hints noemen alles wat een entiteit volledig maakt; de agent laat weg wat niet in de invoer staat.
 _TYPE_HINTS: dict[str, str] = {
-    "Organization": "url, logo, contactPoint/telephone, address en sameAs alleen als ze in de invoer staan",
-    "WebSite": "url van de homepage, name, publisher als verwijzing naar de organisatie",
+    "Organization": "name, url, logo (URL of ImageObject), description, email, telephone, contactPoint, "
+                    "address (PostalAddress) en sameAs (profielen), vatID en identifier (KvK) — elk alleen "
+                    "als het in de invoer staat",
+    "WebSite": "url van de homepage, name, description, inLanguage, publisher als verwijzing naar de organisatie; "
+               "potentialAction (SearchAction) alleen als een zoekfunctie met URL in de invoer staat",
     "Service": "name (de dienst zoals in de H1 of title); serviceType (de dienst zonder plaatsnaam, "
                "bv. \"Website laten maken\"); description uit de meta description of de eerste alinea; "
                "url van deze pagina; provider als verwijzing naar de bestaande organisatie; "
@@ -74,21 +95,53 @@ _TYPE_HINTS: dict[str, str] = {
     "BreadcrumbList": "itemListElement met ListItem (position, name, item) van homepage tot deze pagina",
     "Product": "staat er geen prijs op de pagina, zet dan offers met een plaatshouder voor de prijs; "
                "nooit review of aggregateRating verzinnen; ook description (meta description of eerste "
-               "alinea), image (hoofdafbeelding), url en mainEntityOfPage (verwijzing naar de WebPage)",
-    "Brand": "name van het merk zoals op de pagina; koppel het via brand aan het Product",
-    "ItemList": "itemListElement met ListItem (position, url, name) voor de items op de pagina",
-    "BlogPosting": "headline, author (Person of verwijzing), datePublished alleen als de datum bekend is, "
-                   "mainEntityOfPage als verwijzing naar de WebPage; ook description (meta description of "
-                   "eerste alinea), image (hoofdafbeelding) en publisher (verwijzing naar de organisatie)",
-    "Article": "headline, author (Person of verwijzing), datePublished alleen als de datum bekend is; ook "
-               "description (meta description of eerste alinea), image (hoofdafbeelding), mainEntityOfPage "
-               "(verwijzing naar de WebPage) en publisher (verwijzing naar de organisatie)",
+               "alinea), image (hoofdafbeelding), url, mainEntityOfPage (verwijzing naar de WebPage), brand, "
+               "sku/gtin/mpn als ze op de pagina staan, en in offers: price, priceCurrency, availability en url",
+    "Brand": "name van het merk zoals op de pagina; koppel het via brand aan het Product; logo en url als bekend",
+    "ItemList": "itemListElement met ListItem (position, url, name) voor de items op de pagina; numberOfItems",
+    "BlogPosting": "headline (hooguit 110 tekens), description (meta description of eerste alinea), image "
+                   "(og:image, uitgelichte afbeelding of hoofdafbeelding), datePublished en dateModified "
+                   "(uit article:published_time/article:modified_time, WordPress of <time datetime>), author "
+                   "(Person met name en url, uit meta author, Rank Math of WordPress; of een verwijzing naar een "
+                   "bestaande Person die niet vervalt), publisher (verwijzing naar de organisatie), "
+                   "mainEntityOfPage (verwijzing naar de WebPage), inLanguage en articleSection als bekend",
+    "Article": "headline (hooguit 110 tekens), description (meta description of eerste alinea), image "
+               "(og:image, uitgelichte afbeelding of hoofdafbeelding), datePublished en dateModified (uit "
+               "article:published_time/article:modified_time, WordPress of <time datetime>), author (Person met "
+               "name en url, of een verwijzing naar een bestaande Person die niet vervalt), publisher "
+               "(verwijzing naar de organisatie), mainEntityOfPage (verwijzing naar de WebPage), inLanguage",
     "Person": "name zoals op de pagina; jobTitle en worksFor (verwijzing naar de organisatie) als bekend; "
-              "ook description, image (foto van de persoon) en url als ze op de pagina staan",
+              "ook description, image (foto van de persoon), url (bv. de auteurspagina) en sameAs als ze in "
+              "de invoer staan",
     "JobPosting": "title, description, datePosted, hiringOrganization (verwijzing), jobLocation met address; "
-                  "ook url van deze pagina, mainEntityOfPage (verwijzing naar de WebPage) en "
-                  "employmentType als dat op de pagina staat",
+                  "ook url van deze pagina, mainEntityOfPage (verwijzing naar de WebPage), validThrough, "
+                  "employmentType en baseSalary (MonetaryAmount) als dat op de pagina staat",
     "FAQPage": "mainEntity met Question (name) en acceptedAnswer (Answer met text), alleen vragen van de pagina",
+    "LocalBusiness": "name, address (PostalAddress met streetAddress, postalCode, addressLocality, "
+                     "addressCountry), telephone, email, url, image of logo, sameAs; openingHoursSpecification, "
+                     "geo (GeoCoordinates), priceRange en areaServed alleen als ze in de invoer staan; gebruik "
+                     "het meest specifieke subtype als dat gevraagd is",
+    "HowTo": "name, description, image; step als HowToStep (name, text, url met #anker als er een anker is) "
+             "in de volgorde van de pagina; totalTime (ISO 8601-duur), supply, tool en estimatedCost alleen "
+             "als ze op de pagina staan",
+    "Event": "name, startDate en endDate (ISO 8601 met tijdzone), location (Place met name en address, of "
+             "VirtualLocation met url), description, image, eventStatus, eventAttendanceMode, organizer "
+             "(verwijzing naar de organisatie); offers (price, priceCurrency, availability, url, validFrom) en "
+             "performer alleen als ze op de pagina staan",
+    "VideoObject": "alleen voor een video die echt op de pagina staat: name, description, thumbnailUrl, "
+                   "uploadDate, en contentUrl of embedUrl; duration (ISO 8601) als bekend",
+    "Review": "itemReviewed (verwijzing of naam), author (Person of Organization met name), reviewRating "
+              "(Rating met ratingValue en bestRating) en reviewBody alleen letterlijk van de pagina, "
+              "datePublished als bekend",
+    "Course": "name, description, provider (verwijzing naar de organisatie), url; offers (price, priceCurrency, "
+              "category) en hasCourseInstance (courseMode, courseWorkload of courseSchedule) alleen als ze op "
+              "de pagina staan; inLanguage",
+    "SoftwareApplication": "name, applicationCategory, operatingSystem, url, description, image; offers (price, "
+                           "priceCurrency; 0 alleen als 'gratis' op de pagina staat); aggregateRating of review "
+                           "alleen als ze op de pagina staan",
+    "Recipe": "name, image, description, author, datePublished, recipeIngredient, recipeInstructions "
+              "(HowToStep), prepTime/cookTime/totalTime (ISO 8601), recipeYield, recipeCategory, recipeCuisine, "
+              "keywords en nutrition.calories — elk alleen als het op de pagina staat",
 }
 
 
@@ -112,6 +165,17 @@ class SchemaMarkupResult:
     nothing_missing: bool
     # Types die al op de pagina stonden en dus niet in het blok zijn herhaald.
     existing_types: list[str] = field(default_factory=list)
+    # Types waarvoor het voorstel is gemaakt, en of dat een eigen keuze ("manual") was.
+    target_types: list[str] = field(default_factory=list)
+    target_types_source: str = SOURCE_AUTO
+    # Er is een voorstel, maar de typekeuze van de pagina is daarna gewijzigd.
+    stale: bool = False
+    # Aanbevolen eigenschappen die niet in te vullen waren ("Type.eigenschap").
+    omitted: list[str] = field(default_factory=list)
+    # Eén regel per top-level entiteit van de pagina na plaatsen (zie `page_graph_of`).
+    page_graph: list[dict[str, Any]] = field(default_factory=list)
+    # Bestaande nodes (zonder wat vervalt) plus de nieuwe als één <script>-blok; "" als onbekend.
+    full_script: str = ""
 
 
 @dataclass
@@ -125,6 +189,10 @@ class PageFacts:
     entities: list[tuple[str, list[str], str | None]] = field(default_factory=list)
     content: ContentExtract = field(default_factory=ContentExtract)
     signals: dict[str, Any] = field(default_factory=dict)
+    # Geparste JSON-LD-blokken (zonder door ons geplaatste nodes), ongekort.
+    parsed: list[Any] = field(default_factory=list)
+    # Publicatiegegevens uit de HTML als (label, waarde); alleen wat gevonden is.
+    publication: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _now() -> datetime:
@@ -217,7 +285,31 @@ def analyze_page(html: str, url: str, root_domain: str, placement: dict[str, Any
         entities=_entities(parsed),
         content=extract_content(html, url, root_domain),
         signals=extract_geo(html, url, root_domain).signals,
+        parsed=parsed,
+        publication=publication_facts(html),
     )
+
+
+def publication_facts(html: str) -> list[tuple[str, str]]:
+    """Datums, auteur en hoofdafbeelding uit de <meta>-tags en <time datetime> van de pagina."""
+    page = extract_page(html)
+    meta = page.meta_facts
+    out: list[tuple[str, str]] = []
+    if meta.get("article:published_time"):
+        out.append(("Gepubliceerd (article:published_time)", meta["article:published_time"]))
+    if meta.get("article:modified_time"):
+        out.append(("Gewijzigd (article:modified_time)", meta["article:modified_time"]))
+    if page.open_graph.get("og:image"):
+        out.append(("Hoofdafbeelding (og:image)", page.open_graph["og:image"]))
+    if meta.get("author"):
+        out.append(("Auteur (meta author)", meta["author"]))
+    for n in range(1, 5):
+        label, data = meta.get(f"twitter:label{n}", ""), meta.get(f"twitter:data{n}", "")
+        if data and label.strip().lower() in _AUTHOR_LABELS:
+            out.append((f"Auteur (twitter:data{n}, \"{label.strip()}\")", data))
+    if page.time_datetimes:
+        out.append(("Datums in <time datetime>", ", ".join(page.time_datetimes)))
+    return [(label, _clip(value)) for label, value in out]
 
 
 # --- Rank Math op de pagina ---------------------------------------------------------
@@ -241,6 +333,8 @@ class RankMathFacts:
     had_graph: bool = False
     # Alle types op de pagina zonder het standaardschema (en zonder door ons geplaatste nodes).
     kept_types: set[str] = field(default_factory=set)
+    # @id's van de nodes van het standaardschema (vervallen bij plaatsen).
+    default_ids: list[str] = field(default_factory=list)
 
 
 def _node_id(node: Any) -> str:
@@ -341,6 +435,7 @@ def rank_math_facts(html: str, placement: dict[str, Any] | None = None) -> RankM
         default_types=_unique([t for n in default_nodes for t in types_of(n)]),
         had_graph=any(_is_webpage(n) for n in rm_nodes),
         kept_types=all_types([n for n in all_nodes if not (_node_id(n) and _node_id(n) in default_ids)]),
+        default_ids=sorted(i for i in default_ids if i),
     )
 
 
@@ -358,11 +453,36 @@ def _is_present(expected: str, existing: set[str]) -> bool:
     return False
 
 
-def target_types(page_type: str | None, existing_types: set[str], signals: dict[str, Any] | None) -> list[str]:
-    """Te schrijven types: verwacht voor het paginatype min wat er al staat, plus FAQPage bij een FAQ.
+def normalize_choice(value: Any) -> list[str] | None:
+    """Eigen keuze van schema-types als lijst (uniek, volgorde behouden), of None (automatisch)."""
+    if not isinstance(value, list):
+        return None
+    return _unique([str(t).strip() for t in value if isinstance(t, str)]) or None
 
-    Bij "A|B" wordt het eerste alternatief gevraagd.
+
+def requested_types(page_type: str | None, choice: Any, signals: dict[str, Any] | None = None) -> list[str]:
+    """Wat er gevraagd wordt vóór aftrek van wat al op de pagina staat (zonder de pagina op te halen):
+    de eigen keuze, of de verwachte types van het paginatype (plus FAQPage als het FAQ-signaal bekend is)."""
+    manual = normalize_choice(choice)
+    if manual:
+        return manual
+    types = [expected.split("|")[0] for expected in EXPECTED_SCHEMA.get(page_type or "", [])]
+    if (signals or {}).get("faq") and "FAQPage" not in types:
+        types.append("FAQPage")
+    return types
+
+
+def plan_targets(page_type: str | None, existing_types: set[str], signals: dict[str, Any] | None,
+                 choice: Any = None) -> tuple[list[str], list[str], str]:
+    """(te schrijven types, overgeslagen omdat ze er al staan, bron "manual"/"auto").
+
+    Met een eigen keuze: die types min wat er al staat. Anders: verwacht voor het paginatype min wat
+    er al staat, plus FAQPage bij een FAQ. Bij "A|B" wordt het eerste alternatief gevraagd.
     """
+    manual = normalize_choice(choice)
+    if manual is not None:
+        targets = [t for t in manual if not _is_present(t, existing_types)]
+        return targets, [t for t in manual if t not in targets], SOURCE_MANUAL
     targets = [
         expected.split("|")[0]
         for expected in EXPECTED_SCHEMA.get(page_type or "", [])
@@ -370,22 +490,116 @@ def target_types(page_type: str | None, existing_types: set[str], signals: dict[
     ]
     if (signals or {}).get("faq") and "FAQPage" not in existing_types:
         targets.append("FAQPage")
-    return targets
+    return targets, [], SOURCE_AUTO
+
+
+def target_types(page_type: str | None, existing_types: set[str], signals: dict[str, Any] | None,
+                 choice: Any = None) -> list[str]:
+    """Te schrijven types (zie `plan_targets`)."""
+    return plan_targets(page_type, existing_types, signals, choice)[0]
+
+
+def is_stale(suggestion: Any, choice: Any) -> bool:
+    """Er is een voorstel, maar de typekeuze van de pagina is sindsdien gewijzigd.
+
+    Voorstellen van vóór de eigen keuze zijn automatisch gemaakt.
+    """
+    if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
+        return False
+    made_with = normalize_choice(suggestion.get("target_choice"))
+    current = normalize_choice(choice)
+    return (sorted(made_with) if made_with else None) != (sorted(current) if current else None)
+
+
+# --- organisatie van de site ----------------------------------------------------------------
+
+def _logo_url(value: Any) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("url", "contentUrl", "@id"):
+            if isinstance(value.get(key), str) and value[key].strip():
+                return value[key].strip()
+    return None
+
+
+def organization_of(jsonld: Any) -> dict[str, str] | None:
+    """@id, name, url en logo van de eerste Organization-achtige node, of None."""
+    for node in flatten_jsonld(jsonld or []):
+        if not any(is_org_type(t) for t in types_of(node)):
+            continue
+        org: dict[str, str] = {"type": types_of(node)[0]}
+        if _node_id(node):
+            org["@id"] = _node_id(node)
+        for key in ("name", "url"):
+            if isinstance(node.get(key), str) and node[key].strip():
+                org[key] = _clip(node[key].strip(), 200)
+        logo = _logo_url(node.get("logo"))
+        if logo:
+            org["logo"] = logo
+        if org.get("@id") or org.get("name"):
+            return org
+    return None
+
+
+def home_organization(db: Session, page: LaunchScanPage) -> dict[str, str] | None:
+    """De Organization van de homepage in dezelfde scan, of None.
+
+    Eerst de hoofdpagina (pad "/") van hetzelfde domein als de pagina, ook als die een ander paginatype
+    kreeg (bijv. "landing"); daarna rijen met paginatype "home". Een scan kan meerdere subdomeinen
+    bevatten, en de home-rij van een ander subdomein heeft de organisatie vaak niet.
+    """
+    host = urlparse(page.final_url or page.url or "").netloc.lower()
+    rows = (
+        db.query(LaunchScanPage)
+        .filter(LaunchScanPage.scan_id == page.scan_id,
+                or_(LaunchScanPage.page_type == "home", LaunchScanPage.path == "/"))
+        .limit(20)
+        .all()
+    )
+    rows.sort(key=lambda r: 0 if r.path == "/" and urlparse(r.final_url or r.url or "").netloc.lower() == host else 1)
+    for row in rows:
+        org = organization_of(row.jsonld)
+        if org:
+            return org
+    return None
 
 
 # --- brief voor de agent ---------------------------------------------------------
 
+_GOOGLE_RULES = ("geen vaste regels in het dashboard: gebruik de door Google gedocumenteerde verplichte en "
+                 "aanbevolen eigenschappen van dit type (eigen kennis), elk alleen met een waarde uit de invoer")
+
+
+def _hint(type_name: str) -> str | None:
+    """Hint van het type zelf, of van het algemenere type (LocalBusiness-subtype, artikel)."""
+    if type_name in _TYPE_HINTS:
+        return _TYPE_HINTS[type_name]
+    if type_name != "LocalBusiness" and REQUIRED.get(type_name) == REQUIRED["LocalBusiness"]:
+        return _TYPE_HINTS["LocalBusiness"]
+    if type_name in ARTICLE_TYPES:
+        return _TYPE_HINTS["Article"]
+    return None
+
+
 def _requirements(type_name: str) -> str:
     required = REQUIRED.get(type_name)
-    parts = [
-        "verplicht: " + ", ".join(" of ".join(alternatives) for alternatives in required)
-        if required else "verplicht: name (geen vaste regels)"
-    ]
+    hint = _hint(type_name)
+    if required:
+        parts = ["verplicht: " + ", ".join(" of ".join(alternatives) for alternatives in required)]
+    elif hint:
+        parts = ["verplicht: name (geen vaste regels)"]
+    else:
+        parts = [_GOOGLE_RULES]
     recommended = RECOMMENDED.get(type_name)
     if recommended:
         parts.append("aanbevolen: " + ", ".join(" of ".join(alternatives) for alternatives in recommended))
-    if type_name in _TYPE_HINTS:
-        parts.append(_TYPE_HINTS[type_name])
+    if hint:
+        parts.append(hint)
+    elif required:
+        parts.append("vul aan met de door Google gedocumenteerde aanbevolen eigenschappen van dit type")
     return "; ".join(parts)
 
 
@@ -441,9 +655,19 @@ def page_brief(
     targets: list[str],
     customer: dict[str, str | None] | None,
     open_graph: Any = None,
+    source: str = SOURCE_AUTO,
+    wordpress: list[tuple[str, str]] | None = None,
+    organization: dict[str, str] | None = None,
+    lapse_ids: Any = None,
 ) -> str:
-    """Alle feiten van één pagina als tekstblok voor de schema-agent."""
+    """Alle feiten van één pagina als tekstblok voor de schema-agent.
+
+    `wordpress`: publicatiegegevens uit de gekoppelde WordPress-site; `organization`: de Organization
+    van de homepage als de pagina zelf er geen heeft; `lapse_ids`: @id's van het standaardschema van
+    Rank Math dat bij plaatsen vervalt.
+    """
     content, signals = facts.content, facts.signals
+    lapsing = {str(i) for i in lapse_ids or []}
     lines: list[str] = []
     if customer:
         lines.append(f"Klant: {customer.get('name')}")
@@ -452,7 +676,8 @@ def page_brief(
     lines.append(f"Paginatype: {PAGE_TYPES.get(page_type or '', page_type or 'onbekend')}")
 
     lines.append("")
-    lines.append("Te schrijven types (alleen deze):")
+    lines.append("Te schrijven types (alleen deze; gekozen door de collega):" if source == SOURCE_MANUAL
+                 else "Te schrijven types (alleen deze):")
     lines.extend(f"- {t}: {_requirements(t)}" for t in targets)
 
     lines.append("")
@@ -460,6 +685,8 @@ def page_brief(
         lines.append("Bestaande entiteiten op de pagina (verwijs via @id, niet opnieuw definiëren):")
         lines.extend(
             f"- {entity_id} ({', '.join(types)})" + (f": {name}" if name else "")
+            + (" [standaardschema van Rank Math; vervalt als dit voorstel in Rank Math wordt geplaatst: "
+               "niet naar verwijzen, gegevens eruit mag je overnemen]" if entity_id in lapsing else "")
             for entity_id, types, name in facts.entities
         )
     else:
@@ -494,6 +721,19 @@ def page_brief(
     lines.extend(f"- {label}: {', '.join(str(v) for v in values[:5])}" for label, values in contact
                  if isinstance(values, list) and values)
     lines.append(f"- FAQ-blok herkend: {'ja' if signals.get('faq') else 'nee'}")
+    if facts.publication:
+        lines.append("Publicatiegegevens uit de HTML:")
+        lines.extend(f"- {label}: {value}" for label, value in facts.publication)
+    if wordpress:
+        lines.append("Publicatiegegevens uit WordPress (gekoppelde site):")
+        lines.extend(f"- {label}: {_clip(value)}" for label, value in wordpress)
+    if organization:
+        lines.append("Organisatie van de site (van de homepage; staat NIET op deze pagina):")
+        lines.extend(f"- {key}: {organization[key]}" for key in ("type", "@id", "name", "url", "logo")
+                     if organization.get(key))
+        lines.append("  Neem deze organisatie beknopt op als eigen node in de @graph (met precies deze @id, "
+                     "name, url en logo) en verwijs ernaar als publisher of provider, omdat ze op deze pagina "
+                     "niet gedefinieerd is.")
 
     images = [i for i in content.images if i.get("in_content")][:MAX_IMAGES]
     if images:
@@ -557,8 +797,73 @@ def _placeholders(jsonld: Any, reported: Any) -> list[str]:
     return _unique(from_model + found)
 
 
-def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool) -> SchemaMarkupResult:
+def _without_context(node: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in node.items() if k != "@context"}
+
+
+def _graph_row(node: dict[str, Any], status: str) -> dict[str, Any]:
+    return {
+        "types": types_of(node),
+        "id": _node_id(node) or None,
+        "status": status,
+        "properties": [str(k) for k in node if not str(k).startswith("@")],
+    }
+
+
+def capped_nodes(parsed: Any, limit: int = MAX_EXISTING_JSONLD_BYTES) -> tuple[list[dict[str, Any]], int]:
+    """Top-level nodes van de bestaande JSON-LD, samen hooguit `limit` bytes (als JSON).
+
+    Bij overschrijding vallen de grootste nodes weg. Geeft (nodes, aantal weggelaten).
+    """
+    nodes = flatten_jsonld(parsed)
+    sizes = [len(json.dumps(node, ensure_ascii=False).encode("utf-8")) for node in nodes]
+    total, dropped = sum(sizes), set()
+    for index in sorted(range(len(nodes)), key=lambda i: -sizes[i]):
+        if total <= limit:
+            break
+        dropped.add(index)
+        total -= sizes[index]
+    return [node for index, node in enumerate(nodes) if index not in dropped], len(dropped)
+
+
+def page_graph_of(stored: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    """(page_graph, full_script) van een opgeslagen voorstel.
+
+    Bestaande nodes krijgen "existing", of "lapses" als ze bij het standaardschema van Rank Math
+    horen dat bij plaatsen vervalt; nodes uit het voorstel "new". Zonder bewaarde bestaande markup
+    (voorstel van vóór deze functie) alleen de nieuwe nodes en geen full_script.
+    """
     jsonld = stored.get("jsonld")
+    new_nodes = flatten_jsonld(jsonld) if jsonld else []
+    existing = stored.get("existing_nodes")
+    if not isinstance(existing, list):
+        return [_graph_row(node, "new") for node in new_nodes], ""
+    lapse_ids = {str(i) for i in stored.get("lapse_ids") or []}
+    rows: list[dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
+    for node in existing:
+        if not isinstance(node, dict):
+            continue
+        lapses = bool(_node_id(node)) and _node_id(node) in lapse_ids
+        rows.append(_graph_row(node, "lapses" if lapses else "existing"))
+        if not lapses:
+            kept.append(_without_context(node))
+    rows.extend(_graph_row(node, "new") for node in new_nodes)
+    if not new_nodes:
+        return rows, ""
+    graph = kept + [_without_context(node) for node in new_nodes]
+    return rows, build_script({"@context": "https://schema.org", "@graph": graph})
+
+
+def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool,
+                 choice: Any = None) -> SchemaMarkupResult:
+    """Resultaat van een opgeslagen voorstel; `choice` is de huidige typekeuze van de pagina."""
+    jsonld = stored.get("jsonld")
+    targets = stored.get("target_types")
+    if not isinstance(targets, list):  # voorstel van vóór de typekeuze: de geschreven top-level types
+        targets = _unique([t for node in flatten_jsonld(jsonld or []) for t in types_of(node)])
+    source = stored.get("target_types_source")
+    page_graph, full_script = page_graph_of(stored)
     return SchemaMarkupResult(
         script=build_script(jsonld) if jsonld else "",
         types=[str(t) for t in stored.get("types") or []],
@@ -570,6 +875,12 @@ def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool
         nothing_missing=False,
         # Ontbreekt bij schema's die vóór dit veld zijn opgeslagen.
         existing_types=[str(t) for t in stored.get("existing_types") or []],
+        target_types=[str(t) for t in targets],
+        target_types_source=source if source in (SOURCE_MANUAL, SOURCE_AUTO) else SOURCE_AUTO,
+        stale=is_stale(stored, choice),
+        omitted=[str(o) for o in stored.get("omitted") or []],
+        page_graph=page_graph,
+        full_script=full_script,
     )
 
 
@@ -577,19 +888,37 @@ def stored_result(page: LaunchScanPage) -> SchemaMarkupResult | None:
     """Het opgeslagen voorstel als resultaat (zonder ophalen of modelaanroep), of None."""
     if not isinstance(page.schema_suggestion, dict) or not page.schema_suggestion_at:
         return None
-    return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True)
+    return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True,
+                        choice=page.schema_target_types)
 
 
-def _nothing_missing(page_type: str | None, existing_types: set[str]) -> SchemaMarkupResult:
+def _nothing_missing(page_type: str | None, facts: PageFacts, *, choice: Any = None,
+                     skipped: list[str] | None = None) -> SchemaMarkupResult:
+    existing_types = facts.existing_types
+    manual = normalize_choice(choice)
     expected = EXPECTED_SCHEMA.get(page_type or "")
-    if expected:
+    if manual:
+        notes = f"De gekozen schema-types staan al op de pagina ({', '.join(skipped or manual)})."
+    elif expected:
         notes = (f"Het verwachte schema voor dit paginatype staat al op de pagina "
                  f"({', '.join(e.replace('|', ' of ') for e in expected)}).")
     else:
         notes = "Voor dit paginatype wordt geen schema verwacht en er is geen FAQ-blok herkend."
+    nodes, _ = capped_nodes(facts.parsed)
     return SchemaMarkupResult(script="", types=[], placeholders=[], notes=notes, problems=[],
                               generated_at=_now(), cached=False, nothing_missing=True,
-                              existing_types=sorted(existing_types))
+                              existing_types=sorted(existing_types),
+                              target_types=requested_types(page_type, manual, facts.signals),
+                              target_types_source=SOURCE_MANUAL if manual else SOURCE_AUTO,
+                              page_graph=[_graph_row(node, "existing") for node in nodes])
+
+
+def _omitted(reported: Any) -> list[str]:
+    """Door de agent gemelde weggelaten eigenschappen in de vorm "Type.eigenschap"."""
+    if not isinstance(reported, list):
+        return []
+    values = [str(v).strip() for v in reported if isinstance(v, str)]
+    return _unique([v for v in values if len(v) <= 120 and _OMITTED_RE.match(v)])[:MAX_OMITTED]
 
 
 def _parse_output(output: Any) -> tuple[Any, dict[str, Any]]:
@@ -630,7 +959,9 @@ def generate_schema_markup(
     pagina pas daarna opnieuw opgehaald om het resultaat op te slaan.
     """
     if not regenerate and isinstance(page.schema_suggestion, dict) and page.schema_suggestion_at:
-        return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True)
+        return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True,
+                            choice=page.schema_target_types)
+    from app.features.launch_checklist.services import rankmath_schema  # wederzijdse import
 
     previous = page.schema_suggestion if isinstance(page.schema_suggestion, dict) else {}
     placement = previous.get("placement") if isinstance(previous.get("placement"), dict) else None
@@ -638,12 +969,20 @@ def generate_schema_markup(
     page_type = page.page_type
     fetch_url = page.final_url or page.url
     open_graph = page.open_graph
+    choice = normalize_choice(page.schema_target_types)
     scan = db.get(LaunchScan, page.scan_id)
     customer_row = db.get(CustomerWebsite, scan.customer_website_id) if scan is not None else None
     customer = (
         {"name": customer_row.name, "base_url": customer_row.base_url, "domain": customer_row.domain}
         if customer_row is not None else None
     )
+    site_org = home_organization(db, page)
+    # Extra feiten uit de gekoppelde WordPress-site; zonder (bruikbare) koppeling gewoon zonder.
+    try:
+        wp = rankmath_schema.connect_quietly(rankmath_schema.site_for_customer(db, customer_row, user_id))
+    except Exception:  # noqa: BLE001 - alleen voor extra feiten; nooit fataal
+        logger.info("WordPress-koppeling voor pagina %s niet op te zoeken", page_id, exc_info=True)
+        wp = None
     db.close()
 
     html, final_url = fetch_page_html(fetch_url)
@@ -652,10 +991,18 @@ def generate_schema_markup(
     # voorstel ze missen en zou opnieuw plaatsen ze verwijderen.
     facts = analyze_page(html, final_url, root_domain, placement=placement)
     rank_math = rank_math_facts(html, placement)
-    targets = target_types(page_type, facts.existing_types, facts.signals)
+    # Bij een eigen keuze telt het standaardschema van Rank Math (`#richSnippet`) niet als aanwezig:
+    # dat vervalt zodra het gekozen schema wordt geplaatst, en de keuze is juist om het te vervangen.
+    manual = normalize_choice(choice) is not None
+    present = rank_math.kept_types if manual and rank_math.detected else facts.existing_types
+    targets, skipped, source = plan_targets(page_type, present, facts.signals, choice)
     if not targets:
-        return _nothing_missing(page_type, facts.existing_types)
-    brief = page_brief(facts, page_type=page_type, targets=targets, customer=customer, open_graph=open_graph)
+        return _nothing_missing(page_type, facts, choice=choice, skipped=skipped)
+    wordpress = rankmath_schema.wordpress_post_facts(wp, final_url) if wp is not None else []
+    has_org = any(is_org_type(t) for t in facts.existing_types)
+    brief = page_brief(facts, page_type=page_type, targets=targets, customer=customer, open_graph=open_graph,
+                       source=source, wordpress=wordpress, organization=None if has_org else site_org,
+                       lapse_ids=rank_math.default_ids)
 
     try:
         result = run_agent(AGENTS["schema_markup"](), user_id=user_id, input=brief, context=None)
@@ -674,14 +1021,29 @@ def generate_schema_markup(
     jsonld, data = _parse_output(result)
 
     validation = validate_blocks([json.dumps(jsonld, ensure_ascii=False)])
+    notes = str(data.get("notes") or "").strip()
+    if skipped:
+        notes = " ".join(filter(None, [notes, f"Overgeslagen omdat ze al op de pagina staan: {', '.join(skipped)}."]))
+    existing_nodes, dropped = capped_nodes(facts.parsed)
     suggestion = {
         "jsonld": jsonld,
         "types": _written_types(jsonld) or _unique([str(t) for t in data.get("types") or []]),
         "placeholders": _placeholders(jsonld, data.get("placeholders")),
-        "notes": str(data.get("notes") or "").strip(),
+        "notes": notes,
         "problems": [describe_problem(p) for p in validation["problems"]],
         # Wat er al op de pagina stond (niet herhaald); de dialog toont het naast het blok.
         "existing_types": sorted(facts.existing_types),
+        # Waarvoor het voorstel is gemaakt; `target_choice` is de eigen keuze op dat moment (None =
+        # automatisch) en bepaalt `stale`.
+        "target_types": targets,
+        "target_types_source": source,
+        "target_choice": choice,
+        "omitted": _omitted(data.get("omitted")),
+        # Volledige bestaande JSON-LD (zonder door ons geplaatste nodes) voor de complete markup na
+        # plaatsen, plus de @id's van het standaardschema van Rank Math dat dan vervalt.
+        "existing_nodes": existing_nodes,
+        "existing_nodes_dropped": dropped,
+        "lapse_ids": rank_math.default_ids,
         # Voor "Plaats in Rank Math". Na een plaatsing is het standaardschema van Rank Math al
         # van de pagina verdwenen; dan gelden de waarden van vóór het plaatsen.
         "rank_math_detected": rank_math.detected,
@@ -706,7 +1068,7 @@ def generate_schema_markup(
     except StaleDataError as exc:  # net tussen ophalen en opslaan verwijderd
         db.rollback()
         raise SchemaMarkupPageGoneError(page_id) from exc
-    return _from_stored(suggestion, now, cached=False)
+    return _from_stored(suggestion, now, cached=False, choice=stored.schema_target_types)
 
 
 _INCOMPLETE_REASONS = {

@@ -195,6 +195,8 @@ class LaunchScanPageItem(BaseModel):
     schema_placed_at: datetime | None = None
     # Beoordeling van het huidige voorstel; None = geen geldige beoordeling (of geen voorstel).
     schema_review_status: Literal["approved", "rejected"] | None = None
+    # Eigen keuze van schema-types voor "Maak schema"; None = automatisch op paginatype.
+    schema_target_types: list[str] | None = None
     issue_count: int = 0
 
 

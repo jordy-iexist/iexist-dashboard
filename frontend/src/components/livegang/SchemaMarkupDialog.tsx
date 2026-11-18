@@ -14,9 +14,13 @@ import {
 } from "@/components/ui/dialog"
 import {
   ReplacedDefaultTypes,
+  SchemaEntities,
+  SchemaOmitted,
   SchemaPlaceholders,
   SchemaProblems,
-  TypeRow,
+  SchemaScriptView,
+  SchemaStaleNotice,
+  SchemaTargetInfo,
 } from "@/components/livegang/SchemaMarkupParts"
 import {
   createSchemaMarkup,
@@ -226,19 +230,19 @@ export function SchemaMarkupDialog({
 
         {!loading && result && !result.nothing_missing && (
           <div className="min-w-0 space-y-3">
+            <SchemaStaleNotice stale={result.stale} />
+
             <SchemaPlaceholders placeholders={result.placeholders} />
 
             <SchemaProblems problems={result.problems} />
 
-            {/* Het blok bevat alleen wat ontbrak; zonder deze regel lijkt het de complete markup. */}
-            {(result.existing_types ?? []).length > 0 && (
-              <TypeRow label="Staat al op de pagina (niet herhaald):" types={result.existing_types} tone="muted" />
-            )}
-            {result.types.length > 0 && <TypeRow label="Nieuw in dit blok:" types={result.types} tone="blue" />}
+            <SchemaTargetInfo result={result} />
 
-            <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs">
-              {result.script}
-            </pre>
+            <SchemaEntities result={result} />
+
+            <SchemaScriptView result={result} preClassName="max-h-[50vh]" />
+
+            <SchemaOmitted omitted={result.omitted} />
 
             {result.notes && <p className="text-xs text-muted-foreground">{result.notes}</p>}
 
@@ -332,6 +336,7 @@ export function SchemaMarkupDialog({
             variant={placePrimary ? "outline" : "default"}
             disabled={working || !hasScript}
             onClick={() => void copyScript()}
+            title="Kopieert het nieuwe blok: dat is wat op de site komt"
           >
             {copied ? <Check /> : <Copy />} {copied ? "Gekopieerd" : "Kopieer"}
           </Button>

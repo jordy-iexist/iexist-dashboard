@@ -378,15 +378,22 @@ def _comparable(url: str) -> str:
     return unquote(host + sep + rest).lower()
 
 
-def _match_id(items: Any, page_url: str) -> int | None:
+def _match_item(items: Any, page_url: str) -> dict[str, Any] | None:
+    """Het item uit een WordPress-lijst waarvan `link` deze pagina is (met een geldig ID)."""
     target = _comparable(page_url)
     for item in items if isinstance(items, list) else []:
         if isinstance(item, dict) and item.get("id") and _comparable(str(item.get("link") or "")) == target:
             try:
-                return int(item["id"])
+                int(item["id"])
             except (TypeError, ValueError):
                 continue
+            return item
     return None
+
+
+def _match_id(items: Any, page_url: str) -> int | None:
+    item = _match_item(items, page_url)
+    return int(item["id"]) if item is not None else None
 
 
 def _extra_routes(wp: _WordPress) -> list[str]:
@@ -406,10 +413,16 @@ def _extra_routes(wp: _WordPress) -> list[str]:
     return routes[:MAX_EXTRA_POST_TYPES]
 
 
-def resolve_post_id(wp: _WordPress, page_url: str) -> int:
-    """WordPress-ID van de pagina: homepage via `page_on_front`, anders op slug en `link`.
+# Relaties die `find_post(..., embed=True)` meeneemt (auteur en uitgelichte afbeelding).
+_EMBED = "author,wp:featuredmedia"
 
-    Gooit `RankMathPlacementBlocked` als de pagina niet als bericht of pagina te vinden is.
+
+def find_post(wp: _WordPress, page_url: str, *, embed: bool = False) -> dict[str, Any]:
+    """Het WordPress-item van de pagina: homepage via `page_on_front`, anders op slug en `link`.
+
+    Zonder `embed` alleen `id` en `link`; met `embed` het volledige item inclusief `_embedded`
+    (auteur, uitgelichte afbeelding). Gooit `RankMathPlacementBlocked` als de pagina niet als
+    bericht of pagina te vinden is en `RankMathSchemaError` bij een fout van de klantsite.
     """
     action = "Pagina opzoeken in WordPress mislukt"
     if _comparable(page_url) == _comparable(wp.base_url):
@@ -424,19 +437,24 @@ def resolve_post_id(wp: _WordPress, page_url: str) -> int:
                 "De homepage is geen vaste WordPress-pagina (Instellingen > Lezen), dus Rank Math kan er "
                 "geen schema bij opslaan; kopieer het blok en plaats het zelf."
             )
-        return front_id
+        if not embed:
+            return {"id": front_id}
+        item = _call(wp, "GET", f"wp/v2/pages/{front_id}?{urlencode({'_embed': _EMBED})}", action=action)
+        return item if isinstance(item, dict) else {"id": front_id}
 
     segments = [s for s in urlparse(page_url).path.split("/") if s]
     slug = unquote(segments[-1]) if segments else ""
     if slug:
-        query = urlencode({"slug": slug, "_fields": "id,link", "per_page": 20})
+        params: dict[str, Any] = {"slug": slug, "per_page": 20}
+        params.update({"_embed": _EMBED} if embed else {"_fields": "id,link"})
+        query = urlencode(params)
         for route in ("wp/v2/pages", "wp/v2/posts"):
-            found = _match_id(_call(wp, "GET", f"{route}?{query}", action=action), page_url)
+            found = _match_item(_call(wp, "GET", f"{route}?{query}", action=action), page_url)
             if found:
                 return found
         for route in _extra_routes(wp):
             try:
-                found = _match_id(_call(wp, "GET", f"{route}?{query}", action=action), page_url)
+                found = _match_item(_call(wp, "GET", f"{route}?{query}", action=action), page_url)
             except RankMathSchemaError as exc:  # niet elk berichttype is openbaar op te vragen
                 logger.info("Opzoeken in %s mislukt: %s", route, exc)
                 continue
@@ -446,6 +464,66 @@ def resolve_post_id(wp: _WordPress, page_url: str) -> int:
         "De pagina is niet als bericht of pagina op de gekoppelde WordPress-site gevonden; "
         "kopieer het blok en plaats het zelf."
     )
+
+
+def resolve_post_id(wp: _WordPress, page_url: str) -> int:
+    """WordPress-ID van de pagina (zie `find_post`).
+
+    Gooit `RankMathPlacementBlocked` als de pagina niet als bericht of pagina te vinden is.
+    """
+    return int(find_post(wp, page_url)["id"])
+
+
+def _gmt(item: dict[str, Any], key: str) -> str:
+    """ISO-datum uit WordPress: `<key>_gmt` met +00:00, anders de lokale tijd zoals WordPress hem geeft."""
+    gmt = str(item.get(f"{key}_gmt") or "").strip()
+    if gmt and not gmt.startswith("0000"):
+        return gmt if gmt.endswith(("Z", "+00:00")) else f"{gmt}+00:00"
+    local = str(item.get(key) or "").strip()
+    return "" if local.startswith("0000") else local
+
+
+def connect_quietly(site: WordPressSite | None) -> _WordPress | None:
+    """Verbinding met de gekoppelde site, of None (geen site of onbruikbare koppeling)."""
+    if site is None:
+        return None
+    try:
+        return _connect(site)
+    except Exception as exc:  # noqa: BLE001 - alleen voor extra feiten; nooit fataal
+        logger.info("WordPress-koppeling %s niet bruikbaar voor publicatiegegevens: %s", site.id, exc)
+        return None
+
+
+def wordpress_post_facts(wp: _WordPress, page_url: str) -> list[tuple[str, str]]:
+    """Publicatiegegevens van de pagina uit WordPress: (label, waarde), alleen wat gevonden is.
+
+    Faalt nooit: bij elke fout (klantsite, pagina niet gevonden, onverwacht antwoord) een lege lijst.
+    """
+    try:
+        item = find_post(wp, page_url, embed=True)
+        facts: list[tuple[str, str]] = []
+        for key, label in (("date", "Publicatiedatum"), ("modified", "Wijzigingsdatum")):
+            value = _gmt(item, key)
+            if value:
+                facts.append((label, value))
+        embedded = item.get("_embedded") if isinstance(item.get("_embedded"), dict) else {}
+        authors = embedded.get("author") if isinstance(embedded.get("author"), list) else []
+        author = next((a for a in authors if isinstance(a, dict) and str(a.get("name") or "").strip()), None)
+        if author is not None:
+            name = str(author["name"]).strip()
+            url = str(author.get("link") or author.get("url") or "").strip()
+            facts.append(("Auteur", f"{name} ({url})" if url else name))
+        media = embedded.get("wp:featuredmedia") if isinstance(embedded.get("wp:featuredmedia"), list) else []
+        image = next((m for m in media if isinstance(m, dict) and str(m.get("source_url") or "").strip()), None)
+        if image is not None:
+            details = image.get("media_details") if isinstance(image.get("media_details"), dict) else {}
+            size = (f" ({details['width']}x{details['height']})"
+                    if details.get("width") and details.get("height") else "")
+            facts.append(("Uitgelichte afbeelding", f"{str(image['source_url']).strip()}{size}"))
+        return facts
+    except Exception as exc:  # noqa: BLE001 - genereren mag hier nooit op mislukken
+        logger.info("Publicatiegegevens uit WordPress voor %s niet op te halen: %s", page_url, exc)
+        return []
 
 
 def _update_schemas(wp: _WordPress, post_id: int, schemas: dict[str, Any]) -> Any:

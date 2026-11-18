@@ -17,6 +17,8 @@ _MAIN_TAGS = {"main", "article"}
 _SKIP_LINK_RE = re.compile(r"skip-link|skip-to|screen-reader-text|sr-only|visually-hidden", re.IGNORECASE)
 _WORD_RE = re.compile(r"[\wÀ-ÿ'-]+", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
+_META_FACT_RE = re.compile(r"^(article:published_time|article:modified_time|author|twitter:(label|data)[1-4])$")
+MAX_TIME_DATETIMES = 10
 
 
 @dataclass
@@ -39,6 +41,11 @@ class ExtractedPage:
     # Woorden buiten nav/header/footer/aside; None als de pagina geen van die
     # elementen heeft (geen herkenbare structuur, dan is het totaal het enige eerlijke getal).
     main_word_count: int | None = None
+    # Publicatiegegevens uit <meta> ("article:published_time", "article:modified_time", "author",
+    # "twitter:labelN"/"twitter:dataN"); eerste waarde per sleutel.
+    meta_facts: dict[str, str] = field(default_factory=dict)
+    # Waarden van <time datetime="…"> in de pagina (uniek, begrensd).
+    time_datetimes: list[str] = field(default_factory=list)
 
 
 def _clean(value: str | None) -> str:
@@ -135,6 +142,10 @@ class _SeoParser(HTMLParser):
             if "alt" not in a:
                 # alt="" is bewust decoratief; alleen ontbrekend attribuut telt.
                 self.page.images_missing_alt += 1
+        elif tag == "time":
+            value = _clean(a.get("datetime"))
+            if value and value not in self.page.time_datetimes and len(self.page.time_datetimes) < MAX_TIME_DATETIMES:
+                self.page.time_datetimes.append(value[:60])
         elif tag == "script":
             if "ld+json" in a.get("type", "").lower():
                 self._in_jsonld = True
@@ -191,6 +202,10 @@ class _SeoParser(HTMLParser):
             self.page.meta_robots = f"{existing}, {content}" if existing else content
         if prop.startswith("og:") and content:
             self.page.open_graph.setdefault(prop, content)
+        # Rank Math/Yoast zetten article:* als property, twitter:* en author als name (soms andersom).
+        for key in (prop, name):
+            if key and content and _META_FACT_RE.match(key):
+                self.page.meta_facts.setdefault(key, content[:300])
 
     def _parse_jsonld(self, raw: str) -> None:
         raw = raw.strip()

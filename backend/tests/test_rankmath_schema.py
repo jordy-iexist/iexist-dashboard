@@ -638,5 +638,133 @@ class GenerateWithPlacementTest(_Endpoint):
         self.assertNotIn("placement", item)
 
 
+# --- WordPress-feiten en complete markup ---------------------------------------------------------
+
+class WordPressFactsTest(_Endpoint):
+    def _agent(self, jsonld):
+        from app.agents.base import AgentRunResult
+        return AgentRunResult(output=json.dumps({"jsonld": json.dumps(jsonld), "types": [], "placeholders": [],
+                                                 "omitted": [], "notes": ""}), model="test", incomplete_reason=None)
+
+    def _generate(self):
+        with patch(RUN_AGENT, return_value=self._agent(_graph(SERVICE, BREADCRUMB))) as run:
+            response = self.client.post(self.path, json={"regenerate": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json(), run.call_args.kwargs["input"]
+
+    def test_wordpress_facts_in_brief(self):
+        self.wp.pages = [{
+            "id": 42, "link": URL, "date": "2025-03-01T10:00:00", "date_gmt": "2025-03-01T09:00:00",
+            "modified": "2025-04-02T10:30:00", "modified_gmt": "2025-04-02T08:30:00",
+            "_embedded": {
+                "author": [{"id": 3, "name": "Jan Jansen", "link": f"{BASE}/author/jan/"}],
+                "wp:featuredmedia": [{"source_url": f"{BASE}/wp-content/uploads/dak.jpg",
+                                      "media_details": {"width": 1200, "height": 630}}],
+            },
+        }]
+        _, brief = self._generate()
+        section = brief.split("Publicatiegegevens uit WordPress (gekoppelde site):")[1]
+        self.assertIn("- Publicatiedatum: 2025-03-01T09:00:00+00:00", section)
+        self.assertIn("- Wijzigingsdatum: 2025-04-02T08:30:00+00:00", section)
+        self.assertIn(f"- Auteur: Jan Jansen ({BASE}/author/jan/)", section)
+        self.assertIn(f"- Uitgelichte afbeelding: {BASE}/wp-content/uploads/dak.jpg (1200x630)", section)
+        # Alleen lezen, met _embed; niets geschreven.
+        self.assertEqual(self.wp.writes(), [])
+        self.assertIn(("GET", "wp/v2/pages"), [(m, r) for m, r, _ in self.wp.calls])
+
+    def test_find_post_returns_item_and_homepage(self):
+        wp = rankmath_schema._WordPress(site_id="s", name="n", base_url=BASE, headers={"Authorization": "Basic x"})
+        self.wp.pages = [{"id": 42, "link": URL, "date_gmt": "2025-03-01T09:00:00"}]
+        self.assertEqual(rankmath_schema.find_post(wp, URL, embed=True)["date_gmt"], "2025-03-01T09:00:00")
+        self.assertEqual(rankmath_schema.resolve_post_id(wp, URL), 42)
+        self.assertEqual(rankmath_schema.find_post(wp, f"{BASE}/"), {"id": 7})
+
+    def test_wordpress_error_does_not_break_generation(self):
+        self.wp.fail["wp/v2/pages"] = httpx.Response(500, json={"message": "Databasefout."})
+        body, brief = self._generate()
+        self.assertFalse(body["nothing_missing"])
+        self.assertNotIn("uit WordPress", brief)
+        self.assertIsNotNone(self.fresh_page().schema_suggestion)
+        # Pagina niet gevonden in WordPress: ook gewoon door.
+        del self.wp.fail["wp/v2/pages"]
+        self.wp.pages = []
+        body, brief = self._generate()
+        self.assertNotIn("uit WordPress", brief)
+        # Onverwacht antwoord (geen lijst/JSON).
+        self.wp.fail["wp/v2/pages"] = httpx.Response(200, text="<html>geen json</html>")
+        body, brief = self._generate()
+        self.assertNotIn("uit WordPress", brief)
+
+    def test_unusable_connection_does_not_break_generation(self):
+        site = self.db.get(WordPressSite, self.site.id)
+        site.app_password_encrypted = "kapot"
+        self.db.commit()
+        body, brief = self._generate()
+        self.assertNotIn("uit WordPress", brief)
+        self.assertFalse(body["nothing_missing"])
+
+    def test_page_graph_and_full_script(self):
+        body, brief = self._generate()
+        # Het standaardschema van Rank Math is in de brief gemarkeerd als vervallend.
+        self.assertIn(f"{URL}#richSnippet (Article) [standaardschema van Rank Math", brief)
+        self.assertIn(f"{BASE}/author/jan/ (Person): Jan [standaardschema van Rank Math", brief)
+        self.assertNotIn(f"{BASE}/#organization (Organization): Klant BV [", brief)
+        rows = [(r["types"], r["id"], r["status"]) for r in body["page_graph"]]
+        self.assertEqual(rows, [
+            (["Organization"], f"{BASE}/#organization", "existing"),
+            (["WebSite"], f"{BASE}/#website", "existing"),
+            (["WebPage"], f"{URL}#webpage", "existing"),
+            (["Article"], f"{URL}#richSnippet", "lapses"),
+            (["Person"], f"{BASE}/author/jan/", "lapses"),
+            (["Service"], f"{URL}#service", "new"),
+            (["BreadcrumbList"], None, "new"),
+        ])
+        self.assertEqual(body["page_graph"][0]["properties"], ["name"])
+        self.assertEqual(body["page_graph"][5]["properties"], ["name", "provider"])
+        script = body["full_script"]
+        self.assertTrue(script.startswith('<script type="application/ld+json">\n'))
+        self.assertTrue(script.endswith("\n</script>"))
+        data = json.loads(script[len('<script type="application/ld+json">'):-len("</script>")])
+        self.assertEqual(data["@context"], "https://schema.org")
+        self.assertEqual([n["@type"] for n in data["@graph"]],
+                         ["Organization", "WebSite", "WebPage", "Service", "BreadcrumbList"])
+        self.assertNotIn("richSnippet", script)
+        self.assertFalse(any("@context" in n for n in data["@graph"]))
+        # Het nieuwe blok zelf (dat geplaatst wordt) is ongewijzigd.
+        self.assertNotIn("WebSite", body["script"])
+        # Ook bij opvragen uit de opslag.
+        cached = self.client.post(self.path, json={}).json()
+        self.assertEqual((cached["page_graph"], cached["full_script"]), (body["page_graph"], script))
+
+    def test_after_placement_nothing_lapses_and_placed_nodes_are_new(self):
+        self._generate()
+        self.assertEqual(self.place().status_code, 200)
+        body, _ = self._generate()
+        statuses = [(r["types"][0], r["status"]) for r in body["page_graph"]]
+        self.assertNotIn("lapses", [s for _, s in statuses])
+        # De geplaatste Service staat niet dubbel: alleen als "new".
+        self.assertEqual([s for t, s in statuses if t == "Service"], ["new"])
+        data = json.loads(body["full_script"][len('<script type="application/ld+json">'):-len("</script>")])
+        self.assertEqual([n["@type"] for n in data["@graph"]].count("Service"), 1)
+
+    def test_old_suggestion_without_stored_markup(self):
+        self.store(_suggestion())
+        body = self.client.post(self.path, json={}).json()
+        self.assertTrue(body["cached"])
+        self.assertEqual([(r["types"], r["status"]) for r in body["page_graph"]],
+                         [(["Service"], "new"), (["BreadcrumbList"], "new")])
+        self.assertEqual(body["full_script"], "")
+        self.assertEqual((body["target_types"], body["target_types_source"], body["stale"], body["omitted"]),
+                         (["Service", "BreadcrumbList"], "auto", False, []))
+
+    def test_existing_markup_is_capped_by_dropping_largest_nodes(self):
+        nodes = [{"@type": "Thing", "@id": f"#n{i}", "name": "x" * size} for i, size in enumerate((100, 50_000, 20_000))]
+        kept, dropped = schema_markup.capped_nodes([{"@context": "https://schema.org", "@graph": nodes}],
+                                                   limit=60_000)
+        self.assertEqual(([n["@id"] for n in kept], dropped), (["#n0", "#n2"], 1))
+        kept, dropped = schema_markup.capped_nodes(nodes, limit=1_000)
+        self.assertEqual(([n["@id"] for n in kept], dropped), (["#n0"], 2))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,9 +21,13 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   ReplacedDefaultTypes,
+  SchemaEntities,
+  SchemaOmitted,
   SchemaPlaceholders,
   SchemaProblems,
-  TypeRow,
+  SchemaScriptView,
+  SchemaStaleNotice,
+  SchemaTargetInfo,
 } from "@/components/livegang/SchemaMarkupParts"
 import { Pill, type Tone } from "@/components/livegang/shared"
 import {
@@ -84,6 +88,11 @@ function newEntry(page: LaunchScanPage): Entry {
     place: "idle",
     placeError: null,
   }
+}
+
+/** Stap 1 maakt een voorstel als er geen is, of als de typekeuze na het voorstel is gewijzigd. */
+function needsGeneration(result: SchemaMarkupResponse | null) {
+  return !result || !!result.stale
 }
 
 function reviewOf(e: Entry): SchemaReviewStatus {
@@ -214,6 +223,8 @@ export function SchemaBulkDialog({
   const [skippedGenerate, setSkippedGenerate] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genIds, setGenIds] = useState<string[]>([])
+  /** Pagina's uit stap 1 waarvan een verouderd voorstel opnieuw is (of wordt) gemaakt. */
+  const [regenIds, setRegenIds] = useState<string[]>([])
   const [placing, setPlacing] = useState(false)
   const [placeIds, setPlaceIds] = useState<string[]>([])
   const [stopping, setStopping] = useState(false)
@@ -275,12 +286,13 @@ export function SchemaBulkDialog({
         })
         for (const item of data.items) if (item.result) onResult(item.page_id, item.result)
         setLoaded(true)
-        const missing = order.filter((id) => !byId.get(id)?.result)
-        if (missing.length === 0) {
+        // Zonder voorstel, of met een voorstel van vóór een gewijzigde typekeuze (dat wordt opnieuw gemaakt).
+        const todo = order.filter((id) => needsGeneration(byId.get(id)?.result ?? null))
+        if (todo.length === 0) {
           setSkippedGenerate(true)
           setStep("review")
         } else {
-          void runGeneration(missing)
+          void runGeneration(todo, new Set(todo.filter((id) => !!byId.get(id)?.result?.stale)))
         }
       },
       (err: unknown) => {
@@ -310,13 +322,18 @@ export function SchemaBulkDialog({
     loadOverview()
   }
 
-  async function runGeneration(ids: string[]) {
+  /**
+   * Maakt voorstellen voor `ids`. Pagina's in `regenerateIds` hebben een verouderd voorstel (`stale`) en
+   * worden echt opnieuw gemaakt; de rest krijgt een opgeslagen voorstel terug of een nieuw.
+   */
+  async function runGeneration(ids: string[], regenerateIds: Set<string>) {
     if (ids.length === 0) return
     stopRef.current = false
     setStopping(false)
     setGenerating(true)
     setStep("generate")
     setGenIds((current) => [...current, ...ids.filter((id) => !current.includes(id))])
+    setRegenIds((current) => [...current, ...[...regenerateIds].filter((id) => !current.includes(id))])
     patchMany(ids, () => ({ gen: "wait", genError: null }))
 
     let cursor = 0
@@ -326,7 +343,7 @@ export function SchemaBulkDialog({
         const id = ids[cursor++]
         patch(id, { gen: "busy" })
         try {
-          const result = await createSchemaMarkup(scanId, id, false)
+          const result = await createSchemaMarkup(scanId, id, regenerateIds.has(id))
           onResult(id, result)
           patch(id, { result, gen: "done", genError: null })
         } catch (err) {
@@ -435,7 +452,10 @@ export function SchemaBulkDialog({
 
   const genList = genIds.map((id) => entries[id]).filter((e): e is Entry => !!e)
   const genDone = genList.filter((e) => e.gen === "done" || e.gen === "error").length
-  const missingIds = list.filter((e) => !e.result && e.gen !== "busy" && e.gen !== "wait").map((e) => e.id)
+  const missingIds = list
+    .filter((e) => needsGeneration(e.result) && e.gen !== "busy" && e.gen !== "wait")
+    .map((e) => e.id)
+  const missingStaleIds = missingIds.filter((id) => !!entries[id]?.result?.stale)
   const hadProposalCount = list.filter((e) => e.result && e.gen === "idle").length
 
   const placeList = placeIds.map((id) => entries[id]).filter((e): e is Entry => !!e)
@@ -606,8 +626,10 @@ export function SchemaBulkDialog({
                 <>
                   <p className="text-sm text-muted-foreground">
                     {genIds.length > 0
-                      ? `Voorstellen maken voor ${genIds.length} pagina's zonder voorstel, maximaal ${GENERATE_CONCURRENCY} tegelijk.`
+                      ? `Voorstellen maken voor ${genIds.length} pagina's zonder actueel voorstel, maximaal ${GENERATE_CONCURRENCY} tegelijk.`
                       : "Alle pagina's hebben al een voorstel."}
+                    {regenIds.length > 0 &&
+                      ` Bij ${regenIds.length} daarvan zijn de schema-types gewijzigd na het vorige voorstel; die worden opnieuw gemaakt.`}
                     {hadProposalCount > 0 && ` ${hadProposalCount} pagina's hadden al een voorstel en worden niet opnieuw gemaakt.`}
                   </p>
                   {genIds.length > 0 && <ProgressBar done={genDone} total={genIds.length} />}
@@ -637,8 +659,14 @@ export function SchemaBulkDialog({
                     ) : (
                       <>
                         {missingIds.length > 0 && (
-                          <Button size="sm" variant="outline" onClick={() => void runGeneration(missingIds)}>
-                            <RefreshCw /> Ontbrekende voorstellen maken ({missingIds.length})
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void runGeneration(missingIds, new Set(missingStaleIds))}
+                          >
+                            <RefreshCw />{" "}
+                            {missingStaleIds.length > 0 ? "Ontbrekende en verouderde voorstellen maken" : "Ontbrekende voorstellen maken"}{" "}
+                            ({missingIds.length})
                           </Button>
                         )}
                         <Button size="sm" onClick={() => setStep("review")}>
@@ -978,17 +1006,17 @@ function ReviewPane({
               </div>
             )}
 
-            {(result.existing_types ?? []).length > 0 && (
-              <TypeRow label="Staat al op de pagina (niet herhaald):" types={result.existing_types} tone="muted" />
-            )}
-            {result.types.length > 0 && <TypeRow label="Nieuw in dit blok:" types={result.types} tone="blue" />}
+            <SchemaStaleNotice stale={result.stale} />
+
+            <SchemaTargetInfo result={result} />
+            <SchemaEntities result={result} />
 
             <SchemaPlaceholders placeholders={result.placeholders} />
             <SchemaProblems problems={result.problems} />
 
-            <pre className="overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs">
-              {result.script}
-            </pre>
+            <SchemaScriptView key={entry.id} result={result} />
+
+            <SchemaOmitted omitted={result.omitted} />
 
             {result.notes && <p className="text-xs text-muted-foreground">{result.notes}</p>}
 

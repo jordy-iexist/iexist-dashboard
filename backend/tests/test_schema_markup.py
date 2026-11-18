@@ -394,7 +394,7 @@ class GenerateSchemaMarkupTest(_Base):
         self.assertEqual(agent.max_output_tokens, 20000)
         schema = agent.output_schema
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
-        self.assertEqual(set(schema["required"]), {"jsonld", "types", "placeholders", "notes"})
+        self.assertEqual(set(schema["required"]), {"jsonld", "types", "placeholders", "omitted", "notes"})
         self.assertFalse(schema["additionalProperties"])
 
     def test_page_list_item_has_timestamp_but_not_content(self):
@@ -432,7 +432,10 @@ class SchemaMarkupEndpointTest(_Base):
         self.assertEqual(set(body), {"script", "types", "placeholders", "notes", "problems", "generated_at",
                                      "cached", "nothing_missing", "existing_types", "placement", "can_place",
                                      "place_blocked_reason", "replaces_default_types", "review_status",
-                                     "reviewed_at"})
+                                     "reviewed_at", "target_types", "target_types_source", "stale", "omitted",
+                                     "page_graph", "full_script"})
+        self.assertEqual((body["target_types"], body["target_types_source"], body["stale"]),
+                         (["Service", "BreadcrumbList", "FAQPage"], "auto", False))
         self.assertEqual((body["review_status"], body["reviewed_at"]), ("pending", None))
         self.assertTrue(body["script"].startswith('<script type="application/ld+json">'))
         self.assertFalse(body["cached"])
@@ -514,6 +517,141 @@ class SchemaMarkupEndpointTest(_Base):
             response = self.client.post(self.path, json={})
         self.assertEqual(response.status_code, 404, response.text)
         self.assertIn("verwijderd", response.json()["detail"])
+
+
+# --- rijkere entiteiten -----------------------------------------------------------------------
+
+BLOG_URL = "https://www.klant.nl/blog/nieuw-dak/"
+BLOG_META = (
+    '<meta property="article:published_time" content="2025-03-01T10:00:00+01:00" />'
+    '<meta property="article:modified_time" content="2025-04-02T08:30:00+01:00" />'
+    '<meta property="og:image" content="https://www.klant.nl/wp-content/uploads/dak-groot.jpg" />'
+    '<meta name="author" content="Jan Jansen" />'
+    '<meta name="twitter:label1" content="Geschreven door" /><meta name="twitter:data1" content="Jan Jansen" />'
+    '<meta name="twitter:label2" content="Leestijd" /><meta name="twitter:data2" content="3 minuten" />'
+)
+
+
+def _blog_html(*, organization: bool = False) -> str:
+    graph = [{"@type": "WebPage", "@id": f"{BLOG_URL}#webpage", "url": BLOG_URL, "name": "Nieuw dak"}]
+    if organization:
+        graph.insert(0, {"@type": "Organization", "@id": "https://www.klant.nl/#organization", "name": "Klant BV"})
+    script = f'<script type="application/ld+json">{json.dumps({"@context": "https://schema.org", "@graph": graph})}</script>'
+    return (f"<html><head><title>Nieuw dak</title>{BLOG_META}{script}</head><body><main><h1>Nieuw dak</h1>"
+            '<p>Geplaatst op <time datetime="2025-03-01">1 maart 2025</time>. Een nieuw dak gaat lang mee.</p>'
+            "</main></body></html>")
+
+
+BLOG_JSONLD = {"@context": "https://schema.org", "@graph": [
+    {"@type": "BlogPosting", "@id": f"{BLOG_URL}#blogposting", "headline": "Nieuw dak",
+     "datePublished": "2025-03-01T10:00:00+01:00", "author": {"@type": "Person", "name": "Jan Jansen"},
+     "publisher": {"@id": "https://www.klant.nl/#organization"}},
+    {"@type": "Organization", "@id": "https://www.klant.nl/#organization", "name": "Klant BV"},
+]}
+
+
+class RicherEntitiesTest(_Base):
+    def setUp(self):
+        super().setUp()
+        self.page.url = BLOG_URL
+        self.page.path = "/blog/nieuw-dak/"
+        self.page.page_type = "blog"
+        self.home = LaunchScanPage(
+            id=str(uuid.uuid4()), scan_id=self.scan.id, url="https://www.klant.nl/", path="/", status_code=200,
+            page_type="home", created_at=NOW,
+            jsonld=[{"@type": "WebSite", "@id": "https://www.klant.nl/#website"},
+                    {"@type": "Organization", "@id": "https://www.klant.nl/#organization", "name": "Klant BV",
+                     "url": "https://www.klant.nl/",
+                     "logo": {"@type": "ImageObject", "url": "https://www.klant.nl/logo.png"}}],
+        )
+        self.db.add(self.home)
+        self.db.commit()
+
+    def _generate(self, html: str, output: dict | None = None):
+        output = output or {**_agent_output(BLOG_JSONLD, placeholders=[]), "omitted": []}
+        with patch(FETCH, return_value=(html, BLOG_URL)), patch(RUN_AGENT, return_value=_result(output)) as run:
+            result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1",
+                                                          regenerate=True)
+        return result, run.call_args.kwargs["input"]
+
+    def test_publication_facts_from_html_in_brief(self):
+        _, brief = self._generate(_blog_html())
+        self.assertIn("Publicatiegegevens uit de HTML:", brief)
+        self.assertIn("- Gepubliceerd (article:published_time): 2025-03-01T10:00:00+01:00", brief)
+        self.assertIn("- Gewijzigd (article:modified_time): 2025-04-02T08:30:00+01:00", brief)
+        self.assertIn("- Hoofdafbeelding (og:image): https://www.klant.nl/wp-content/uploads/dak-groot.jpg", brief)
+        self.assertIn("- Auteur (meta author): Jan Jansen", brief)
+        self.assertIn('- Auteur (twitter:data1, "Geschreven door"): Jan Jansen', brief)
+        self.assertNotIn("3 minuten", brief.split("Publicatiegegevens uit de HTML:")[1].split("\n\n")[0])
+        self.assertIn("- Datums in <time datetime>: 2025-03-01", brief)
+        # Geen gekoppelde WordPress-site: geen WordPress-feiten.
+        self.assertNotIn("uit WordPress", brief)
+
+    def test_without_facts_no_section(self):
+        facts = schema_markup.analyze_page(_html(), URL, "klant.nl")
+        self.assertEqual(facts.publication, [])
+        brief = schema_markup.page_brief(facts, page_type="dienst", targets=["Service"], customer=None)
+        self.assertNotIn("Publicatiegegevens", brief)
+        self.assertNotIn("Organisatie van de site", brief)
+
+    def test_home_organization_when_page_has_none(self):
+        _, brief = self._generate(_blog_html())
+        section = brief.split("Organisatie van de site (van de homepage; staat NIET op deze pagina):")[1]
+        self.assertIn("- @id: https://www.klant.nl/#organization", section)
+        self.assertIn("- name: Klant BV", section)
+        self.assertIn("- url: https://www.klant.nl/", section)
+        self.assertIn("- logo: https://www.klant.nl/logo.png", section)
+        self.assertIn("publisher of provider", section)
+
+    def test_home_organization_from_root_of_same_host(self):
+        # De hoofdpagina van het eigen domein is als "landing" ingedeeld; de "home"-rij is een ander
+        # subdomein zonder organisatie. De organisatie komt dan van de hoofdpagina van het eigen domein.
+        self.home.page_type = "landing"
+        self.db.add(LaunchScanPage(id=str(uuid.uuid4()), scan_id=self.scan.id, url="https://app.klant.nl/",
+                                   path="/", status_code=200, page_type="home", created_at=NOW, jsonld=[]))
+        self.db.commit()
+        _, brief = self._generate(_blog_html())
+        self.assertIn("- @id: https://www.klant.nl/#organization", brief)
+
+    def test_no_home_organization_when_page_has_one(self):
+        _, brief = self._generate(_blog_html(organization=True))
+        self.assertNotIn("Organisatie van de site", brief)
+
+    def test_no_home_organization_without_home_row(self):
+        self.db.delete(self.db.get(LaunchScanPage, self.home.id))
+        self.db.commit()
+        _, brief = self._generate(_blog_html())
+        self.assertNotIn("Organisatie van de site", brief)
+
+    def test_omitted_stored_and_returned(self):
+        output = {**_agent_output(BLOG_JSONLD, placeholders=[]),
+                  "omitted": ["BlogPosting.dateModified", "BlogPosting.image", "geen eigenschap",
+                              "BlogPosting.dateModified"]}
+        result, _ = self._generate(_blog_html(), output)
+        self.assertEqual(result.omitted, ["BlogPosting.dateModified", "BlogPosting.image"])
+        self.assertEqual(self.fresh_page().schema_suggestion["omitted"], result.omitted)
+        self.assertEqual(schema_markup.stored_result(self.fresh_page()).omitted, result.omitted)
+
+    def test_requirements_for_types_without_rules(self):
+        line = schema_markup._requirements("TouristAttraction")
+        self.assertIn("door Google gedocumenteerde verplichte en aanbevolen eigenschappen", line)
+        self.assertNotIn("verplicht: name", line)
+        # Nieuwe profielen en een LocalBusiness-subtype krijgen het LocalBusiness-profiel.
+        for type_name in ("LocalBusiness", "HowTo", "Event", "VideoObject", "Review", "Course",
+                          "SoftwareApplication", "Recipe"):
+            self.assertIn(type_name, schema_markup._TYPE_HINTS)
+        self.assertIn("openingHoursSpecification", schema_markup._requirements("Plumber"))
+        self.assertIn("datePublished", schema_markup._requirements("NewsArticle"))
+        # Bestaande regels blijven.
+        self.assertTrue(schema_markup._requirements("Service").startswith("verplicht: name of serviceType"))
+        self.assertTrue(schema_markup._requirements("Brand").startswith("verplicht: name (geen vaste regels)"))
+
+    def test_html_extract_meta_facts(self):
+        from app.features.launch_checklist.services.html_extract import extract_page
+        page = extract_page(_blog_html())
+        self.assertEqual(page.meta_facts["article:published_time"], "2025-03-01T10:00:00+01:00")
+        self.assertEqual(page.meta_facts["twitter:data1"], "Jan Jansen")
+        self.assertEqual(page.time_datetimes, ["2025-03-01"])
 
 
 if __name__ == "__main__":

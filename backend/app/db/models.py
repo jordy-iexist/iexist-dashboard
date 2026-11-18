@@ -1012,6 +1012,9 @@ class LaunchScanPage(Base):
     schema_suggestion_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Eigen keuze van schema-types voor "Maak schema" (lijst met typenamen); None = automatisch
+    # op paginatype. Gaat niet mee naar een rescan.
+    schema_target_types: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

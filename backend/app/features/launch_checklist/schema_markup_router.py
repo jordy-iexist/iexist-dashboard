@@ -11,6 +11,10 @@ collega keurt elk voorstel goed of af (`…/schema-markup/review`); bulkplaatsen
 `require_approved`, zodat er niets op de klantsite komt zonder goedkeuring van precies dat
 voorstel. `…/schema-markup/overview` geeft de opgeslagen voorstellen van meerdere pagina's
 (alleen database).
+
+Per pagina kan een collega de te maken schema-types zelf kiezen
+(`PUT …/scans/{scan_id}/schema-markup/target-types`, alleen database). Een gewijzigde keuze laat
+voorstel, beoordeling en plaatsing staan; de response meldt dan `stale` tot er opnieuw is gegenereerd.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.dependencies import require_user_id
 from app.db.models import LaunchScan, LaunchScanPage
@@ -35,6 +40,8 @@ from app.features.launch_checklist.services.rankmath_schema import (
     review_schema,
 )
 from app.features.launch_checklist.services.schema_markup import (
+    MAX_TARGET_TYPES,
+    TYPE_NAME_RE,
     SchemaMarkupError,
     SchemaMarkupPageGoneError,
     SchemaMarkupResult,
@@ -66,6 +73,35 @@ class SchemaOverviewRequest(BaseModel):
     page_ids: list[str]
 
 
+MAX_TARGET_TYPE_PAGES = 200
+
+
+class SchemaTargetTypesRequest(BaseModel):
+    page_ids: list[str]
+    # Schema.org-typenamen; null of [] = automatisch op paginatype.
+    types: list[str] | None = None
+
+
+class SchemaTargetTypesPage(BaseModel):
+    page_id: str
+    schema_target_types: list[str] | None = None
+
+
+class SchemaTargetTypesResponse(BaseModel):
+    updated: int
+    pages: list[SchemaTargetTypesPage]
+
+
+class SchemaGraphEntity(BaseModel):
+    types: list[str]
+    id: str | None = None
+    # existing = staat er al en blijft; new = uit het voorstel; lapses = standaardschema van Rank Math
+    # dat bij plaatsen vervalt.
+    status: Literal["existing", "new", "lapses"]
+    # Namen van de eigenschappen (zonder @-sleutels).
+    properties: list[str] = []
+
+
 class SchemaMarkupResponse(BaseModel):
     # Volledig <script type="application/ld+json">-blok; leeg als er niets ontbreekt.
     script: str
@@ -93,6 +129,17 @@ class SchemaMarkupResponse(BaseModel):
     review_status: Literal["pending", "approved", "rejected"] = "pending"
     # Wanneer goed- of afgekeurd; null bij "pending".
     reviewed_at: datetime | None = None
+    # Types waarvoor het voorstel is gemaakt (zonder voorstel: wat gemaakt zou worden).
+    target_types: list[str] = []
+    target_types_source: Literal["manual", "auto"] = "auto"
+    # Er is een voorstel, maar de typekeuze van de pagina is daarna gewijzigd.
+    stale: bool = False
+    # Aanbevolen eigenschappen die niet in te vullen waren ("Type.eigenschap").
+    omitted: list[str] = []
+    # De entiteiten van de pagina na plaatsen.
+    page_graph: list[SchemaGraphEntity] = []
+    # Bestaande JSON-LD (zonder wat vervalt) plus het nieuwe blok als één <script>; "" als onbekend.
+    full_script: str = ""
 
 
 class SchemaPlacement(BaseModel):
@@ -144,6 +191,12 @@ def _response(result: SchemaMarkupResult, state: PlacementState) -> SchemaMarkup
         replaces_default_types=state.replaces_default_types,
         review_status=state.review_status,
         reviewed_at=state.reviewed_at,
+        target_types=result.target_types,
+        target_types_source=result.target_types_source,
+        stale=result.stale,
+        omitted=result.omitted,
+        page_graph=[SchemaGraphEntity(**row) for row in result.page_graph],
+        full_script=result.full_script,
     )
 
 
@@ -316,3 +369,64 @@ def schema_markup_overview(
             result=_response(result, placement_state(db, page, user_id)) if result is not None else None,
         ))
     return SchemaOverviewResponse(items=items)
+
+
+def _target_types_choice(types: list[str] | None) -> list[str] | None:
+    """Gevalideerde, ontdubbelde keuze; None = automatisch. Gooit HTTPException 400."""
+    if types is None:
+        return None
+    chosen: list[str] = []
+    for raw in types:
+        name = str(raw).strip()
+        if not TYPE_NAME_RE.match(name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ongeldige naam van een schema-type: \"{str(raw)[:80]}\". Gebruik de naam van een "
+                "schema.org-type, bijvoorbeeld LocalBusiness of HowTo.",
+            )
+        if name not in chosen:
+            chosen.append(name)
+    if len(chosen) > MAX_TARGET_TYPES:
+        raise HTTPException(status_code=400, detail=f"Kies maximaal {MAX_TARGET_TYPES} schema-types per pagina.")
+    return chosen or None
+
+
+@router.put("/scans/{scan_id}/schema-markup/target-types", response_model=SchemaTargetTypesResponse)
+def set_schema_target_types(
+    scan_id: str,
+    payload: SchemaTargetTypesRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Zet de eigen keuze van schema-types voor één of meer pagina's (alleen database).
+
+    `types` null of [] = terug naar automatisch (paginatype). Pagina's die niet bestaan of niet bij de
+    scan horen worden overgeslagen. Een bestaand voorstel, de beoordeling en de plaatsing blijven staan;
+    het voorstel geldt daarna als `stale` tot er opnieuw is gegenereerd.
+    """
+    if len(payload.page_ids) > MAX_TARGET_TYPE_PAGES:
+        raise HTTPException(status_code=400,
+                            detail=f"Stel de schema-types voor maximaal {MAX_TARGET_TYPE_PAGES} pagina's tegelijk in.")
+    choice = _target_types_choice(payload.types)
+    page_ids = list(dict.fromkeys(payload.page_ids))
+    scan = db.get(LaunchScan, scan_id)
+    scan_ids = {scan_id} | ({scan.source_scan_id} if scan is not None and scan.source_scan_id else set())
+    rows = (
+        db.query(LaunchScanPage)
+        .filter(LaunchScanPage.id.in_(page_ids), LaunchScanPage.scan_id.in_(scan_ids))
+        .all()
+    ) if page_ids else []
+    by_id = {row.id: row for row in rows}
+    pages: list[SchemaTargetTypesPage] = []
+    for page_id in page_ids:
+        page = by_id.get(page_id)
+        if page is None:
+            continue
+        page.schema_target_types = list(choice) if choice else None
+        pages.append(SchemaTargetTypesPage(page_id=page.id, schema_target_types=choice))
+    try:
+        db.commit()
+    except StaleDataError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=_PAGE_GONE) from exc
+    return SchemaTargetTypesResponse(updated=len(pages), pages=pages)

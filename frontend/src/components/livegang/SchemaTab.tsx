@@ -1,17 +1,19 @@
 "use client"
 
-import { Braces, ListChecks, Search } from "lucide-react"
+import { Braces, ListChecks, Search, Shapes } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SchemaBulkDialog } from "@/components/livegang/SchemaBulkDialog"
 import { SchemaMarkupDialog } from "@/components/livegang/SchemaMarkupDialog"
+import { SchemaTypePicker } from "@/components/livegang/SchemaTypePicker"
 import { Pill } from "@/components/livegang/shared"
 import {
   apiFetch,
   EXPECTED_SCHEMA,
   PAGE_TYPE_LABELS,
+  setSchemaTargetTypes,
   type LaunchScanPage,
   type SchemaMarkupResponse,
 } from "@/lib/launch-checklist"
@@ -25,6 +27,39 @@ const MAX_BULK = 200
 function hasSchema(page: LaunchScanPage, expected: string) {
   const types = page.schema_all ?? []
   return expected.split("|").some((t) => types.includes(t))
+}
+
+/** Automatische schema-types voor een paginatype, leesbaar ("BlogPosting|Article" wordt "BlogPosting / Article"). */
+function autoTypesFor(pageType: string | null) {
+  return (EXPECTED_SCHEMA[pageType ?? "overig"] ?? []).map((t) => t.replace("|", " / "))
+}
+
+/** Eigen keuze van een pagina; null bij automatisch (of een oude backend zonder het veld). */
+function targetTypesOf(page: LaunchScanPage) {
+  return page.schema_target_types?.length ? page.schema_target_types : null
+}
+
+/** Inhoud van de knop in de kolom "Te maken": eigen keuze als chips, anders de automatische types in grijs. */
+function TargetTypesCell({ page }: { page: LaunchScanPage }) {
+  const own = targetTypesOf(page)
+  if (own) {
+    return (
+      <span className="flex flex-wrap gap-1">
+        {own.map((t) => (
+          <Pill key={t} tone="blue">
+            {t}
+          </Pill>
+        ))}
+      </span>
+    )
+  }
+  const auto = autoTypesFor(page.page_type)
+  return (
+    <span className="flex flex-wrap items-center gap-1 text-muted-foreground">
+      <span className="text-xs">{auto.length ? auto.join(" · ") : "geen vaste types"}</span>
+      <span className="text-[10px] italic">automatisch</span>
+    </span>
+  )
 }
 
 function CoverageCell({ have, total }: { have: number; total: number }) {
@@ -59,6 +94,7 @@ export function SchemaTab({
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null)
   const [bulkPages, setBulkPages] = useState<LaunchScanPage[] | null>(null)
+  const [targetSaved, setTargetSaved] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -175,12 +211,31 @@ export function SchemaTab({
   function clearSelection() {
     setSelected(new Set())
     setSelectionNotice(null)
+    setTargetSaved(null)
   }
+
+  // Pagina's in de selectie (in lijstvolgorde) en hun gezamenlijke keuze; undefined = verschillende keuzes.
+  const selectedPages = useMemo(() => (pages ?? []).filter((p) => p.indexable && selected.has(p.id)), [pages, selected])
+  const selectionTargets = useMemo(() => {
+    const keys = new Set(selectedPages.map((p) => JSON.stringify(targetTypesOf(p))))
+    return keys.size === 1 ? (targetTypesOf(selectedPages[0]) ?? null) : undefined
+  }, [selectedPages])
 
   function openBulk() {
     // In lijstvolgorde; alleen pagina's die (nog) indexeerbaar in de lijst staan.
     const list = (pages ?? []).filter((p) => p.indexable && selected.has(p.id))
     if (list.length) setBulkPages(list)
+  }
+
+  /** Zet de eigen schema-types (null = automatisch) voor één of meer pagina's en werkt de rijen bij. Gooit bij een fout. */
+  async function applyTargetTypes(pageIds: string[], types: string[] | null) {
+    const data = await setSchemaTargetTypes(sourceScanId, pageIds, types)
+    const byId = new Map<string, string[] | null>(pageIds.map((id) => [id, types]))
+    for (const p of data?.pages ?? []) byId.set(p.page_id, p.schema_target_types)
+    setPages((current) =>
+      current && current.map((p) => (byId.has(p.id) ? { ...p, schema_target_types: byId.get(p.id) ?? null } : p))
+    )
+    return data?.updated ?? pageIds.length
   }
 
   async function changeType(page: LaunchScanPage, pageType: string) {
@@ -286,7 +341,35 @@ export function SchemaTab({
             <Button size="sm" variant="ghost" className="h-7 px-2" onClick={clearSelection}>
               Selectie wissen
             </Button>
-            <Button size="sm" className="ml-auto" onClick={openBulk}>
+            {targetSaved && <span className="text-xs text-muted-foreground">{targetSaved}</span>}
+            <span className="ml-auto" />
+            <SchemaTypePicker
+              value={selectionTargets}
+              heading={`Schema-types voor ${selectedPages.length} pagina's`}
+              onApply={async (types) => {
+                const updated = await applyTargetTypes(
+                  selectedPages.map((p) => p.id),
+                  types
+                )
+                setTargetSaved(
+                  types
+                    ? `Schema-types ingesteld voor ${updated} pagina's.`
+                    : `${updated} pagina's staan weer op automatisch.`
+                )
+              }}
+              autoHint="Automatisch volgen de types uit het paginatype van elke pagina (kolom Te maken)."
+              note={
+                selectionTargets === undefined
+                  ? "De geselecteerde pagina's hebben nu verschillende keuzes; Toepassen zet deze keuze voor allemaal."
+                  : "Bestaande voorstellen blijven staan; genereer daarna opnieuw voor de nieuwe types."
+              }
+              trigger={
+                <Button size="sm" variant="outline">
+                  <Shapes /> Schema-types voor selectie
+                </Button>
+              }
+            />
+            <Button size="sm" onClick={openBulk}>
               <ListChecks /> Schema genereren en controleren
             </Button>
           </div>
@@ -314,6 +397,9 @@ export function SchemaTab({
                 <th className="px-3 py-2 text-right font-medium" title="Klikdiepte vanaf de homepage">Diepte</th>
                 <th className="px-3 py-2 text-right font-medium" title="Aantal pagina's dat hiernaar linkt">Inlinks</th>
                 <th className="px-3 py-2 text-left font-medium">Schema</th>
+                <th className="px-3 py-2 text-left font-medium" title="Schema-types die bij Maak schema gemaakt worden">
+                  Te maken
+                </th>
                 <th className="px-3 py-2">
                   <span className="sr-only">Acties</span>
                 </th>
@@ -378,6 +464,38 @@ export function SchemaTab({
                         ))}
                       {page.schema_all !== null && page.schema_all.length === 0 && <Pill tone="red">Geen schema</Pill>}
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {page.indexable && (
+                      <SchemaTypePicker
+                        value={targetTypesOf(page)}
+                        heading="Schema-types voor deze pagina"
+                        onApply={async (types) => {
+                          await applyTargetTypes([page.id], types)
+                        }}
+                        autoHint={
+                          <>
+                            Automatisch voor {PAGE_TYPE_LABELS[page.page_type ?? "overig"] ?? page.page_type}:{" "}
+                            {autoTypesFor(page.page_type).join(", ") || "geen vaste types"}.
+                          </>
+                        }
+                        note={
+                          page.schema_suggestion_at
+                            ? "Het bestaande voorstel blijft staan; genereer daarna opnieuw voor de nieuwe types."
+                            : undefined
+                        }
+                        trigger={
+                          <button
+                            type="button"
+                            className="block max-w-56 rounded-md px-1.5 py-1 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            aria-label={`Schema-types voor ${page.path} kiezen`}
+                            title="Schema-types kiezen"
+                          >
+                            <TargetTypesCell page={page} />
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right">
                     {page.indexable && page.schema_review_status === "approved" && (
