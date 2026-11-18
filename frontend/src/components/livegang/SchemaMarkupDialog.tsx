@@ -171,12 +171,14 @@ export function SchemaMarkupDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
+      {/* Nooit hoger dan het scherm: kop, bevestiging en knoppen blijven staan, het middendeel scrolt. */}
+      <DialogContent className="flex max-h-[92dvh] flex-col sm:max-w-3xl">
+        <DialogHeader className="shrink-0 pr-6">
           <DialogTitle>Schema markup</DialogTitle>
           <DialogDescription className="break-all">{page.path || page.url}</DialogDescription>
         </DialogHeader>
 
+        <div className="-mr-3 min-h-0 flex-1 space-y-4 overflow-y-auto pr-3">
         {loading && (
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-6 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -240,7 +242,7 @@ export function SchemaMarkupDialog({
 
             <SchemaEntities result={result} />
 
-            <SchemaScriptView result={result} preClassName="max-h-[50vh]" />
+            <SchemaScriptView result={result} preClassName="max-h-[45dvh]" />
 
             <SchemaOmitted omitted={result.omitted} />
 
@@ -256,9 +258,10 @@ export function SchemaMarkupDialog({
         {!loading && blockedReason && (
           <p className="text-xs text-muted-foreground">{blockedReason}</p>
         )}
+        </div>
 
         {!loading && confirm && (
-          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="shrink-0 space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             {confirm === "place" ? (
               <>
                 <p className="font-medium">Schema op de live site zetten?</p>
@@ -298,9 +301,9 @@ export function SchemaMarkupDialog({
           </div>
         )}
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 
-        <DialogFooter className="sm:flex-wrap sm:items-center">
+        <DialogFooter className="shrink-0 sm:flex-wrap sm:items-center">
           {result && !loading && (
             <p className="text-xs text-muted-foreground sm:mr-auto">
               {result.nothing_missing ? "Gecontroleerd" : result.cached ? "Opgeslagen versie" : "Nieuw gemaakt"} ·{" "}

@@ -499,13 +499,27 @@ def target_types(page_type: str | None, existing_types: set[str], signals: dict[
     return plan_targets(page_type, existing_types, signals, choice)[0]
 
 
-def is_stale(suggestion: Any, choice: Any) -> bool:
-    """Er is een voorstel, maar de typekeuze van de pagina is sindsdien gewijzigd.
+def outdated_format(suggestion: Any) -> bool:
+    """Voorstel van vóór de rijkere generator: zonder bewaarde paginamarkup, dus zonder volledige weergave.
 
-    Voorstellen van vóór de eigen keuze zijn automatisch gemaakt.
+    Zo'n voorstel wordt bij openen vanzelf opnieuw gemaakt, tenzij het al beoordeeld of geplaatst is:
+    dan zou opnieuw maken die beoordeling of de koppeling met de site ongemerkt ongeldig maken.
     """
     if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
         return False
+    return "existing_nodes" not in suggestion and not suggestion.get("placement") and not suggestion.get("review")
+
+
+def is_stale(suggestion: Any, choice: Any) -> bool:
+    """Er is een voorstel, maar het moet opnieuw gemaakt worden.
+
+    Omdat de typekeuze van de pagina sindsdien is gewijzigd (voorstellen van vóór de eigen keuze zijn
+    automatisch gemaakt), of omdat het voorstel nog van vóór de rijkere generator is.
+    """
+    if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
+        return False
+    if outdated_format(suggestion):
+        return True
     made_with = normalize_choice(suggestion.get("target_choice"))
     current = normalize_choice(choice)
     return (sorted(made_with) if made_with else None) != (sorted(current) if current else None)
@@ -958,7 +972,9 @@ def generate_schema_markup(
     (transactie dicht, verbinding terug naar de pool; `page` is daarna losgekoppeld) en de
     pagina pas daarna opnieuw opgehaald om het resultaat op te slaan.
     """
-    if not regenerate and isinstance(page.schema_suggestion, dict) and page.schema_suggestion_at:
+    # Een voorstel van vóór de rijkere generator telt niet als opgeslagen versie: opnieuw maken.
+    if (not regenerate and isinstance(page.schema_suggestion, dict) and page.schema_suggestion_at
+            and not outdated_format(page.schema_suggestion)):
         return _from_stored(page.schema_suggestion, page.schema_suggestion_at, cached=True,
                             choice=page.schema_target_types)
     from app.features.launch_checklist.services import rankmath_schema  # wederzijdse import

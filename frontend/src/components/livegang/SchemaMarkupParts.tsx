@@ -231,7 +231,8 @@ type ScriptView = "new" | "full"
  * "Kopieer volledig" voor de Rich Results Test. Het nieuwe blok kopiëren blijft de taak van de dialog.
  */
 export function SchemaScriptView({ result, preClassName }: { result: SchemaMarkupResponse; preClassName?: string }) {
-  const [view, setView] = useState<ScriptView>("new")
+  // Standaard de complete markup van de pagina; zonder die gegevens valt het terug op het nieuwe blok.
+  const [view, setView] = useState<ScriptView>("full")
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const full = (result.full_script ?? "").trim()

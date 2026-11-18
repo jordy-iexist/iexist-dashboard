@@ -215,7 +215,7 @@ class GenerateWithChoiceTest(_TargetBase):
 
     def test_old_suggestion_is_auto(self):
         self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
-                    "problems": []})
+                    "problems": [], "existing_nodes": []})
         body = self.client.post(self.path, json={}).json()
         self.assertEqual((body["target_types_source"], body["stale"]), ("auto", False))
         self.assertEqual(body["target_types"], ["Service", "BreadcrumbList"])
@@ -240,11 +240,15 @@ class PureTargetTypesTest(unittest.TestCase):
         self.assertEqual(schema_markup.requested_types("blog", ["HowTo"]), ["HowTo"])
 
     def test_is_stale(self):
-        suggestion = {"jsonld": {"@type": "Service"}, "target_choice": ["A", "B"]}
+        suggestion = {"jsonld": {"@type": "Service"}, "target_choice": ["A", "B"], "existing_nodes": []}
         self.assertFalse(schema_markup.is_stale(suggestion, ["B", "A"]))
         self.assertTrue(schema_markup.is_stale(suggestion, None))
-        self.assertTrue(schema_markup.is_stale({"jsonld": {"@type": "Service"}}, ["A"]))
-        self.assertFalse(schema_markup.is_stale({"jsonld": {"@type": "Service"}}, []))
+        current = {"jsonld": {"@type": "Service"}, "existing_nodes": []}
+        self.assertTrue(schema_markup.is_stale(current, ["A"]))
+        self.assertFalse(schema_markup.is_stale(current, []))
+        # Voorstel van vóór de rijkere generator: verouderd, tenzij al beoordeeld of geplaatst.
+        self.assertTrue(schema_markup.is_stale({"jsonld": {"@type": "Service"}}, None))
+        self.assertFalse(schema_markup.is_stale({"jsonld": {"@type": "Service"}, "review": {"status": "approved"}}, None))
         self.assertFalse(schema_markup.is_stale(None, ["A"]))
 
 

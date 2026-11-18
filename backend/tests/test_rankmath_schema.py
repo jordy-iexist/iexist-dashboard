@@ -52,7 +52,7 @@ def _graph(*nodes) -> dict:
 
 def _suggestion(jsonld=None, **extra) -> dict:
     return {"jsonld": jsonld or _graph(SERVICE, BREADCRUMB), "types": ["Service", "BreadcrumbList"],
-            "placeholders": [], "notes": "", "problems": [], **extra}
+            "placeholders": [], "notes": "", "problems": [], "existing_nodes": [], **extra}
 
 
 class FakeWordPress:
@@ -748,7 +748,9 @@ class WordPressFactsTest(_Endpoint):
         self.assertEqual([n["@type"] for n in data["@graph"]].count("Service"), 1)
 
     def test_old_suggestion_without_stored_markup(self):
-        self.store(_suggestion())
+        # Voorstel van vóór de rijkere generator dat al beoordeeld is: blijft staan (niet opnieuw gemaakt).
+        old = {k: v for k, v in _suggestion().items() if k != "existing_nodes"}
+        self.store({**old, "review": {"status": "rejected", "jsonld_hash": "oud"}})
         body = self.client.post(self.path, json={}).json()
         self.assertTrue(body["cached"])
         self.assertEqual([(r["types"], r["status"]) for r in body["page_graph"]],

@@ -269,7 +269,7 @@ class GenerateSchemaMarkupTest(_Base):
 
     def test_old_stored_suggestion_without_existing_types(self):
         self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
-                    "problems": []})
+                    "problems": [], "existing_nodes": []})
         with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
             result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
         fetch.assert_not_called()
@@ -278,7 +278,7 @@ class GenerateSchemaMarkupTest(_Base):
 
     def test_reuses_stored_without_fetch_or_model_call(self):
         self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
-                    "problems": ["Service: mist name of serviceType"]})
+                    "problems": ["Service: mist name of serviceType"], "existing_nodes": []})
         with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
             result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
         fetch.assert_not_called()
@@ -287,6 +287,30 @@ class GenerateSchemaMarkupTest(_Base):
         self.assertEqual(result.problems, ["Service: mist name of serviceType"])
         self.assertEqual(result.generated_at.replace(tzinfo=timezone.utc), NOW)
         self.assertIn('"@type": "Service"', result.script)
+
+    def test_outdated_format_is_regenerated_on_open(self):
+        # Voorstel van vóór de rijkere generator (zonder bewaarde paginamarkup): bij openen opnieuw maken.
+        self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
+                    "problems": []})
+        self.assertTrue(schema_markup.is_stale(self.fresh_page().schema_suggestion, None))
+        with patch(FETCH, return_value=(_html(), URL)), \
+                patch(RUN_AGENT, return_value=_result(_agent_output())) as run:
+            result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+        run.assert_called_once()
+        self.assertFalse(result.cached)
+        self.assertIn("existing_nodes", self.fresh_page().schema_suggestion)
+        self.assertFalse(result.stale)
+
+    def test_outdated_format_is_kept_when_reviewed_or_placed(self):
+        # Al beoordeeld of geplaatst: niet ongemerkt opnieuw maken.
+        for extra in ({"review": {"status": "approved", "jsonld_hash": "x"}}, {"placement": {"post_id": 1}}):
+            self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
+                        "problems": [], **extra})
+            with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
+                result = schema_markup.generate_schema_markup(self.db, self.fresh_page(), user_id="user-1")
+            fetch.assert_not_called()
+            run.assert_not_called()
+            self.assertTrue(result.cached)
 
     def test_nothing_missing_skips_model_and_stores_nothing(self):
         present = {"@context": "https://schema.org", "@graph": [
@@ -448,7 +472,7 @@ class SchemaMarkupEndpointTest(_Base):
 
     def test_old_stored_suggestion_gives_empty_existing_types(self):
         self.store({"jsonld": SERVICE_JSONLD, "types": ["Service"], "placeholders": [], "notes": "",
-                    "problems": []})
+                    "problems": [], "existing_nodes": []})
         with patch(FETCH) as fetch, patch(RUN_AGENT) as run:
             response = self.client.post(self.path, json={})
         fetch.assert_not_called()

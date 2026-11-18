@@ -231,7 +231,8 @@ export function SchemaTypePicker({
         {trigger}
       </PopoverTrigger>
       <PopoverContent
-        className="w-[22rem] space-y-2 p-3"
+        // Nooit hoger dan de ruimte die er op het scherm is; dan scrolt de inhoud.
+        className="max-h-[var(--radix-popover-content-available-height)] w-[22rem] space-y-2 overflow-y-auto p-3"
         align="start"
         onOpenAutoFocus={(e) => {
           e.preventDefault()
