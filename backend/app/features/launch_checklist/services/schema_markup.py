@@ -9,6 +9,11 @@ het blok en plakt het zelf. Er wordt niets op de klantsite geschreven.
 Per pagina kan een collega zelf de schema-types kiezen (`LaunchScanPage.schema_target_types`);
 zonder keuze volgen ze uit het paginatype. Het voorstel bewaart ook de bestaande JSON-LD van de
 pagina, zodat de response de complete markup na plaatsen kan tonen (`page_graph_of`).
+
+Een collega kan het voorstel met de hand bewerken (`edit_schema_markup`, alleen database). Zo'n voorstel
+wordt nooit vanzelf opnieuw gemaakt; alleen `regenerate` overschrijft het (en wist de bewerkt-markering).
+De brief geeft de bedrijfsgegevens van de site (pagina plus homepage) apart en volledig mee
+(`business_facts`), omdat de bestaande JSON-LD in de brief begrensd is.
 """
 from __future__ import annotations
 
@@ -179,6 +184,17 @@ class SchemaMarkupResult:
     page_graph: list[dict[str, Any]] = field(default_factory=list)
     # Bestaande nodes (zonder wat vervalt) plus de nieuwe als één <script>-blok; "" als onbekend.
     full_script: str = ""
+    # Het voorstel is daarna met de hand bewerkt (`edit_schema_markup`); wanneer.
+    edited: bool = False
+    edited_at: datetime | None = None
+
+
+class SchemaMarkupEditError(ValueError):
+    """De bewerkte JSON-LD is niet bruikbaar; de tekst is de (Nederlandse) reden."""
+
+
+class SchemaMarkupNoSuggestionError(LookupError):
+    """Er is (nog) geen voorstel om te bewerken."""
 
 
 @dataclass
@@ -521,11 +537,12 @@ def outdated_format(suggestion: Any) -> bool:
     komen ze niet als eigen schema in Rank Math; zie `split_target_entities`).
 
     Zo'n voorstel wordt bij openen vanzelf opnieuw gemaakt, tenzij het al beoordeeld of geplaatst is:
-    dan zou opnieuw maken die beoordeling of de koppeling met de site ongemerkt ongeldig maken.
+    dan zou opnieuw maken die beoordeling of de koppeling met de site ongemerkt ongeldig maken. Een met
+    de hand bewerkt voorstel ook nooit: dat gaat alleen weg met een expliciete `regenerate`.
     """
     if not isinstance(suggestion, dict) or not suggestion.get("jsonld"):
         return False
-    if suggestion.get("placement") or suggestion.get("review"):
+    if suggestion.get("placement") or suggestion.get("review") or suggestion.get("edited"):
         return False
     return "existing_nodes" not in suggestion or nested_targets(suggestion)
 
@@ -580,13 +597,8 @@ def organization_of(jsonld: Any) -> dict[str, str] | None:
     return None
 
 
-def home_organization(db: Session, page: LaunchScanPage) -> dict[str, str] | None:
-    """De Organization van de homepage in dezelfde scan, of None.
-
-    Eerst de hoofdpagina (pad "/") van hetzelfde domein als de pagina, ook als die een ander paginatype
-    kreeg (bijv. "landing"); daarna rijen met paginatype "home". Een scan kan meerdere subdomeinen
-    bevatten, en de home-rij van een ander subdomein heeft de organisatie vaak niet.
-    """
+def _home_rows(db: Session, page: LaunchScanPage) -> list[LaunchScanPage]:
+    """Kandidaat-homepages in dezelfde scan, de beste eerst (zie `home_organization`)."""
     host = urlparse(page.final_url or page.url or "").netloc.lower()
     rows = (
         db.query(LaunchScanPage)
@@ -596,11 +608,245 @@ def home_organization(db: Session, page: LaunchScanPage) -> dict[str, str] | Non
         .all()
     )
     rows.sort(key=lambda r: 0 if r.path == "/" and urlparse(r.final_url or r.url or "").netloc.lower() == host else 1)
-    for row in rows:
+    return rows
+
+
+def home_organization(db: Session, page: LaunchScanPage) -> dict[str, str] | None:
+    """De Organization van de homepage in dezelfde scan, of None.
+
+    Eerst de hoofdpagina (pad "/") van hetzelfde domein als de pagina, ook als die een ander paginatype
+    kreeg (bijv. "landing"); daarna rijen met paginatype "home". Een scan kan meerdere subdomeinen
+    bevatten, en de home-rij van een ander subdomein heeft de organisatie vaak niet.
+    """
+    for row in _home_rows(db, page):
         org = organization_of(row.jsonld)
         if org:
             return org
     return None
+
+
+def home_jsonld(db: Session, page: LaunchScanPage) -> Any:
+    """De opgeslagen JSON-LD van de homepage-rij die `home_organization` kiest, of None.
+
+    `LaunchScanPage.jsonld` kort lange teksten in, maar adressen, telefoon en dergelijke blijven heel.
+    """
+    for row in _home_rows(db, page):
+        if organization_of(row.jsonld):
+            return row.jsonld
+    return None
+
+
+# --- bedrijfsgegevens van de site ------------------------------------------------------------
+
+SOURCE_THIS_PAGE = "deze pagina"
+SOURCE_HOMEPAGE = "homepage"
+# Volgorde in de brief: wat het vaakst ontbreekt (adres) staat vooraan.
+_BUSINESS_KEYS = ("type", "@id", "name", "url", "address", "telephone", "email", "logo", "geo",
+                  "openingHoursSpecification", "openingHours", "sameAs")
+MAX_BUSINESS_CHARS = 5_000
+MAX_BUSINESS_VALUE_CHARS = 800
+# Een adres wordt nooit afgekapt tenzij het absurd lang is (meerdere vestigingen).
+MAX_BUSINESS_ADDRESS_CHARS = 3_000
+MAX_SAME_AS = 12
+_REF_DEPTH = 4
+
+
+def _id_index(value: Any) -> dict[str, dict[str, Any]]:
+    """Alle entiteiten met een @id (ook genest), per @id de uitgebreidste (meeste eigenschappen)."""
+    index: dict[str, dict[str, Any]] = {}
+
+    def walk(item: Any, depth: int) -> None:
+        if depth > 10:
+            return
+        if isinstance(item, list):
+            for v in item:
+                walk(v, depth + 1)
+        elif isinstance(item, dict):
+            node_id = _node_id(item)
+            if node_id and len(item) > 1 and len(item) > len(index.get(node_id, {})):
+                index[node_id] = item
+            for v in item.values():
+                if isinstance(v, (dict, list)):
+                    walk(v, depth + 1)
+
+    walk(value, 0)
+    return index
+
+
+def _is_ref(value: Any) -> bool:
+    return isinstance(value, dict) and bool(_node_id(value)) and set(value) <= {"@id"}
+
+
+def _resolve_refs(value: Any, index: dict[str, dict[str, Any]], depth: int = 0) -> Any:
+    """Waarde met verwijzingen ({"@id": …}) vervangen door de entiteit zelf (begrensd, zonder @context)."""
+    if depth > _REF_DEPTH:
+        return value
+    if _is_ref(value) and _node_id(value) in index:
+        value = index[_node_id(value)]
+    if isinstance(value, dict):
+        return {k: _resolve_refs(v, index, depth + 1) for k, v in value.items() if k != "@context"}
+    if isinstance(value, list):
+        return [_resolve_refs(v, index, depth + 1) for v in value]
+    return value
+
+
+def _filled(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value) and not _is_ref(value)
+    return True
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value] if value is not None else []
+
+
+def _org_candidates(parsed: Any, index: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Organization-achtige entiteiten (ook genest) met @id of name: eerst die op het hoogste niveau,
+    daarbinnen die met een adres eerst."""
+    top = flatten_jsonld(parsed or [])
+    found: list[tuple[int, dict[str, Any]]] = [(0, n) for n in top]
+    seen = {id(n) for _, n in found}
+
+    def walk(item: Any, depth: int) -> None:
+        if depth > 8:
+            return
+        if isinstance(item, list):
+            for v in item:
+                walk(v, depth + 1)
+        elif isinstance(item, dict):
+            if id(item) not in seen and item.get("@type"):
+                seen.add(id(item))
+                found.append((1, item))
+            for v in item.values():
+                if isinstance(v, (dict, list)):
+                    walk(v, depth + 1)
+
+    for node in top:
+        for v in node.values():
+            walk(v, 1)
+    orgs = [(level, n) for level, n in found
+            if any(is_org_type(t) for t in types_of(n))
+            and (_node_id(n) or (isinstance(n.get("name"), str) and n["name"].strip()))]
+    ranked = sorted(enumerate(orgs), key=lambda item: (item[1][0], 0 if _business_values(item[1][1], index)
+                                                       .get("address") else 1, item[0]))
+    return [n for _, (_, n) in ranked]
+
+
+def _business_values(node: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Bedrijfsgegevens van één organisatie-entiteit; adres, coördinaten, telefoon en openingstijden
+    ook van een Place waarnaar ze via `location` verwijst, telefoon en e-mail ook uit `contactPoint`."""
+    places = [p for p in (_resolve_refs(loc, index) for loc in _as_list(node.get("location"))) if isinstance(p, dict)]
+    contacts = [c for c in (_resolve_refs(cp, index) for cp in _as_list(node.get("contactPoint")))
+                if isinstance(c, dict)]
+
+    def pick(key: str, *, extra: list[dict[str, Any]] | None = None) -> Any:
+        for source in [node, *places, *(extra or [])]:
+            value = _resolve_refs(source.get(key), index)
+            if _filled(value):
+                return value
+        return None
+
+    values: dict[str, Any] = {"type": ", ".join(types_of(node))}
+    if _node_id(node):
+        values["@id"] = _node_id(node)
+    for key in ("name", "url"):
+        if isinstance(node.get(key), str) and node[key].strip():
+            values[key] = node[key].strip()
+    logo = _logo_url(_resolve_refs(node.get("logo"), index))
+    if logo:
+        values["logo"] = logo
+    for key in ("address", "geo", "openingHoursSpecification", "openingHours"):
+        value = pick(key)
+        if value is not None:
+            values[key] = value
+    for key in ("telephone", "email"):
+        value = pick(key, extra=contacts)
+        if value is not None:
+            values[key] = value
+    same_as = [s.strip() for s in _as_list(node.get("sameAs")) if isinstance(s, str) and s.strip()]
+    if same_as:
+        values["sameAs"] = _unique(same_as)[:MAX_SAME_AS]
+    return values
+
+
+def business_of(jsonld: Any) -> dict[str, Any] | None:
+    """Bedrijfsgegevens van de belangrijkste organisatie in de JSON-LD, of None."""
+    index = _id_index(jsonld)
+    candidates = _org_candidates(jsonld, index)
+    return _business_values(candidates[0], index) if candidates else None
+
+
+def _same_org(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    if a.get("@id") and b.get("@id") and a["@id"] == b["@id"]:
+        return True
+    name_a, name_b = str(a.get("name") or "").strip().lower(), str(b.get("name") or "").strip().lower()
+    return bool(name_a) and name_a == name_b
+
+
+def business_facts(page_jsonld: Any, home: Any) -> tuple[list[tuple[str, Any, str]], bool]:
+    """([(eigenschap, waarde, bron)], organisatie alleen op de homepage).
+
+    Eerst de gegevens van de pagina zelf, aangevuld met die van de homepage als het dezelfde organisatie
+    is (zelfde @id of naam) of de pagina er zelf geen heeft. Bron: `SOURCE_THIS_PAGE` of `SOURCE_HOMEPAGE`.
+    """
+    own = business_of(page_jsonld)
+    site = business_of(home) if home else None
+    if own and site and not _same_org(own, site):
+        site = None
+    rows: list[tuple[str, Any, str]] = []
+    for key in _BUSINESS_KEYS:
+        if own and key in own:
+            rows.append((key, own[key], SOURCE_THIS_PAGE))
+        elif site and key in site:
+            rows.append((key, site[key], SOURCE_HOMEPAGE))
+    return rows, own is None and site is not None
+
+
+def _business_value(key: str, value: Any) -> str:
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        text = ", ".join(value)
+    elif isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = str(value).strip()
+    return _clip(text, MAX_BUSINESS_ADDRESS_CHARS if key == "address" else MAX_BUSINESS_VALUE_CHARS)
+
+
+def _business_section(page_jsonld: Any, home: Any) -> list[str]:
+    """Sectie "Bedrijfsgegevens van de site" voor de brief, of [] als er geen organisatie bekend is."""
+    rows, home_only = business_facts(page_jsonld, home)
+    if not rows:
+        return []
+    lines = ["Bedrijfsgegevens van de site (volledig uit de bestaande JSON-LD, niet ingekort; bron per gegeven):"]
+    if home_only:
+        lines.append("Organisatie van de site (van de homepage; staat NIET op deze pagina):")
+    budget = MAX_BUSINESS_CHARS
+    for index, (key, value, source) in enumerate(rows):
+        line = f"- {key}: {_business_value(key, value)} (bron: {source})"
+        if len(line) > budget:
+            lines.append(f"- … nog {len(rows) - index} gegeven(s) weggelaten (te lang)")
+            break
+        lines.append(line)
+        budget -= len(line)
+    has_address = any(key == "address" for key, _, _ in rows)
+    lines.append("  Gebruik deze gegevens voor Organization, LocalBusiness (en subtypes), provider en publisher, "
+                 "ook als ze niet in de tekst van de pagina staan.")
+    if has_address:
+        lines.append("  Schrijf het adres als volledige PostalAddress (streetAddress, postalCode, addressLocality, "
+                     "addressCountry, en addressRegion als die er staat) met precies deze waarden.")
+    else:
+        lines.append("  Er staat geen adres bij de organisatie: verzin er geen (bij een verplicht adres geldt de "
+                     "regel voor plaatshouders).")
+    if home_only:
+        lines.append("  Neem deze organisatie beknopt op als eigen node in de @graph (met precies deze @id, "
+                     "name, url en logo) en verwijs ernaar als publisher of provider, omdat ze op deze pagina "
+                     "niet gedefinieerd is; schrijf je zelf een Organization of LocalBusiness, gebruik dan alle "
+                     "gegevens hierboven.")
+    return lines
 
 
 # --- brief voor de agent ---------------------------------------------------------
@@ -693,14 +939,17 @@ def page_brief(
     open_graph: Any = None,
     source: str = SOURCE_AUTO,
     wordpress: list[tuple[str, str]] | None = None,
-    organization: dict[str, str] | None = None,
+    home: Any = None,
     lapse_ids: Any = None,
 ) -> str:
     """Alle feiten van één pagina als tekstblok voor de schema-agent.
 
-    `wordpress`: publicatiegegevens uit de gekoppelde WordPress-site; `organization`: de Organization
-    van de homepage als de pagina zelf er geen heeft; `lapse_ids`: @id's van het standaardschema van
-    Rank Math dat bij plaatsen vervalt.
+    `wordpress`: publicatiegegevens uit de gekoppelde WordPress-site; `home`: de opgeslagen JSON-LD van
+    de homepage (`home_jsonld`), waarmee de bedrijfsgegevens van de pagina worden aangevuld;
+    `lapse_ids`: @id's van het standaardschema van Rank Math dat bij plaatsen vervalt.
+
+    De bestaande JSON-LD wordt begrensd meegegeven; de bedrijfsgegevens (adres, telefoon, …) staan
+    daarom apart en volledig in "Bedrijfsgegevens van de site" (`business_facts`).
     """
     content, signals = facts.content, facts.signals
     lapsing = {str(i) for i in lapse_ids or []}
@@ -763,13 +1012,10 @@ def page_brief(
     if wordpress:
         lines.append("Publicatiegegevens uit WordPress (gekoppelde site):")
         lines.extend(f"- {label}: {_clip(value)}" for label, value in wordpress)
-    if organization:
-        lines.append("Organisatie van de site (van de homepage; staat NIET op deze pagina):")
-        lines.extend(f"- {key}: {organization[key]}" for key in ("type", "@id", "name", "url", "logo")
-                     if organization.get(key))
-        lines.append("  Neem deze organisatie beknopt op als eigen node in de @graph (met precies deze @id, "
-                     "name, url en logo) en verwijs ernaar als publisher of provider, omdat ze op deze pagina "
-                     "niet gedefinieerd is.")
+    business = _business_section(facts.parsed, home)
+    if business:
+        lines.append("")
+        lines.extend(business)
 
     images = [i for i in content.images if i.get("in_content")][:MAX_IMAGES]
     if images:
@@ -1033,6 +1279,7 @@ def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool
         targets = _unique([t for node in flatten_jsonld(jsonld or []) for t in types_of(node)])
     source = stored.get("target_types_source")
     page_graph, full_script = page_graph_of(stored)
+    edited = stored.get("edited") if isinstance(stored.get("edited"), dict) else None
     return SchemaMarkupResult(
         script=build_script(jsonld) if jsonld else "",
         types=[str(t) for t in stored.get("types") or []],
@@ -1050,7 +1297,19 @@ def _from_stored(stored: dict[str, Any], generated_at: datetime, *, cached: bool
         omitted=[str(o) for o in stored.get("omitted") or []],
         page_graph=page_graph,
         full_script=full_script,
+        edited=edited is not None,
+        edited_at=_parse_time(edited.get("edited_at")) if edited else None,
     )
+
+
+def _parse_time(raw: Any) -> datetime | None:
+    try:
+        value = datetime.fromisoformat(str(raw)) if raw else None
+    except ValueError:
+        return None
+    if value is not None and value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def stored_result(page: LaunchScanPage) -> SchemaMarkupResult | None:
@@ -1148,7 +1407,7 @@ def generate_schema_markup(
         {"name": customer_row.name, "base_url": customer_row.base_url, "domain": customer_row.domain}
         if customer_row is not None else None
     )
-    site_org = home_organization(db, page)
+    home = home_jsonld(db, page)
     # Extra feiten uit de gekoppelde WordPress-site; zonder (bruikbare) koppeling gewoon zonder.
     try:
         wp = rankmath_schema.connect_quietly(rankmath_schema.site_for_customer(db, customer_row, user_id))
@@ -1171,10 +1430,8 @@ def generate_schema_markup(
     if not targets:
         return _nothing_missing(page_type, facts, choice=choice, skipped=skipped)
     wordpress = rankmath_schema.wordpress_post_facts(wp, final_url) if wp is not None else []
-    has_org = any(is_org_type(t) for t in facts.existing_types)
     brief = page_brief(facts, page_type=page_type, targets=targets, customer=customer, open_graph=open_graph,
-                       source=source, wordpress=wordpress, organization=None if has_org else site_org,
-                       lapse_ids=rank_math.default_ids)
+                       source=source, wordpress=wordpress, home=home, lapse_ids=rank_math.default_ids)
 
     try:
         result = run_agent(AGENTS["schema_markup"](), user_id=user_id, input=brief, context=None)
@@ -1249,3 +1506,171 @@ _INCOMPLETE_REASONS = {
     "max_output_tokens": "maximale lengte bereikt",
     "content_filter": "geblokkeerd door het inhoudsfilter",
 }
+
+
+# --- met de hand bewerken -------------------------------------------------------------------
+
+MAX_EDIT_BYTES = 100_000
+_SCRIPT_OPEN_RE = re.compile(r"^\s*<script\b([^>]*)>", re.IGNORECASE)
+_SCRIPT_CLOSE_RE = re.compile(r"</script\s*>\s*$", re.IGNORECASE)
+# Meldingen van `json` in het Nederlands (begin van de Engelse melding → Nederlandse tekst).
+_JSON_ERRORS = (
+    ("Expecting ',' delimiter", "komma verwacht"),
+    ("Expecting ':' delimiter", "dubbele punt verwacht"),
+    ("Expecting property name enclosed in double quotes", "eigenschapsnaam tussen dubbele aanhalingstekens "
+                                                          "verwacht (of een komma te veel)"),
+    ("Expecting value", "waarde verwacht"),
+    ("Unterminated string", "tekst zonder afsluitend aanhalingsteken"),
+    ("Extra data", "extra tekst na het einde van de JSON"),
+    ("Invalid control character", "ongeldig teken (bijv. een regeleinde of tab) binnen een tekst"),
+    ("Invalid \\escape", "ongeldige escape met \\"),
+    ("Invalid \\uXXXX escape", "ongeldige \\u-escape"),
+)
+
+
+def _json_error(exc: json.JSONDecodeError, text: str, offset: int) -> str:
+    """Nederlandse melding met regel en kolom in de tekst zoals de gebruiker die stuurde."""
+    reason = next((dutch for english, dutch in _JSON_ERRORS if exc.msg.startswith(english)), exc.msg)
+    pos = offset + exc.pos
+    line = text.count("\n", 0, pos) + 1
+    column = pos - (text.rfind("\n", 0, pos) + 1) + 1
+    return f"De JSON-LD is geen geldige JSON: {reason} (regel {line}, kolom {column})."
+
+
+def _reject_constant(name: str) -> Any:
+    raise SchemaMarkupEditError(f"De JSON-LD is geen geldige JSON: {name} is geen geldige waarde.")
+
+
+def parse_edited_jsonld(text: str) -> dict[str, Any]:
+    """Bewerkte JSON-LD (kale JSON of één `<script type="application/ld+json">`-blok) als één object.
+
+    Gooit `SchemaMarkupEditError` met een Nederlandse reden: te groot, leeg, ongeldige JSON (met regel en
+    kolom), geen object, of geen entiteit met @type. Het resultaat heeft altijd @context.
+    """
+    if not isinstance(text, str):
+        raise SchemaMarkupEditError("De JSON-LD ontbreekt.")
+    size = len(text.encode("utf-8"))
+    if size > MAX_EDIT_BYTES:
+        raise SchemaMarkupEditError(f"De JSON-LD is te groot ({size // 1000} kB); maximaal "
+                                    f"{MAX_EDIT_BYTES // 1000} kB.")
+    start, end = 0, len(text)
+    opening = _SCRIPT_OPEN_RE.match(text)
+    if opening:
+        if not _LDJSON_ATTR_RE.search(opening.group(1)):
+            raise SchemaMarkupEditError('Alleen een <script type="application/ld+json">-blok of kale JSON '
+                                        "is toegestaan.")
+        closing = _SCRIPT_CLOSE_RE.search(text, opening.end())
+        if not closing:
+            raise SchemaMarkupEditError("Het <script>-blok is niet afgesloten met </script>.")
+        start, end = opening.end(), closing.start()
+        if re.search(r"</script\s*>", text[start:end], re.IGNORECASE):
+            raise SchemaMarkupEditError("Plak één JSON-LD-blok, niet meerdere <script>-blokken.")
+    body = text[start:end]
+    if not body.strip():
+        raise SchemaMarkupEditError("De JSON-LD is leeg.")
+    try:
+        data = json.loads(body, parse_constant=_reject_constant)
+    except json.JSONDecodeError as exc:
+        raise SchemaMarkupEditError(_json_error(exc, text, start)) from exc
+    except RecursionError as exc:
+        raise SchemaMarkupEditError("De JSON-LD is te diep genest.") from exc
+    if not isinstance(data, dict):
+        raise SchemaMarkupEditError("De JSON-LD moet één object zijn ({ … }) met @type of @graph; zet "
+                                    "meerdere entiteiten in een @graph.")
+    graph = data.get("@graph")
+    if graph is None:
+        if not types_of(data):
+            raise SchemaMarkupEditError("Het object heeft geen @type en geen @graph; geef elke entiteit een "
+                                        "@type (bijv. \"LocalBusiness\") of zet de entiteiten in een @graph.")
+    else:
+        if isinstance(graph, dict):
+            graph = [graph]
+        if not isinstance(graph, list):
+            raise SchemaMarkupEditError("@graph moet een lijst met entiteiten zijn.")
+        if not any(isinstance(node, dict) and types_of(node) for node in graph):
+            raise SchemaMarkupEditError("De @graph bevat geen entiteiten met een @type.")
+        data = {**data, "@graph": graph}
+    if not data.get("@context"):
+        data = {"@context": DEFAULT_CONTEXT, **{k: v for k, v in data.items() if k != "@context"}}
+    return data
+
+
+def _path_filled(node: Any, path: list[str]) -> bool:
+    if not path:  # een verwijzing ({"@id": …}) telt hier wel als ingevuld
+        return bool(node.strip()) if isinstance(node, str) else node not in (None, [], {})
+    if isinstance(node, list):
+        return any(_path_filled(item, path) for item in node)
+    return isinstance(node, dict) and _path_filled(node.get(path[0]), path[1:])
+
+
+def still_omitted(omitted: Any, jsonld: Any) -> list[str]:
+    """Regels "Type.eigenschap" van `omitted` waarvan de eigenschap nog nergens is ingevuld.
+
+    Ingevuld = bij een entiteit (ook genest) met dat type staat een niet-lege waarde; een
+    plaatshouder telt ook als ingevuld (die staat al in `placeholders`).
+    """
+    if not isinstance(omitted, list):
+        return []
+    nodes: list[dict[str, Any]] = []
+
+    def walk(value: Any, depth: int) -> None:
+        if depth > _SPLIT_MAX_DEPTH:
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item, depth + 1)
+        elif isinstance(value, dict):
+            if value.get("@type"):
+                nodes.append(value)
+            for item in value.values():
+                walk(item, depth + 1)
+
+    walk(jsonld, 0)
+    keep: list[str] = []
+    for rule in (str(o) for o in omitted):
+        type_name, _, rest = rule.partition(".")
+        path = rest.split(".") if rest else []
+        if not path or not any(type_name in types_of(n) and _path_filled(n, path) for n in nodes):
+            keep.append(rule)
+    return keep
+
+
+def edit_schema_markup(db: Session, page: LaunchScanPage, text: str, *, user_id: str) -> SchemaMarkupResult:
+    """Slaat een met de hand bewerkt voorstel op (alleen database: geen modelaanroep, geen HTTP).
+
+    De JSON-LD wordt genormaliseerd (één object met @context en @graph), elk type waarvoor het voorstel is
+    gemaakt wordt een eigen entiteit (`split_target_entities`), en types, plaatshouders, problemen en
+    `omitted` worden opnieuw bepaald. De rest van het voorstel (bewaarde paginamarkup, typekeuze,
+    plaatsing, beoordeling) blijft staan; beoordeling en `placement.current` volgen de hash van de
+    JSON-LD en worden dus vanzelf "pending"/false als die verandert.
+
+    Gooit `SchemaMarkupNoSuggestionError` zonder voorstel, `SchemaMarkupEditError` bij onbruikbare
+    JSON-LD en `SchemaMarkupPageGoneError` als de pagina intussen is verwijderd.
+    """
+    suggestion = page.schema_suggestion if isinstance(page.schema_suggestion, dict) else None
+    if not suggestion or not suggestion.get("jsonld") or not page.schema_suggestion_at:
+        raise SchemaMarkupNoSuggestionError(page.id)
+    jsonld = parse_edited_jsonld(text)
+    targets = suggestion.get("target_types")
+    if not isinstance(targets, list):  # voorstel van vóór de typekeuze (zie `_from_stored`)
+        targets = _written_types(suggestion["jsonld"])
+    jsonld = split_target_entities(jsonld, targets, page.final_url or page.url)
+    validation = validate_blocks([json.dumps(jsonld, ensure_ascii=False)])
+    now = _now()
+    updated = {
+        **suggestion,
+        "jsonld": jsonld,
+        "types": _written_types(jsonld),
+        "placeholders": _placeholders(jsonld, None),
+        "problems": [describe_problem(p) for p in validation["problems"]],
+        "omitted": still_omitted(suggestion.get("omitted"), jsonld),
+        "edited": {"user_id": user_id, "edited_at": now.isoformat()},
+    }
+    page_id, generated_at, choice = page.id, page.schema_suggestion_at, page.schema_target_types
+    page.schema_suggestion = updated
+    try:
+        db.commit()
+    except StaleDataError as exc:
+        db.rollback()
+        raise SchemaMarkupPageGoneError(page_id) from exc
+    return _from_stored(updated, generated_at, cached=True, choice=choice)

@@ -8,6 +8,7 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Square,
@@ -28,6 +29,7 @@ import {
   SchemaScriptView,
   SchemaStaleNotice,
   SchemaTargetInfo,
+  type SchemaEditState,
 } from "@/components/livegang/SchemaMarkupParts"
 import { Pill, type Tone } from "@/components/livegang/shared"
 import {
@@ -37,6 +39,7 @@ import {
   PAGE_TYPE_LABELS,
   placeSchemaMarkup,
   reviewSchemaMarkup,
+  saveSchemaMarkupContent,
   type LaunchScanPage,
   type SchemaMarkupResponse,
   type SchemaReviewStatus,
@@ -49,6 +52,8 @@ const GENERATE_CONCURRENCY = 3
 type Step = "generate" | "review" | "place"
 type RunStatus = "idle" | "wait" | "busy" | "done" | "error" | "stopped"
 type ReviewAction = SchemaReviewStatus | "regenerate"
+/** Waar de gebruiker heen wilde terwijl er niet-opgeslagen wijzigingen in het schema stonden. */
+type PendingLeave = { kind: "page"; id: string } | { kind: "step"; step: Step } | { kind: "close" }
 
 type Entry = {
   id: string
@@ -132,7 +137,7 @@ function reviewBadge(e: Entry): { label: string; tone: Tone } {
   }
   if (status === "rejected") return { label: "Afgekeurd", tone: "red" }
   if (!e.result.can_place) return { label: "Kan niet geplaatst worden", tone: "amber" }
-  return { label: "Te beoordelen", tone: "blue" }
+  return { label: e.result.edited ? "Bewerkt, te beoordelen" : "Te beoordelen", tone: "blue" }
 }
 
 function genBadge(e: Entry): { label: string; tone: Tone } {
@@ -232,6 +237,9 @@ export function SchemaBulkDialog({
   const [confirmClose, setConfirmClose] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  /** Bewerken van het schema in stap 2 (per pagina); null = er wordt niets bewerkt. */
+  const [edit, setEdit] = useState<(SchemaEditState & { id: string }) | null>(null)
+  const [pendingLeave, setPendingLeave] = useState<PendingLeave | null>(null)
 
   // Na sluiten (unmount) of "Stoppen" worden er geen nieuwe aanvragen gestart; lopende maken af.
   const aliveRef = useRef(true)
@@ -408,6 +416,26 @@ export function SchemaBulkDialog({
     }
   }
 
+  /** Slaat het bewerkte blok op; de beoordeling gaat daarbij terug naar "te beoordelen". */
+  async function saveContent(id: string, jsonld: string) {
+    setActiveId(id)
+    setCopied(null)
+    patch(id, { actionError: null })
+    const result = await saveSchemaMarkupContent(scanId, id, jsonld)
+    onResult(id, result)
+    patch(id, { result })
+    return result
+  }
+
+  function onEditStateChange(id: string, state: SchemaEditState) {
+    setEdit((current) => {
+      if (state.editing || state.dirty) return { id, ...state }
+      return current && current.id !== id ? current : null
+    })
+    // Opgeslagen of geannuleerd: niets meer om weg te gooien.
+    if (!state.dirty) setPendingLeave(null)
+  }
+
   // --- stap 3: doorzetten -------------------------------------------------------------------------
 
   async function runPlacement(ids: string[]) {
@@ -473,8 +501,20 @@ export function SchemaBulkDialog({
   const siteLabel = siteNames.length ? `${siteNames.join(", ")} (${host})` : host
 
   const running = generating || placing
+  const editDirty = !!edit?.dirty
+  const editingCurrent = !!edit && edit.editing && edit.id === currentId
+  const editPath = edit ? entries[edit.id]?.path || entries[edit.id]?.url || "" : ""
 
+  /** Naar een andere pagina; met niet-opgeslagen wijzigingen in het schema eerst bevestigen. */
   function select(id: string) {
+    if (id !== currentId && editDirty) {
+      setPendingLeave({ kind: "page", id })
+      return
+    }
+    showPage(id)
+  }
+
+  function showPage(id: string) {
     setActiveId(id)
     setCopied(null)
     const el = itemRefs.current.get(id)
@@ -493,7 +533,7 @@ export function SchemaBulkDialog({
 
   // Pijltjes omhoog/omlaag wisselen van pagina in stap 2 (niet in invoervelden of tijdens een bevestiging).
   useEffect(() => {
-    if (step !== "review" || confirmClose) return
+    if (step !== "review" || confirmClose || pendingLeave) return
     function onKey(ev: KeyboardEvent) {
       if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return
       const target = ev.target as HTMLElement | null
@@ -503,6 +543,10 @@ export function SchemaBulkDialog({
       const index = currentId ? order.indexOf(currentId) : -1
       const nextIndex = Math.min(order.length - 1, Math.max(0, index + (ev.key === "ArrowDown" ? 1 : -1)))
       const id = order[nextIndex]
+      if (editDirty && id !== currentId) {
+        setPendingLeave({ kind: "page", id })
+        return
+      }
       setActiveId(id)
       setCopied(null)
       const el = itemRefs.current.get(id)
@@ -511,7 +555,7 @@ export function SchemaBulkDialog({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [step, confirmClose, order, currentId])
+  }, [step, confirmClose, pendingLeave, editDirty, order, currentId])
 
   function stop() {
     stopRef.current = true
@@ -520,7 +564,29 @@ export function SchemaBulkDialog({
 
   function requestClose() {
     if (running) setConfirmClose(true)
+    else if (editDirty) setPendingLeave({ kind: "close" })
     else onClose()
+  }
+
+  /** Naar een andere stap; vanuit stap 2 met niet-opgeslagen wijzigingen eerst bevestigen. */
+  function goStep(key: Step) {
+    if (key !== step && step === "review" && editDirty) {
+      setPendingLeave({ kind: "step", step: key })
+      return
+    }
+    setConfirmPlace(false)
+    setStep(key)
+  }
+
+  function discardAndLeave() {
+    const target = pendingLeave
+    setPendingLeave(null)
+    if (!target) return
+    if (target.kind === "page") showPage(target.id)
+    else if (target.kind === "step") {
+      setConfirmPlace(false)
+      setStep(target.step)
+    } else onClose()
   }
 
   function forceClose() {
@@ -560,10 +626,7 @@ export function SchemaBulkDialog({
                 <button
                   type="button"
                   disabled={!loaded || running || state === "current"}
-                  onClick={() => {
-                    setConfirmPlace(false)
-                    setStep(s.key)
-                  }}
+                  onClick={() => goStep(s.key)}
                   aria-current={state === "current" ? "step" : undefined}
                   className={cn(
                     "flex items-center gap-1.5 rounded-full border px-3 py-1 disabled:cursor-default",
@@ -594,6 +657,7 @@ export function SchemaBulkDialog({
             <p className="text-xs">
               Lopende aanvragen maken op de achtergrond af en worden in de lijst bijgewerkt; er worden geen nieuwe
               gestart.
+              {editDirty ? " Niet-opgeslagen wijzigingen in het schema gaan verloren." : ""}
             </p>
             <div className="flex flex-wrap justify-end gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={() => setConfirmClose(false)}>
@@ -601,6 +665,28 @@ export function SchemaBulkDialog({
               </Button>
               <Button size="sm" onClick={forceClose}>
                 Toch sluiten
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {pendingLeave && (
+          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <p className="font-medium">Niet-opgeslagen wijzigingen weggooien?</p>
+            <p className="text-xs">
+              Het schema van {editPath || "deze pagina"} is bewerkt maar nog niet opgeslagen.{" "}
+              {pendingLeave.kind === "close"
+                ? "Bij sluiten gaan de wijzigingen verloren."
+                : pendingLeave.kind === "page"
+                  ? "Bij wisselen van pagina gaan de wijzigingen verloren."
+                  : "Bij wisselen van stap gaan de wijzigingen verloren."}
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => setPendingLeave(null)}>
+                Verder bewerken
+              </Button>
+              <Button size="sm" variant="destructive" onClick={discardAndLeave}>
+                Weggooien en doorgaan
               </Button>
             </div>
           </div>
@@ -718,7 +804,7 @@ export function SchemaBulkDialog({
                   })}
                 </ul>
                 <div className="border-t p-2">
-                  <Button size="sm" className="w-full" onClick={() => setStep("place")}>
+                  <Button size="sm" className="w-full" onClick={() => goStep("place")}>
                     Naar doorzetten ({toPlace.length}) <ArrowRight />
                   </Button>
                 </div>
@@ -727,7 +813,11 @@ export function SchemaBulkDialog({
               <section className="min-h-0 overflow-y-auto rounded-lg border bg-card">
                 {current ? (
                   <ReviewPane
+                    key={current.id}
                     entry={current}
+                    editing={editingCurrent}
+                    onSave={(jsonld) => saveContent(current.id, jsonld)}
+                    onEditStateChange={(state) => onEditStateChange(current.id, state)}
                     copied={copied === current.id}
                     hasNextToReview={list.some((e) => e.id !== current.id && isToReview(e))}
                     onReview={(status) => review(current.id, status)}
@@ -875,27 +965,40 @@ export function SchemaBulkDialog({
   )
 }
 
-/** Rechterdeel van stap 2: het voorstel van één pagina met de beoordelingsknoppen. */
+/**
+ * Rechterdeel van stap 2: het voorstel van één pagina met de beoordelingsknoppen. Mount per pagina (met
+ * `key`), zodat een open bevestiging niet meeschuift naar een andere pagina.
+ */
 function ReviewPane({
   entry,
   copied,
   hasNextToReview,
+  editing,
   onReview,
   onRegenerate,
   onCopy,
   onNext,
+  onSave,
+  onEditStateChange,
 }: {
   entry: Entry
   copied: boolean
   hasNextToReview: boolean
+  /** Het schema van deze pagina wordt bewerkt: beoordelen en opnieuw genereren kunnen dan niet. */
+  editing: boolean
   onReview: (status: SchemaReviewStatus) => void
   onRegenerate: () => void
   onCopy: () => void
   onNext: () => void
+  onSave: (jsonld: string) => Promise<SchemaMarkupResponse>
+  onEditStateChange: (state: SchemaEditState) => void
 }) {
+  // Opnieuw genereren van een handmatig bewerkt voorstel overschrijft die wijzigingen: eerst bevestigen.
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   const result = entry.result
   const status = reviewOf(entry)
   const busy = entry.action !== null
+  const locked = busy || editing || confirmRegenerate
   const proposal = hasProposal(entry)
   const placement = result?.placement ?? null
   const placementOk = !!placement && placement.verified && placement.current
@@ -992,8 +1095,8 @@ function ReviewPane({
                 )}
                 {!placement.current && (
                   <p className="text-xs">
-                    Op de site staat een eerdere versie; dit voorstel is daarna gemaakt. Na goedkeuren kun je het
-                    doorzetten.
+                    Op de site staat een eerdere versie; dit voorstel is daarna {result.edited ? "gewijzigd" : "gemaakt"}.
+                    Na goedkeuren kun je het doorzetten.
                   </p>
                 )}
               </div>
@@ -1016,6 +1119,17 @@ function ReviewPane({
               </div>
             )}
 
+            {result.edited && status === "pending" && result.can_place && (
+              <p className="flex items-start gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+                <Pencil className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Dit voorstel is handmatig bewerkt
+                  {result.edited_at ? ` op ${formatDateTime(result.edited_at)}` : ""} en moet (opnieuw) goedgekeurd worden
+                  voordat het doorgezet wordt. Controleer de problemen en plaatshouders hieronder.
+                </span>
+              </p>
+            )}
+
             <SchemaStaleNotice stale={result.stale} />
 
             <SchemaTargetInfo result={result} />
@@ -1024,7 +1138,13 @@ function ReviewPane({
             <SchemaPlaceholders placeholders={result.placeholders} />
             <SchemaProblems problems={result.problems} />
 
-            <SchemaScriptView key={entry.id} result={result} />
+            <SchemaScriptView
+              key={entry.id}
+              result={result}
+              onSave={onSave}
+              editDisabled={busy || confirmRegenerate}
+              onEditStateChange={onEditStateChange}
+            />
 
             <SchemaOmitted omitted={result.omitted} />
 
@@ -1048,10 +1168,34 @@ function ReviewPane({
       </div>
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t bg-card px-4 py-3">
+        {confirmRegenerate && (
+          <div className="w-full space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <p className="font-medium">Handmatige wijzigingen overschrijven?</p>
+            <p className="text-xs">
+              Dit voorstel is handmatig bewerkt
+              {result?.edited_at ? ` op ${formatDateTime(result.edited_at)}` : ""}. Opnieuw genereren maakt een nieuw
+              voorstel en die wijzigingen gaan verloren.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => setConfirmRegenerate(false)}>
+                Annuleren
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setConfirmRegenerate(false)
+                  onRegenerate()
+                }}
+              >
+                <RefreshCw /> Opnieuw genereren
+              </Button>
+            </div>
+          </div>
+        )}
         {proposal && result?.can_place && (
           <Button
             size="sm"
-            disabled={busy || status === "approved"}
+            disabled={locked || status === "approved"}
             onClick={() => onReview("approved")}
             className="bg-green-700 text-white hover:bg-green-800 dark:bg-green-600 dark:text-white dark:hover:bg-green-700"
           >
@@ -1059,12 +1203,12 @@ function ReviewPane({
           </Button>
         )}
         {proposal && (
-          <Button size="sm" variant="outline" disabled={busy || status === "rejected"} onClick={() => onReview("rejected")}>
+          <Button size="sm" variant="outline" disabled={locked || status === "rejected"} onClick={() => onReview("rejected")}>
             {entry.action === "rejected" ? <Loader2 className="animate-spin" /> : <ThumbsDown />} Afkeuren
           </Button>
         )}
         {proposal && status !== "pending" && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onReview("pending")}>
+          <Button size="sm" variant="ghost" disabled={locked} onClick={() => onReview("pending")}>
             {entry.action === "pending" ? <Loader2 className="animate-spin" /> : <RotateCcw />} Beoordeling wissen
           </Button>
         )}
@@ -1072,9 +1216,15 @@ function ReviewPane({
           <Button
             size="sm"
             variant="ghost"
-            disabled={busy}
-            onClick={onRegenerate}
-            title={result ? "Maakt een nieuw voorstel; de beoordeling vervalt." : undefined}
+            disabled={locked}
+            onClick={() => (result?.edited ? setConfirmRegenerate(true) : onRegenerate())}
+            title={
+              editing
+                ? "Sla eerst je wijzigingen op of annuleer het bewerken"
+                : result
+                  ? "Maakt een nieuw voorstel; de beoordeling vervalt."
+                  : undefined
+            }
           >
             <RefreshCw /> {result ? "Opnieuw genereren" : entry.gen === "error" ? "Opnieuw proberen" : "Voorstel maken"}
           </Button>

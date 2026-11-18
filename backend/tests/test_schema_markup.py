@@ -608,7 +608,8 @@ class SchemaMarkupEndpointTest(_Base):
                                      "cached", "nothing_missing", "existing_types", "placement", "can_place",
                                      "place_blocked_reason", "replaces_default_types", "review_status",
                                      "reviewed_at", "target_types", "target_types_source", "stale", "omitted",
-                                     "page_graph", "full_script"})
+                                     "page_graph", "full_script", "edited", "edited_at"})
+        self.assertEqual((body["edited"], body["edited_at"]), (False, None))
         self.assertEqual((body["target_types"], body["target_types_source"], body["stale"]),
                          (["Service", "BreadcrumbList", "FAQPage"], "auto", False))
         self.assertEqual((body["review_status"], body["reviewed_at"]), ("pending", None))

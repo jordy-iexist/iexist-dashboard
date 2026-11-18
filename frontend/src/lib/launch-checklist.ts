@@ -487,6 +487,10 @@ export type SchemaMarkupResponse = {
   page_graph?: SchemaGraphEntity[]
   /** Compleet `<script>`-blok met bestaand plus nieuw (zonder wat vervalt); "" als onbekend. */
   full_script?: string
+  /** True = het nieuwe blok is handmatig bewerkt (na het genereren). */
+  edited?: boolean
+  /** Moment van de laatste handmatige bewerking; null als niet bewerkt. */
+  edited_at?: string | null
 }
 
 export type SchemaTargetTypesSource = "manual" | "auto"
@@ -571,6 +575,19 @@ export function reviewSchemaMarkup(scanId: string, pageId: string, status: Schem
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
+  })
+}
+
+/**
+ * Slaat een handmatig bewerkt nieuw blok op (kale JSON; een `<script>`-omhulsel mag ook). De backend rekent
+ * types, plaatshouders en problemen opnieuw uit; een beoordeling gaat terug naar "pending" en een bestaande
+ * plaatsing is daarna niet meer `current`. 400 met een melding bij ongeldige JSON of een blok zonder entiteiten.
+ */
+export function saveSchemaMarkupContent(scanId: string, pageId: string, jsonld: string) {
+  return apiFetch<SchemaMarkupResponse>(`/scans/${scanId}/pages/${pageId}/schema-markup/content`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonld }),
   })
 }
 

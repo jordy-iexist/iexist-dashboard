@@ -21,18 +21,22 @@ import {
   SchemaScriptView,
   SchemaStaleNotice,
   SchemaTargetInfo,
+  type SchemaEditState,
 } from "@/components/livegang/SchemaMarkupParts"
 import {
   createSchemaMarkup,
   formatDateTime,
   placeSchemaMarkup,
   removeSchemaMarkup,
+  saveSchemaMarkupContent,
   type LaunchScanPage,
   type SchemaMarkupResponse,
 } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
 type PlacementAction = "place" | "remove"
+/** Vraagt eerst een bevestiging in de dialog: plaatsen/verwijderen, handmatige wijzigingen overschrijven of weggooien. */
+type ConfirmAction = PlacementAction | "regenerate" | "close"
 
 const pageLinkClass = "break-all font-medium underline underline-offset-2 hover:no-underline"
 
@@ -66,8 +70,10 @@ export function SchemaMarkupDialog({
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Plaatsen/verwijderen gaat pas na een bevestiging in de dialog: het raakt de live klantsite.
-  const [confirm, setConfirm] = useState<PlacementAction | null>(null)
+  const [confirm, setConfirm] = useState<ConfirmAction | null>(null)
   const [busy, setBusy] = useState<PlacementAction | null>(null)
+  // Bewerken van het nieuwe blok (in SchemaScriptView): blokkeert genereren, plaatsen en verwijderen.
+  const [edit, setEdit] = useState<SchemaEditState>({ editing: false, dirty: false })
   // Alleen het antwoord op de laatste aanvraag telt.
   const requestRef = useRef(0)
   // Eén aanvraag bij openen, ook als React (StrictMode) het effect dubbel draait: anders twee modelaanroepen.
@@ -105,6 +111,12 @@ export function SchemaMarkupDialog({
   // Zonder resultaat (eerste aanvraag mislukt) is het een nieuwe poging; anders echt opnieuw genereren.
   const retry = !result && error !== null
   function regenerate() {
+    // Een handmatig bewerkt voorstel wordt overschreven: eerst bevestigen.
+    if (!retry && result?.edited && confirm !== "regenerate") {
+      setError(null)
+      setConfirm("regenerate")
+      return
+    }
     setLoading(true)
     setError(null)
     setCopied(false)
@@ -141,6 +153,36 @@ export function SchemaMarkupDialog({
     setConfirm(action)
   }
 
+  /** Slaat het bewerkte blok op; het resultaat gaat terug naar de weergave, een fout ook (die toont hem). */
+  async function saveContent(jsonld: string) {
+    const id = ++requestRef.current
+    setError(null)
+    setCopied(false)
+    const next = await saveSchemaMarkupContent(scanId, page.id, jsonld)
+    // Ook na sluiten doorgeven, zodat de lijst klopt (beoordeling en plaatsing kunnen gewijzigd zijn).
+    if (!next.nothing_missing) onGenerated(page.id, next.generated_at)
+    onPlacementChange(page.id, next.placement?.placed_at ?? null)
+    onResult?.(page.id, next)
+    if (id === requestRef.current) setResult(next)
+    return next
+  }
+
+  function onEditStateChange(state: SchemaEditState) {
+    setEdit(state)
+    // Opgeslagen of geannuleerd: de vraag over weggooien bij sluiten is dan niet meer aan de orde.
+    if (!state.dirty) setConfirm((current) => (current === "close" ? null : current))
+  }
+
+  /** Sluiten met niet-opgeslagen wijzigingen in het blok vraagt eerst een bevestiging. */
+  function requestClose() {
+    if (edit.dirty) {
+      setError(null)
+      setConfirm("close")
+    } else {
+      onClose()
+    }
+  }
+
   const hasScript = !!result && !result.nothing_missing && !!result.script
   const placement = result?.placement ?? null
   const canPlace = hasScript && !!result?.can_place
@@ -151,7 +193,7 @@ export function SchemaMarkupDialog({
   // Nog niet geplaatst, of het voorstel is daarna opnieuw gegenereerd: plaatsen is dan de hoofdactie.
   const placePrimary = canPlace && (!placement || !placement.current)
   const working = loading || busy !== null
-  const footerDisabled = working || confirm !== null
+  const footerDisabled = working || confirm !== null || edit.editing
   const placementOk = !!placement && placement.verified && placement.current
 
   async function copyScript() {
@@ -172,7 +214,7 @@ export function SchemaMarkupDialog({
   )
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && requestClose()}>
       {/* Nooit hoger dan het scherm: kop, bevestiging en knoppen blijven staan, het middendeel scrolt. */}
       <DialogContent className="flex max-h-[92dvh] flex-col sm:max-w-3xl">
         <DialogHeader className="shrink-0 pr-6">
@@ -215,8 +257,8 @@ export function SchemaMarkupDialog({
             )}
             {!placement.current && (
               <p className="text-xs">
-                Het voorstel is na het plaatsen opnieuw gegenereerd; op de site staat nog de vorige versie. Plaats
-                opnieuw om de site bij te werken.
+                Het voorstel is na het plaatsen {result?.edited ? "gewijzigd" : "opnieuw gegenereerd"}; op de site staat
+                nog de vorige versie. Plaats opnieuw om de site bij te werken.
               </p>
             )}
           </div>
@@ -244,7 +286,13 @@ export function SchemaMarkupDialog({
 
             <SchemaEntities result={result} />
 
-            <SchemaScriptView result={result} preClassName="max-h-[45dvh]" />
+            <SchemaScriptView
+              result={result}
+              preClassName="max-h-[45dvh]"
+              onSave={saveContent}
+              editDisabled={working || confirm !== null}
+              onEditStateChange={onEditStateChange}
+            />
 
             <SchemaOmitted omitted={result.omitted} />
 
@@ -262,7 +310,41 @@ export function SchemaMarkupDialog({
         )}
         </div>
 
-        {!loading && confirm && (
+        {!loading && (confirm === "regenerate" || confirm === "close") && (
+          <div className="shrink-0 space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            {confirm === "regenerate" ? (
+              <>
+                <p className="font-medium">Handmatige wijzigingen overschrijven?</p>
+                <p className="text-xs">
+                  Dit voorstel is handmatig bewerkt
+                  {result?.edited_at ? ` op ${formatDateTime(result.edited_at)}` : ""}. Opnieuw genereren maakt een
+                  nieuw voorstel en die wijzigingen gaan verloren.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">Niet-opgeslagen wijzigingen weggooien?</p>
+                <p className="text-xs">Het bewerkte blok is nog niet opgeslagen. Bij sluiten gaan de wijzigingen verloren.</p>
+              </>
+            )}
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => setConfirm(null)}>
+                {confirm === "close" ? "Verder bewerken" : "Annuleren"}
+              </Button>
+              {confirm === "regenerate" ? (
+                <Button size="sm" onClick={regenerate}>
+                  <RefreshCw /> Opnieuw genereren
+                </Button>
+              ) : (
+                <Button size="sm" variant="destructive" onClick={onClose}>
+                  Sluiten zonder opslaan
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!loading && (confirm === "place" || confirm === "remove") && (
           <div className="shrink-0 space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             {confirm === "place" ? (
               <>

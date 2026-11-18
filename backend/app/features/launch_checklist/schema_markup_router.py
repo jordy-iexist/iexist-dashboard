@@ -9,8 +9,9 @@ Alle endpoints per pagina geven dezelfde response terug.
 In bulk (Schema-tabblad): genereren en plaatsen lopen per pagina via dezelfde endpoints. Een
 collega keurt elk voorstel goed of af (`…/schema-markup/review`); bulkplaatsen gebruikt
 `require_approved`, zodat er niets op de klantsite komt zonder goedkeuring van precies dat
-voorstel. `…/schema-markup/overview` geeft de opgeslagen voorstellen van meerdere pagina's
-(alleen database).
+voorstel. Een collega kan het voorstel ook zelf bewerken (`PUT …/schema-markup/content`, alleen
+database); een eerdere goedkeuring geldt dan niet meer voor de gewijzigde JSON-LD.
+`…/schema-markup/overview` geeft de opgeslagen voorstellen van meerdere pagina's (alleen database).
 
 Per pagina kan een collega de te maken schema-types zelf kiezen
 (`PUT …/scans/{scan_id}/schema-markup/target-types`, alleen database). Een gewijzigde keuze laat
@@ -42,9 +43,12 @@ from app.features.launch_checklist.services.rankmath_schema import (
 from app.features.launch_checklist.services.schema_markup import (
     MAX_TARGET_TYPES,
     TYPE_NAME_RE,
+    SchemaMarkupEditError,
     SchemaMarkupError,
+    SchemaMarkupNoSuggestionError,
     SchemaMarkupPageGoneError,
     SchemaMarkupResult,
+    edit_schema_markup,
     generate_schema_markup,
     stored_result,
 )
@@ -64,6 +68,11 @@ class SchemaPlaceRequest(BaseModel):
 
 class SchemaReviewRequest(BaseModel):
     status: Literal["pending", "approved", "rejected"]
+
+
+class SchemaContentRequest(BaseModel):
+    # De bewerkte JSON-LD: kale JSON of één <script type="application/ld+json">-blok.
+    jsonld: str
 
 
 MAX_OVERVIEW_PAGES = 200
@@ -140,6 +149,9 @@ class SchemaMarkupResponse(BaseModel):
     page_graph: list[SchemaGraphEntity] = []
     # Bestaande JSON-LD (zonder wat vervalt) plus het nieuwe blok als één <script>; "" als onbekend.
     full_script: str = ""
+    # Het voorstel is met de hand bewerkt (`PUT …/schema-markup/content`); false na opnieuw genereren.
+    edited: bool = False
+    edited_at: datetime | None = None
 
 
 class SchemaPlacement(BaseModel):
@@ -197,6 +209,8 @@ def _response(result: SchemaMarkupResult, state: PlacementState) -> SchemaMarkup
         omitted=result.omitted,
         page_graph=[SchemaGraphEntity(**row) for row in result.page_graph],
         full_script=result.full_script,
+        edited=result.edited,
+        edited_at=result.edited_at,
     )
 
 
@@ -325,6 +339,34 @@ def review_schema_markup(
     try:
         review_schema(db, page, status=payload.status, user_id=user_id)
     except RankMathPlacementBlocked as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SchemaMarkupPageGoneError as exc:
+        raise HTTPException(status_code=404, detail=_PAGE_GONE) from exc
+    return _stored_response(db, page_id, user_id)
+
+
+@router.put("/scans/{scan_id}/pages/{page_id}/schema-markup/content", response_model=SchemaMarkupResponse)
+def edit_schema_markup_content(
+    scan_id: str,
+    page_id: str,
+    payload: SchemaContentRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Slaat een met de hand bewerkt voorstel op (alleen database: geen modelaanroep, geen HTTP).
+
+    400 bij onbruikbare JSON-LD (met de reden, bij ongeldige JSON met regel en kolom), 404 als de pagina
+    niet bij de scan hoort of er geen voorstel is. Een eerdere goedkeuring wordt "pending" en
+    `placement.current` false zodra de JSON-LD verandert; de plaatsing zelf blijft staan.
+    """
+    page = db.get(LaunchScanPage, page_id)
+    if page is None or not _page_in_scan(db, scan_id, page):
+        raise HTTPException(status_code=404, detail="Pagina niet gevonden.")
+    try:
+        edit_schema_markup(db, page, payload.jsonld, user_id=user_id)
+    except SchemaMarkupNoSuggestionError as exc:
+        raise HTTPException(status_code=404, detail="Er is geen schema-voorstel voor deze pagina.") from exc
+    except SchemaMarkupEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SchemaMarkupPageGoneError as exc:
         raise HTTPException(status_code=404, detail=_PAGE_GONE) from exc

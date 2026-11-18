@@ -1,11 +1,11 @@
 "use client"
 
-import { AlertTriangle, Check, Copy } from "lucide-react"
-import { useState } from "react"
+import { AlertTriangle, Check, Copy, Loader2, Pencil, Save, WandSparkles } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/livegang/shared"
-import type { SchemaGraphEntity, SchemaMarkupResponse } from "@/lib/launch-checklist"
+import { formatDateTime, type SchemaGraphEntity, type SchemaMarkupResponse } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
 /** Gedeelde weergave van een schemavoorstel; gebruikt door de dialog voor één pagina en het bulkscherm. */
@@ -226,17 +226,389 @@ export function SchemaEntities({ result }: { result: SchemaMarkupResponse }) {
 
 type ScriptView = "new" | "full"
 
+/** De JSON van een `<script type="application/ld+json">`-blok, zonder het omhulsel. */
+export function scriptToJson(script: string): string {
+  const match = /^\s*<script\b[^>]*>([\s\S]*?)<\/script>\s*$/i.exec(script)
+  return (match ? match[1] : script).trim()
+}
+
+type JsonIssue = { message: string; line: number; column: number }
+
+class JsonFail {
+  constructor(
+    readonly message: string,
+    readonly at: number
+  ) {}
+}
+
+const NUMBER_PATTERN = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y
+
+/**
+ * Controleert of `text` geldige JSON is en geeft anders de eerste fout met regel en kolom (vanaf 1).
+ * Eigen controle i.p.v. `JSON.parse`: niet elke browser noemt de plek van de fout in zijn melding.
+ */
+export function checkJson(text: string): JsonIssue | null {
+  let i = 0
+  const n = text.length
+  const fail = (message: string, at = i): never => {
+    throw new JsonFail(message, at)
+  }
+  const describe = (at: number) =>
+    at >= n ? "het einde van de tekst" : text[at] === '"' ? "een aanhalingsteken" : `"${text[at]}"`
+  const skipSpace = () => {
+    while (i < n && (text[i] === " " || text[i] === "\t" || text[i] === "\n" || text[i] === "\r")) i++
+  }
+
+  function string() {
+    const start = i
+    i++
+    while (i < n) {
+      const c = text[i]
+      if (c === '"') {
+        i++
+        return
+      }
+      if (c === "\\") {
+        const next = text[i + 1]
+        if (next !== undefined && '"\\/bfnrt'.includes(next)) i += 2
+        else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(text.slice(i + 2, i + 6))) i += 6
+        else fail("Ongeldige escape (\\) in een tekst")
+        continue
+      }
+      if (c === "\n" || c === "\r") fail("Tekst niet afgesloten met een dubbel aanhalingsteken vóór het einde van de regel")
+      if (c.charCodeAt(0) < 0x20) fail("Ongeldig stuurteken (bijvoorbeeld een tab) in een tekst; gebruik \\t")
+      i++
+    }
+    fail("Tekst niet afgesloten met een dubbel aanhalingsteken", start)
+  }
+
+  function value(): void {
+    skipSpace()
+    if (i >= n) fail("Onverwacht einde van de tekst; er ontbreekt een waarde")
+    const c = text[i]
+    if (c === "{") return container("}")
+    if (c === "[") return container("]")
+    if (c === '"') return string()
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      NUMBER_PATTERN.lastIndex = i
+      const match = NUMBER_PATTERN.exec(text)
+      if (!match) return fail("Ongeldig getal")
+      i += match[0].length
+      return
+    }
+    for (const word of ["true", "false", "null"]) {
+      if (text.startsWith(word, i)) {
+        i += word.length
+        return
+      }
+    }
+    if (c === "'") fail("Gebruik dubbele aanhalingstekens (\") in plaats van enkele")
+    fail(`Onverwacht teken ${describe(i)}; hier hoort een waarde`)
+  }
+
+  function container(close: "}" | "]") {
+    const isObject = close === "}"
+    i++
+    skipSpace()
+    if (text[i] === close) {
+      i++
+      return
+    }
+    for (;;) {
+      skipSpace()
+      if (isObject) {
+        if (text[i] === close) fail(`Komma te veel vóór "${close}"`)
+        if (text[i] !== '"') {
+          fail(
+            text[i] === "'"
+              ? "Gebruik dubbele aanhalingstekens (\") in plaats van enkele"
+              : `Verwacht een eigenschapsnaam tussen dubbele aanhalingstekens, niet ${describe(i)}`
+          )
+        }
+        string()
+        skipSpace()
+        if (text[i] !== ":") fail(`Verwacht ":" na de eigenschapsnaam, niet ${describe(i)}`)
+        i++
+      } else if (text[i] === close) {
+        fail(`Komma te veel vóór "${close}"`)
+      }
+      value()
+      skipSpace()
+      if (text[i] === ",") {
+        i++
+        continue
+      }
+      if (text[i] === close) {
+        i++
+        return
+      }
+      if (i < n && (isObject ? text[i] === '"' : '"{['.includes(text[i]))) {
+        fail(`Komma ontbreekt tussen twee ${isObject ? "eigenschappen" : "waarden"}`)
+      }
+      fail(`Verwacht "," of "${close}", niet ${describe(i)}`)
+    }
+  }
+
+  try {
+    skipSpace()
+    if (i >= n) fail("Het blok is leeg")
+    value()
+    skipSpace()
+    if (i < n) fail(`Extra tekst na het einde van de JSON: ${describe(i)}`)
+    return null
+  } catch (err) {
+    if (!(err instanceof JsonFail)) throw err
+    const before = text.slice(0, err.at)
+    const line = before.split("\n").length
+    const column = err.at - (before.lastIndexOf("\n") + 1) + 1
+    return { message: err.message, line, column }
+  }
+}
+
+/** Stand van het bewerken, voor de dialog (knoppen uitschakelen, wegnavigeren bevestigen). */
+export type SchemaEditState = { editing: boolean; dirty: boolean }
+
+const TEXTAREA_INDENT = "  "
+
+/**
+ * Bewerkstand van het nieuwe blok: een tekstvak met de JSON, controle tijdens het typen, "Opmaken",
+ * "Opslaan" en "Annuleren" (met bevestiging als er niet-opgeslagen wijzigingen zijn).
+ */
+function SchemaEditor({
+  initial,
+  onSave,
+  onDone,
+  onDirtyChange,
+}: {
+  initial: string
+  onSave: (jsonld: string) => Promise<SchemaMarkupResponse>
+  onDone: () => void
+  onDirtyChange: (dirty: boolean) => void
+}) {
+  const [draft, setDraft] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [confirmCancel, setConfirmCancel] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const issue = useMemo(() => checkJson(draft), [draft])
+  const dirty = draft !== initial
+
+  const dirtyRef = useRef(onDirtyChange)
+  useEffect(() => {
+    dirtyRef.current = onDirtyChange
+  })
+  useEffect(() => {
+    dirtyRef.current(dirty)
+  }, [dirty])
+
+  useEffect(() => {
+    textareaRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  function update(next: string) {
+    setDraft(next)
+    setSaveError(null)
+    setConfirmCancel(false)
+  }
+
+  function onKeyDown(ev: KeyboardEvent<HTMLTextAreaElement>) {
+    if (ev.key !== "Tab" || ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey || saving) return
+    ev.preventDefault()
+    const el = ev.currentTarget
+    // insertText behoudt "ongedaan maken"; anders zelf invoegen en de cursor terugzetten.
+    if (document.execCommand("insertText", false, TEXTAREA_INDENT)) return
+    const { selectionStart, selectionEnd } = el
+    update(draft.slice(0, selectionStart) + TEXTAREA_INDENT + draft.slice(selectionEnd))
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = selectionStart + TEXTAREA_INDENT.length
+    })
+  }
+
+  function format() {
+    try {
+      update(JSON.stringify(JSON.parse(draft), null, 2))
+    } catch {
+      // Opmaken is alleen beschikbaar bij geldige JSON.
+    }
+  }
+
+  async function save() {
+    if (issue || !dirty || saving) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await onSave(draft)
+      onDone()
+    } catch (err) {
+      setSaveError((err as Error).message || "Opslaan is mislukt.")
+      setSaving(false)
+    }
+  }
+
+  function cancel() {
+    if (dirty) setConfirmCancel(true)
+    else onDone()
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-medium">Nieuw blok bewerken</p>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-7 px-2"
+          disabled={!!issue || saving}
+          onClick={format}
+          title="Springt de JSON netjes in (2 spaties)"
+        >
+          <WandSparkles /> Opmaken
+        </Button>
+      </div>
+
+      <textarea
+        ref={textareaRef}
+        value={draft}
+        onChange={(ev) => update(ev.target.value)}
+        onKeyDown={onKeyDown}
+        readOnly={saving}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        autoComplete="off"
+        wrap="off"
+        aria-label="JSON van het nieuwe blok"
+        aria-invalid={!!issue}
+        aria-describedby="schema-editor-status"
+        className={cn(
+          "block h-[55dvh] min-h-64 w-full resize-y overflow-auto rounded-md border bg-background p-3 font-mono text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+          issue && "border-red-400 dark:border-red-800",
+          saving && "opacity-70"
+        )}
+      />
+
+      <div id="schema-editor-status" className="space-y-1 text-xs">
+        {issue ? (
+          <p className="flex items-start gap-1.5 text-red-700 dark:text-red-400">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" />
+            <span>
+              Ongeldige JSON op regel {issue.line}, kolom {issue.column}: {issue.message}.
+            </span>
+          </p>
+        ) : (
+          <p className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+            <Check className="size-3.5 shrink-0" /> Geldige JSON
+          </p>
+        )}
+        <p className="text-muted-foreground">
+          Alleen de JSON, zonder &lt;script&gt;-tags. Tab voegt twee spaties in. Na opslaan worden types, plaatshouders
+          en problemen opnieuw berekend; een eerdere goedkeuring vervalt.
+        </p>
+        {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+      </div>
+
+      {confirmCancel ? (
+        <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <p className="font-medium">Wijzigingen weggooien?</p>
+          <p className="text-xs">De aanpassingen in het blok zijn nog niet opgeslagen en gaan verloren.</p>
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <Button size="sm" variant="outline" onClick={() => setConfirmCancel(false)}>
+              Verder bewerken
+            </Button>
+            <Button size="sm" variant="destructive" onClick={onDone}>
+              Wijzigingen weggooien
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button size="sm" variant="outline" disabled={saving} onClick={cancel}>
+            Annuleren
+          </Button>
+          <Button
+            size="sm"
+            disabled={!!issue || !dirty || saving}
+            onClick={() => void save()}
+            title={issue ? "Herstel eerst de JSON-fout" : !dirty ? "Nog niets gewijzigd" : undefined}
+          >
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {saving ? "Opslaan…" : "Opslaan"}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Kenmerk dat het nieuwe blok handmatig is bewerkt, met de datum; niets als dat niet zo is. */
+export function SchemaEditedBadge({ result }: { result: SchemaMarkupResponse }) {
+  if (!result.edited) return null
+  return (
+    <Pill tone="amber" className="gap-1">
+      <Pencil className="size-3" /> Handmatig bewerkt{result.edited_at ? ` op ${formatDateTime(result.edited_at)}` : ""}
+    </Pill>
+  )
+}
+
 /**
  * Het codeblok met een schakelaar tussen het nieuwe blok en de volledige pagina na plaatsen, en de knop
  * "Kopieer volledig" voor de Rich Results Test. Het nieuwe blok kopiëren blijft de taak van de dialog.
+ * Met `onSave` kan het nieuwe blok ook handmatig bewerkt worden; de dialog slaat op en neemt het resultaat
+ * over. `onEditStateChange` meldt of er bewerkt wordt en of er niet-opgeslagen wijzigingen zijn.
  */
-export function SchemaScriptView({ result, preClassName }: { result: SchemaMarkupResponse; preClassName?: string }) {
+export function SchemaScriptView({
+  result,
+  preClassName,
+  onSave,
+  editDisabled,
+  onEditStateChange,
+}: {
+  result: SchemaMarkupResponse
+  preClassName?: string
+  onSave?: (jsonld: string) => Promise<SchemaMarkupResponse>
+  /** Bewerken (tijdelijk) niet starten, bijvoorbeeld tijdens een lopende aanvraag. */
+  editDisabled?: boolean
+  onEditStateChange?: (state: SchemaEditState) => void
+}) {
   // Standaard de complete markup van de pagina; zonder die gegevens valt het terug op het nieuwe blok.
   const [view, setView] = useState<ScriptView>("full")
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
+  /** De JSON waarmee het bewerken begon; null = niet aan het bewerken. */
+  const [editing, setEditing] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
   const full = (result.full_script ?? "").trim()
   const effective: ScriptView = full ? view : "new"
+
+  const reportRef = useRef(onEditStateChange)
+  useEffect(() => {
+    reportRef.current = onEditStateChange
+  })
+  const isEditing = editing !== null
+  useEffect(() => {
+    reportRef.current?.({ editing: isEditing, dirty: isEditing && dirty })
+  }, [isEditing, dirty])
+  // Bij weggaan (andere pagina, dialog dicht) is er niets meer in bewerking.
+  useEffect(() => () => reportRef.current?.({ editing: false, dirty: false }), [])
+
+  function startEdit() {
+    // Bewerken gaat altijd over het nieuwe blok: dat is wat naar de site gaat.
+    setView("new")
+    setDirty(false)
+    setEditing(scriptToJson(result.script))
+  }
+
+  function stopEdit() {
+    setEditing(null)
+    setDirty(false)
+  }
+
+  if (onSave && editing !== null) {
+    return (
+      <div className="space-y-1.5">
+        <SchemaEditor initial={editing} onSave={onSave} onDone={stopEdit} onDirtyChange={setDirty} />
+      </div>
+    )
+  }
 
   async function copyFull() {
     try {
@@ -249,8 +621,26 @@ export function SchemaScriptView({ result, preClassName }: { result: SchemaMarku
     }
   }
 
+  const editButton = onSave ? (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7 shrink-0 px-2"
+      disabled={editDisabled}
+      onClick={startEdit}
+      title="Het nieuwe blok handmatig aanpassen; dat is wat naar de site gaat"
+    >
+      <Pencil /> Bewerken
+    </Button>
+  ) : null
+
   return (
     <div className="space-y-1.5">
+      {result.edited && (
+        <div>
+          <SchemaEditedBadge result={result} />
+        </div>
+      )}
       {full ? (
         <div className="flex flex-wrap items-center gap-2">
           <div role="group" aria-label="Weergave van de markup" className="inline-flex rounded-md border p-0.5 text-xs">
@@ -274,10 +664,12 @@ export function SchemaScriptView({ result, preClassName }: { result: SchemaMarku
               </button>
             ))}
           </div>
+          <span className="ml-auto" />
+          {editButton}
           <Button
             size="sm"
             variant="ghost"
-            className="ml-auto h-7 px-2"
+            className="h-7 px-2"
             onClick={() => void copyFull()}
             title="Voor de Rich Results Test van Google; niet op de site plakken"
           >
@@ -285,10 +677,13 @@ export function SchemaScriptView({ result, preClassName }: { result: SchemaMarku
           </Button>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">
-          Alleen het nieuwe blok is beschikbaar. Genereer opnieuw om ook de volledige markup van de pagina na plaatsen te
-          zien.
-        </p>
+        <div className="flex items-start gap-2">
+          <p className="flex-1 text-xs text-muted-foreground">
+            Alleen het nieuwe blok is beschikbaar. Genereer opnieuw om ook de volledige markup van de pagina na plaatsen
+            te zien.
+          </p>
+          {editButton}
+        </div>
       )}
 
       <pre
