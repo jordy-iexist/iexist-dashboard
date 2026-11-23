@@ -533,11 +533,24 @@ def _delete_schemas(wp: _WordPress, post_id: int, meta_ids: list[int], *, had_gr
     return True
 
 
-def _with_cache_buster(url: str) -> str:
+def with_cache_buster(url: str) -> str:
+    """URL met een unieke query-parameter, zodat een paginacache de verse pagina teruggeeft."""
     parsed = urlparse(url)
     query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != CACHE_BUSTER]
     query.append((CACHE_BUSTER, uuid.uuid4().hex[:10]))
     return parsed._replace(query=urlencode(query)).geturl()
+
+
+def without_cache_buster(url: str) -> str:
+    """De URL zonder de parameter van `with_cache_buster` (de rest van de query blijft staan)."""
+    parsed = urlparse(url)
+    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(k == CACHE_BUSTER for k, _ in pairs):
+        return url
+    return parsed._replace(query=urlencode([(k, v) for k, v in pairs if k != CACHE_BUSTER])).geturl()
+
+
+_with_cache_buster = with_cache_buster  # oude naam
 
 
 def _verify(url: str, placed_types: list[str]) -> bool:

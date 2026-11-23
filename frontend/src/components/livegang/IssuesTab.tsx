@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { CheckDetails, DETAIL_ITEM_KEYS } from "@/components/livegang/CheckDetails"
+import { ChangesLink } from "@/components/livegang/ChangesWorkspace"
 import { FixPromptDialog } from "@/components/livegang/FixPromptDialog"
 import { IssueDetails } from "@/components/livegang/IssueDetails"
 import { Pill, SeverityBadge } from "@/components/livegang/shared"
@@ -127,16 +128,19 @@ function IssueRow({
           </button>
           {/* Buiten de uitklapknop: een link mag niet in een button staan. */}
           {issue.url && (
-            <a
-              href={issue.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              title={`${issue.url} openen in een nieuw tabblad`}
-              className="inline-flex max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
-            >
-              {grouped ? <span>Pagina openen</span> : <span className="truncate">{issue.url}</span>}
-              <ExternalLink className="size-3 shrink-0" />
-            </a>
+            <div className="flex max-w-full flex-wrap items-center gap-x-3">
+              <a
+                href={issue.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={`${issue.url} openen in een nieuw tabblad`}
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
+              >
+                {grouped ? <span>Pagina openen</span> : <span className="truncate">{issue.url}</span>}
+                <ExternalLink className="size-3 shrink-0" />
+              </a>
+              <ChangesLink url={issue.url} />
+            </div>
           )}
         </div>
         <Button

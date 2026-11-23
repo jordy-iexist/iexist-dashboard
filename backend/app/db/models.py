@@ -1287,6 +1287,69 @@ class LaunchContentSuggestion(Base):
     )
 
 
+class SiteChange(Base):
+    """Beslissing of afhandeling van een medewerker over één voorstel of actiepunt op een pagina.
+
+    Open punten zonder beslissing hebben geen rij. `source_key` is stabiel over herscans en
+    heranalyses (issue-rijen en open voorstellen worden dan opnieuw aangemaakt); de rij bewaart
+    genoeg om zelfstandig te tonen als de bronrij verdwenen is.
+    `status`: goedgekeurd | afgewezen | doorgevoerd. `verified`: true = live teruggezien,
+    false = gecontroleerd maar niet gevonden, None = niet (automatisch) gecontroleerd.
+    """
+
+    __tablename__ = "site_changes"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "source_key", name="uq_site_change_source"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    page_url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    # content_suggestion | scan_issue
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # Vluchtige id's als hint: {"suggestion_id": ...} of {"issue_id": ...}.
+    source_ref: Mapped[Any] = mapped_column(JSON, nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proposed_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    edited: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    item_label: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    verified: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # {checked_at, message, live_value, missing}
+    verify_detail: Mapped[Any] = mapped_column(JSON, nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    done_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    done_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -1318,4 +1381,5 @@ __all__ = [
     "LandingPageRow",
     "LandingPage",
     "LandingPageGenerationSettings",
+    "SiteChange",
 ]

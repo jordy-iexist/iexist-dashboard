@@ -1,12 +1,13 @@
 "use client"
 
-import { Download, Loader2, Play, Radar, RefreshCw, Square, Trash2 } from "lucide-react"
+import { ClipboardCheck, Download, Loader2, Play, Radar, RefreshCw, Square, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AiChecksTab } from "@/components/livegang/AiChecksTab"
 import { AiVisibilityTab } from "@/components/livegang/AiVisibilityTab"
+import { ChangesNavProvider, ChangesWorkspace } from "@/components/livegang/ChangesWorkspace"
 import { ContentWorkspace } from "@/components/livegang/ContentWorkspace"
 import { GeoWorkspace } from "@/components/livegang/GeoWorkspace"
 import { InventoryTab } from "@/components/livegang/InventoryTab"
@@ -52,6 +53,8 @@ const TAB_KEYS = TABS.map((t) => t.key)
 
 /** Sitemap-monitor: zelfde nummer als `LaunchScan.phase` in de backend; in de URL `?fase=monitor`. */
 const MONITOR_PHASE = 6
+/** Aanpassingen per pagina: alleen in de frontend; in de URL `?fase=aanpassingen` (met eventueel `&url=`). */
+const CHANGES_PHASE = 7
 
 async function fetchPhaseState(customerId: string) {
   const query = `customer_website_id=${encodeURIComponent(customerId)}&limit=20`
@@ -103,6 +106,8 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
   const [refreshError, setRefreshError] = useState(false)
   // Ophogen = de fasestatus opnieuw laden (knop "Opnieuw proberen").
   const [loadAttempt, setLoadAttempt] = useState(0)
+  // Ophogen = het scherm Aanpassingen opnieuw openen (leest dan de gekozen pagina uit de URL).
+  const [changesVisit, setChangesVisit] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +132,8 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
         const initial =
           fromUrl === "monitor"
             ? MONITOR_PHASE
+            : fromUrl === "aanpassingen"
+            ? CHANGES_PHASE
             : fromUrl === "1"
             ? 1
             : fromUrl === "2" && state.done[1]
@@ -156,6 +163,14 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
       .catch(() => setRefreshError(true))
   }, [customerId])
 
+  // Naar Aanpassingen, eventueel direct op één pagina (ook vanuit "Bekijk in Aanpassingen"-links).
+  const openChanges = useCallback((url: string | null) => {
+    writeUrlParams({ fase: "aanpassingen", tab: null, ronde: null, url })
+    setPhase(CHANGES_PHASE)
+    setChangesVisit((n) => n + 1)
+    if (url) window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
   function retryLoad() {
     setLoadError(null)
     setLoadAttempt((n) => n + 1)
@@ -182,7 +197,7 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 space-y-2">{header}</div>
         <div className="space-y-2 lg:shrink-0">
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
             <PhaseStepper
               active={phase ?? 1}
               completed={done}
@@ -195,15 +210,23 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
               onSelect={(next) => {
                 setPhase(next)
                 // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
-                writeUrlParams({ fase: String(next), tab: null, ronde: null })
+                writeUrlParams({ fase: String(next), tab: null, ronde: null, url: null })
               }}
             />
             <MonitorStep
               active={phase === MONITOR_PHASE}
               onSelect={() => {
                 setPhase(MONITOR_PHASE)
-                writeUrlParams({ fase: "monitor", tab: null, ronde: null })
+                writeUrlParams({ fase: "monitor", tab: null, ronde: null, url: null })
               }}
+            />
+            <SideStep
+              active={phase === CHANGES_PHASE}
+              onSelect={() => openChanges(null)}
+              icon={ClipboardCheck}
+              eyebrow="Per pagina"
+              label="Aanpassingen"
+              title="Aanpassingen — per pagina voorstellen beoordelen, afvinken en live controleren"
             />
           </div>
           {refreshError && (
@@ -214,11 +237,14 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
           <MondayBoardSetting customerId={customerId} align="end" />
         </div>
       </header>
-      {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
-      {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
-      {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
-      {phase === 4 && <QuarterlyWorkspace customerId={customerId} onChange={refreshPhases} />}
-      {phase === MONITOR_PHASE && <MonitorWorkspace customerId={customerId} />}
+      <ChangesNavProvider customerId={customerId} onOpen={openChanges}>
+        {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
+        {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
+        {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
+        {phase === 4 && <QuarterlyWorkspace customerId={customerId} onChange={refreshPhases} />}
+        {phase === MONITOR_PHASE && <MonitorWorkspace customerId={customerId} />}
+        {phase === CHANGES_PHASE && <ChangesWorkspace key={changesVisit} customerId={customerId} />}
+      </ChangesNavProvider>
     </div>
   )
 }
@@ -226,10 +252,38 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
 /** Stap "Monitor" naast de fasekiezer, in dezelfde stijl: doorlopend, dus zonder nummer of afgerond-status. */
 function MonitorStep({ active, onSelect }: { active: boolean; onSelect: () => void }) {
   return (
+    <SideStep
+      active={active}
+      onSelect={onSelect}
+      icon={Radar}
+      eyebrow="Doorlopend"
+      label="Monitor"
+      title="Monitor — dagelijkse sitemapcontrole op nieuwe en gewijzigde pagina's"
+    />
+  )
+}
+
+/** Losse stap naast de fasekiezer (Monitor, Aanpassingen): altijd klikbaar, zonder nummer of afgerond-status. */
+function SideStep({
+  active,
+  onSelect,
+  icon: Icon,
+  eyebrow,
+  label,
+  title,
+}: {
+  active: boolean
+  onSelect: () => void
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
+  eyebrow: string
+  label: string
+  title: string
+}) {
+  return (
     <button
       type="button"
       onClick={onSelect}
-      title="Monitor — dagelijkse sitemapcontrole op nieuwe en gewijzigde pagina's"
+      title={title}
       aria-current={active ? "step" : undefined}
       className={cn(
         "flex w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors sm:w-40",
@@ -243,12 +297,12 @@ function MonitorStep({ active, onSelect }: { active: boolean; onSelect: () => vo
             active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
           )}
         >
-          <Radar className="size-2.5" strokeWidth={3} />
+          <Icon className="size-2.5" strokeWidth={3} />
         </span>
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Doorlopend</span>
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</span>
       </span>
       <span className={cn("block truncate text-sm leading-snug", active ? "font-semibold" : "font-medium")}>
-        Monitor
+        {label}
       </span>
     </button>
   )

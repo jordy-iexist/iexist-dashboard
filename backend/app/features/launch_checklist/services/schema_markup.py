@@ -225,12 +225,21 @@ def _clip(text: Any, limit: int = MAX_TEXT_CHARS) -> str:
 
 # --- ophalen en analyseren -----------------------------------------------------
 
-def fetch_page_html(url: str) -> tuple[str, str]:
-    """(html, eind-URL). Volgt redirects stap voor stap, elke stap langs de SSRF-bescherming.
+@dataclass
+class FetchedPage:
+    """Opgehaalde HTML-pagina met de doorverwijzingen onderweg (zie `fetch_page`)."""
 
-    Gooit `SchemaMarkupError` als de pagina niet als HTML met status 200 op te halen is.
-    """
+    html: str
+    final_url: str
+    # Elke doorverwijzing: {"url", "status", "location"}, in volgorde.
+    redirects: list[dict[str, Any]] = field(default_factory=list)
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+def fetch_page(url: str) -> FetchedPage:
+    """Als `fetch_page_html`, maar met de doorverwijzingen en de response-headers erbij."""
     current = url
+    redirects: list[dict[str, Any]] = []
     with new_client() as client:
         for _ in range(MAX_HOPS + 1):
             if not is_safe_external_url(current):
@@ -245,6 +254,7 @@ def fetch_page_html(url: str) -> tuple[str, str]:
                 target = clean_url(response.headers.get("location", ""), current)
                 if not target:
                     raise SchemaMarkupError("De pagina stuurt door naar een ongeldige URL.")
+                redirects.append({"url": current, "status": response.status_code, "location": target})
                 current = target
                 continue
             if response.status_code != 200:
@@ -252,8 +262,18 @@ def fetch_page_html(url: str) -> tuple[str, str]:
             if "html" not in response.headers.get("content-type", "").lower():
                 raise SchemaMarkupError("De pagina is geen HTML-pagina.")
             html = response.content[:MAX_BODY_BYTES].decode(response.encoding or "utf-8", errors="replace")
-            return html, str(response.url)
+            return FetchedPage(html=html, final_url=str(response.url), redirects=redirects,
+                               headers={k.lower(): v for k, v in response.headers.items()})
     raise SchemaMarkupError("De pagina stuurt te vaak door; ophalen gestopt.")
+
+
+def fetch_page_html(url: str) -> tuple[str, str]:
+    """(html, eind-URL). Volgt redirects stap voor stap, elke stap langs de SSRF-bescherming.
+
+    Gooit `SchemaMarkupError` als de pagina niet als HTML met status 200 op te halen is.
+    """
+    page = fetch_page(url)
+    return page.html, page.final_url
 
 
 def _parsed_blocks(blocks: list[str]) -> list[Any]:

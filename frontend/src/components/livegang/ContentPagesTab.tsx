@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ChangesLink } from "@/components/livegang/ChangesWorkspace"
 import { CheckDetails } from "@/components/livegang/CheckDetails"
 import { AutoStatusBadge, Pill, PollingFailedNotice } from "@/components/livegang/shared"
 import { SuggestionRow } from "@/components/livegang/SuggestionRow"
@@ -647,6 +648,7 @@ export function ContentPagesTab({
                   >
                     Open pagina <ExternalLink className="size-3" />
                   </a>
+                  <ChangesLink url={openPage.url} />
                 </div>
               </header>
               <div className="[overflow-wrap:anywhere]">

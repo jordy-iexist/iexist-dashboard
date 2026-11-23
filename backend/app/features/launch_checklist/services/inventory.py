@@ -123,6 +123,53 @@ def _determine_indexability(rec: PageRecord, x_robots: str) -> None:
     rec.indexable, rec.indexability_reason = True, None
 
 
+def fill_from_html(rec: PageRecord, html: str, root_domain: str) -> None:
+    """Zet de SEO-velden en de interne linkdoelen van geparste HTML op het record.
+
+    De basis-URL voor links is `rec.final_url`.
+    """
+    page = extract_page(html)
+    rec.title = page.title
+    rec.title_length = len(page.title) if page.title is not None else None
+    rec.meta_description = page.meta_description
+    rec.meta_description_length = (
+        len(page.meta_description) if page.meta_description is not None else None
+    )
+    rec.meta_robots = page.meta_robots
+    rec.canonical = page.canonical
+    rec.lang = page.lang
+    rec.hreflang = page.hreflang
+    rec.h1 = page.h1
+    rec.h1_count = len(page.h1)
+    rec.h2 = page.h2[:30]
+    rec.word_count = page.word_count
+    rec.main_word_count = page.main_word_count
+    rec.images_total = page.images_total
+    rec.images_missing_alt = page.images_missing_alt
+    rec.schema_types = page.schema_types
+    rec.open_graph = page.open_graph
+
+    internal: list[str] = []
+    external = 0
+    seen: set[str] = set()
+    for href in page.links:
+        if href.lower().startswith(_SKIP_LINK_PREFIXES):
+            continue
+        absolute = clean_url(href, rec.final_url)
+        if not absolute:
+            continue
+        if is_internal(absolute, root_domain):
+            key = url_key(absolute)
+            if key not in seen:
+                seen.add(key)
+                internal.append(absolute)
+        else:
+            external += 1
+    rec.internal_links = len(internal)
+    rec.external_links = external
+    rec.internal_targets = internal
+
+
 # Wordt per pagina aangeroepen zodra de HTML geparsed is: (record, html, response).
 PageHook = Callable[[PageRecord, str, httpx.Response], None]
 
@@ -185,46 +232,7 @@ async def fetch_page(
         html = response.content[:MAX_BODY_BYTES].decode(
             response.encoding or "utf-8", errors="replace"
         )
-        page = extract_page(html)
-        rec.title = page.title
-        rec.title_length = len(page.title) if page.title is not None else None
-        rec.meta_description = page.meta_description
-        rec.meta_description_length = (
-            len(page.meta_description) if page.meta_description is not None else None
-        )
-        rec.meta_robots = page.meta_robots
-        rec.canonical = page.canonical
-        rec.lang = page.lang
-        rec.hreflang = page.hreflang
-        rec.h1 = page.h1
-        rec.h1_count = len(page.h1)
-        rec.h2 = page.h2[:30]
-        rec.word_count = page.word_count
-        rec.main_word_count = page.main_word_count
-        rec.images_total = page.images_total
-        rec.images_missing_alt = page.images_missing_alt
-        rec.schema_types = page.schema_types
-        rec.open_graph = page.open_graph
-
-        internal: list[str] = []
-        external = 0
-        seen: set[str] = set()
-        for href in page.links:
-            if href.lower().startswith(_SKIP_LINK_PREFIXES):
-                continue
-            absolute = clean_url(href, rec.final_url)
-            if not absolute:
-                continue
-            if is_internal(absolute, root_domain):
-                key = url_key(absolute)
-                if key not in seen:
-                    seen.add(key)
-                    internal.append(absolute)
-            else:
-                external += 1
-        rec.internal_links = len(internal)
-        rec.external_links = external
-        rec.internal_targets = internal
+        fill_from_html(rec, html, root_domain)
         if page_hook is not None:
             page_hook(rec, html, response)
 
