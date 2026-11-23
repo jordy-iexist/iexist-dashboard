@@ -36,8 +36,16 @@ type IssueBucket = {
   issues: LaunchScanIssue[]
 }
 
+/** Vinkje in schermvolgorde: een losse rij of een hele groep. */
+type SelectUnit = { key: string; ids: string[] }
+
 const STATUS_OPTIONS: IssueStatus[] = ["open", "doorgezet", "opgelost", "genegeerd"]
 const SEVERITY_RANK: Record<IssueSeverity, number> = { hoog: 0, middel: 1, laag: 2 }
+
+/** Eén sitebreed punt (zonder URL) blijft een losse regel; de rest wordt een groep. */
+function isSingle(bucket: IssueBucket): boolean {
+  return bucket.issues.length === 1 && !bucket.issues[0].url
+}
 
 function pagesLabel(count: number): string {
   return count === 1 ? "1 pagina" : `${count} pagina's`
@@ -57,7 +65,8 @@ type IssueRowProps = {
   selected: boolean
   open: boolean
   busy: boolean
-  onToggleSelected: () => void
+  /** shift: Shift ingedrukt, dan selecteren we een reeks vanaf het anker. */
+  onToggleSelected: (shift: boolean) => void
   onToggleOpen: () => void
   onPrompt: () => void
   onPush: () => void
@@ -86,7 +95,12 @@ function IssueRow({
           type="checkbox"
           className="mt-1.5"
           checked={selected}
-          onChange={onToggleSelected}
+          onClick={(e) => onToggleSelected(e.shiftKey)}
+          onChange={() => {}}
+          // Shift+klik mag geen tekst tussen de rijen selecteren.
+          onMouseDown={(e) => {
+            if (e.shiftKey) e.preventDefault()
+          }}
           aria-label={`${headline} selecteren`}
         />
         <div className="min-w-0 flex-1">
@@ -196,7 +210,8 @@ type IssueGroupRowProps = {
   onOpenChange: (open: boolean) => void
   selectedCount: number
   busy: boolean
-  onToggleSelected: () => void
+  /** shift: Shift ingedrukt, dan selecteren we een reeks vanaf het anker. */
+  onToggleSelected: (shift: boolean) => void
   onPush: (ids: string[]) => void
   onStatus: (status: IssueStatus) => void
   children: React.ReactNode
@@ -233,7 +248,11 @@ function IssueGroupRow({
             type="checkbox"
             className="mt-1.5"
             checked={allSelected}
-            onChange={onToggleSelected}
+            onClick={(e) => onToggleSelected(e.shiftKey)}
+            onChange={() => {}}
+            onMouseDown={(e) => {
+              if (e.shiftKey) e.preventDefault()
+            }}
             aria-label={`Alle pagina's van ${bucket.label} selecteren`}
           />
           <CollapsibleTrigger className="min-w-0 flex-1 text-left">
@@ -296,6 +315,8 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
   const [severity, setSeverity] = useState<string>("")
   const [status, setStatus] = useState<string>("open")
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Laatst gewoon aangeklikte eenheid; Shift+klik selecteert vanaf hier.
+  const [anchor, setAnchor] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -369,6 +390,22 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
     )
   }, [data, groupInfo])
 
+  // Alle vinkjes in schermvolgorde; rijen van een dichte groep zijn niet zichtbaar.
+  const units = useMemo(() => {
+    const list: SelectUnit[] = []
+    for (const bucket of buckets) {
+      if (isSingle(bucket)) {
+        list.push({ key: bucket.issues[0].id, ids: [bucket.issues[0].id] })
+        continue
+      }
+      list.push({ key: `group:${bucket.issueType}`, ids: bucket.issues.map((i) => i.id) })
+      if (openGroups.has(bucket.issueType)) {
+        for (const issue of bucket.issues) list.push({ key: issue.id, ids: [issue.id] })
+      }
+    }
+    return list
+  }, [buckets, openGroups])
+
   async function updateStatus(ids: string[], next: IssueStatus) {
     if (!ids.length) return
     setBusy(true)
@@ -434,25 +471,27 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
   const pushable = issues.filter((i) => selected.has(i.id) && !i.external_item_id).map((i) => i.id)
   const allSelected = issues.length > 0 && issues.every((i) => selected.has(i.id))
 
-  function toggle(id: string) {
+  /**
+   * Vinkje aangeklikt. Zonder Shift (of zonder geldig anker) één rij of groep aan/uit en wordt dit het anker.
+   * Met Shift krijgt alles tussen anker en klik de nieuwe stand van de aangeklikte eenheid; het anker blijft.
+   */
+  function handleSelect(key: string, shift: boolean) {
+    const target = units.findIndex((u) => u.key === key)
+    if (target < 0) return
+    const from = shift && anchor ? units.findIndex((u) => u.key === anchor) : -1
+    const range = from < 0 ? [units[target]] : units.slice(Math.min(from, target), Math.max(from, target) + 1)
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function toggleGroupSelection(ids: string[]) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      const all = ids.every((id) => next.has(id))
-      for (const id of ids) {
-        if (all) next.delete(id)
-        else next.add(id)
+      const deselect = units[target].ids.every((id) => prev.has(id))
+      for (const unit of range) {
+        for (const id of unit.ids) {
+          if (deselect) next.delete(id)
+          else next.add(id)
+        }
       }
       return next
     })
+    if (from < 0) setAnchor(key)
   }
 
   function setGroupOpen(key: string, open: boolean) {
@@ -467,6 +506,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
   // In "Alle types" staan groepen dicht; kies je één type, dan staat die groep open.
   function selectIssueType(next: string | null) {
     setIssueType(next)
+    setAnchor(null)
     setOpenGroups(next === null ? new Set() : new Set([next]))
   }
 
@@ -480,7 +520,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
         selected={selected.has(issue.id)}
         open={open}
         busy={busy}
-        onToggleSelected={() => toggle(issue.id)}
+        onToggleSelected={(shift) => handleSelect(issue.id, shift)}
         onToggleOpen={() => setExpanded(open ? null : issue.id)}
         onPrompt={() => setPromptIssue(issue)}
         onPush={() => void pushIssues([issue.id])}
@@ -527,19 +567,40 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
+          <select
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value)
+              setAnchor(null)
+            }}
+            className="h-8 rounded-md border bg-background px-2 text-sm"
+          >
             <option value="">Alle categorieën</option>
             {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
-          <select value={severity} onChange={(e) => setSeverity(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
+          <select
+            value={severity}
+            onChange={(e) => {
+              setSeverity(e.target.value)
+              setAnchor(null)
+            }}
+            className="h-8 rounded-md border bg-background px-2 text-sm"
+          >
             <option value="">Alle ernst</option>
             <option value="hoog">Hoog</option>
             <option value="middel">Middel</option>
             <option value="laag">Laag</option>
           </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value)
+              setAnchor(null)
+            }}
+            className="h-8 rounded-md border bg-background px-2 text-sm"
+          >
             <option value="">Alle statussen</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>{ISSUE_STATUS_LABELS[s]}</option>
@@ -557,6 +618,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
             />
             {selected.size > 0 ? `${selected.size} geselecteerd` : "Selecteer alles"}
           </label>
+          {selected.size <= 1 && <span className="text-xs text-muted-foreground">Tip: Shift+klik selecteert een reeks</span>}
           <div className="ml-auto flex flex-wrap gap-2">
             {(["opgelost", "genegeerd", "open"] as IssueStatus[]).map((s) => (
               <Button key={s} size="sm" variant="ghost" disabled={busy || selected.size === 0} onClick={() => updateStatus([...selected], s)}>
@@ -590,8 +652,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
 
         <ul className="divide-y rounded-lg border bg-card">
           {buckets.map((bucket) => {
-            // Eén sitebreed punt (zonder URL) blijft een losse regel; de rest wordt een groep.
-            if (bucket.issues.length === 1 && !bucket.issues[0].url) return renderRow(bucket.issues[0], false)
+            if (isSingle(bucket)) return renderRow(bucket.issues[0], false)
             const ids = bucket.issues.map((i) => i.id)
             return (
               <IssueGroupRow
@@ -602,7 +663,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
                 onOpenChange={(open) => setGroupOpen(bucket.issueType, open)}
                 selectedCount={ids.filter((id) => selected.has(id)).length}
                 busy={busy}
-                onToggleSelected={() => toggleGroupSelection(ids)}
+                onToggleSelected={(shift) => handleSelect(`group:${bucket.issueType}`, shift)}
                 onPush={(pushIds) => void pushIssues(pushIds, bucket.label)}
                 onStatus={(next) => void updateStatus(ids, next)}
               >
