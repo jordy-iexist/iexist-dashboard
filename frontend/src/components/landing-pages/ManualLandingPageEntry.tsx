@@ -181,7 +181,7 @@ export function ManualLandingPageEntry({ onSuccess }: { onSuccess?: () => void }
 
       {!templateError && fields.length > 0 && (
       <div className="space-y-3">
-        <div className="overflow-x-auto rounded-lg border">
+        <div className="overflow-x-auto rounded-lg border bg-card">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b bg-muted/50">

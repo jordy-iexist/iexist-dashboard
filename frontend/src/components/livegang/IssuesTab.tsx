@@ -541,7 +541,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
           onClick={() => selectIssueType(null)}
           className={cn(
             "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm",
-            issueType === null ? "bg-primary/10 font-medium" : "hover:bg-muted"
+            issueType === null ? "bg-primary/10 font-medium" : "hover:bg-card"
           )}
         >
           Alle types
@@ -554,7 +554,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
             onClick={() => selectIssueType(group.issue_type)}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-              issueType === group.issue_type ? "bg-primary/10 font-medium" : "hover:bg-muted"
+              issueType === group.issue_type ? "bg-primary/10 font-medium" : "hover:bg-card"
             )}
           >
             <span
@@ -613,7 +613,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
           <span className="text-sm text-muted-foreground">{data?.total ?? 0} actiepunten</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm">
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -638,7 +638,7 @@ export function IssuesTab({ scanId, customerId }: { scanId: string; customerId: 
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         {notice && (
-          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <div className="rounded-md border bg-card px-3 py-2 text-sm">
             <p>
               {notice.text}{" "}
               {notice.boardUrl && (

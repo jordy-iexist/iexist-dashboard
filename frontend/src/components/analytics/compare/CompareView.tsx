@@ -68,7 +68,7 @@ export function CompareView({ initialState }: { initialState: CompareState }) {
         <div
           role="group"
           aria-label="Soort vergelijking"
-          className="grid w-full grid-cols-3 gap-1 rounded-lg border bg-muted/40 p-1 sm:inline-grid sm:w-auto"
+          className="grid w-full grid-cols-3 gap-1 rounded-lg border bg-card p-1 sm:inline-grid sm:w-auto"
         >
           {MODES.map((mode) => {
             const selected = mode.key === state.mode
@@ -82,7 +82,7 @@ export function CompareView({ initialState }: { initialState: CompareState }) {
                 className={cn(
                   "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors",
                   selected
-                    ? "bg-card font-medium text-foreground shadow-xs"
+                    ? "bg-muted font-medium text-foreground shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >

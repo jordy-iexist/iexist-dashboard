@@ -14,6 +14,7 @@ from unittest.mock import patch
 from app.db.models import SiteChange
 from app.features.launch_checklist.services.discovery import url_key
 from app.features.launch_checklist.services.schema_markup import FetchedPage, SchemaMarkupError
+from app.features.site_changes.mappers import counts, open_high_count
 from app.features.site_changes.services import verify
 from app.features.site_changes.services.changes import (
     KIND_ISSUE,
@@ -82,20 +83,20 @@ class TopicTest(unittest.TestCase):
 
 # --- statussen samenvoegen ---------------------------------------------------------
 
-def _source(kind, status, *, key=None, sid=None, type_key="c3_meta_title"):
+def _source(kind, status, *, key=None, sid=None, type_key="c3_meta_title", severity=None):
     return SourceItem(
         key=key or uuid.uuid4().hex, source_kind=kind, type_key=type_key, topic=topic_for(type_key),
         page_url=PAGE, url_key=url_key(PAGE), title="t", description=None, current_value="oud",
         proposed_value="nieuw" if kind == KIND_SUGGESTION else None, rationale=None, ref=None,
-        severity=None, item_label=None, status=status,
+        severity=severity, item_label=None, status=status,
         source_ref={"suggestion_id": sid or uuid.uuid4().hex} if kind == KIND_SUGGESTION else {"issue_id": "i"},
     )
 
 
-def _row(key, status, kind=KIND_SUGGESTION, source_ref=None):
+def _row(key, status, kind=KIND_SUGGESTION, source_ref=None, severity=None):
     return SiteChange(
         id=str(uuid.uuid4()), customer_website_id="c", page_url=PAGE, url_key=url_key(PAGE), topic="meta_title",
-        source_kind=kind, source_key=key, source_ref=source_ref or {}, title="t", status=status,
+        source_kind=kind, source_key=key, source_ref=source_ref or {}, title="t", status=status, severity=severity,
     )
 
 
@@ -264,6 +265,36 @@ class VerifyIssuesTest(unittest.TestCase):
         self.assertIn("status_4xx", verify.determinable_types(live))
 
 
+class OpenHighCountTest(unittest.TestCase):
+    def test_counts_only_open_items_with_high_severity(self):
+        items = [
+            _source(KIND_ISSUE, "open", severity="hoog"),
+            _source(KIND_ISSUE, "doorgezet", severity="hoog"),  # telt als open
+            _source(KIND_ISSUE, "open", severity="middel"),
+            _source(KIND_ISSUE, "open"),
+            _source(KIND_ISSUE, "genegeerd", severity="hoog"),  # afgewezen
+            _source(KIND_ISSUE, "opgelost", severity="hoog"),  # valt af zonder rij
+        ]
+        approved = _source(KIND_ISSUE, "open", severity="hoog")
+        done = _source(KIND_ISSUE, "open", severity="hoog")
+        reopened = _source(KIND_ISSUE, "open", severity="laag")
+        sources = {i.key: i for i in [*items, approved, done, reopened]}
+        rows = [
+            _row(approved.key, "goedgekeurd", KIND_ISSUE),
+            _row(done.key, "doorgevoerd", KIND_ISSUE),
+            # De rij (momentopname) wint van de bron.
+            _row(reopened.key, "open", KIND_ISSUE, severity="hoog"),
+            # Rij zonder bron telt ook mee.
+            _row("weg", "open", KIND_ISSUE, severity="hoog"),
+        ]
+        entries = merge_entries(sources, rows)
+        open_count, _, _ = counts(entries)
+        self.assertEqual(open_high_count(entries), 4)
+        self.assertEqual(open_count, 6)
+        self.assertLessEqual(open_high_count(entries), open_count)
+        self.assertEqual(open_high_count([]), 0)
+
+
 # --- API tegen de dev-database (alles in een terug te draaien transactie) ----------
 
 def _dev_db_available() -> bool:
@@ -419,6 +450,7 @@ class SiteChangesApiTest(unittest.TestCase):
         weights = [p["open_count"] + p["approved_count"] for p in data["pages"]]
         self.assertEqual(weights, sorted(weights, reverse=True))
         self.assertEqual(data["totals"]["open"], sum(p["open_count"] for p in data["pages"]))
+        self.assertLessEqual(data["totals"]["open_high"], data["totals"]["open"])
 
         page = self._page()
         item = self._key_for(page, "suggestion_id", suggestion.id)
@@ -532,6 +564,24 @@ class SiteChangesApiTest(unittest.TestCase):
         r = self._put(again, "reopen")
         self.assertEqual(r.json()["status"], "open")
         self.assertEqual(self.db.query(SiteChange).filter(SiteChange.source_key == item["key"]).count(), 0)
+
+    def test_open_high_in_totals(self):
+        def totals():
+            r = self.client.get(f"{self.base}/pages")
+            self.assertEqual(r.status_code, 200, r.text)
+            return r.json()["totals"]
+
+        before = totals()
+        issue_type = self._free_issue_type(["h1_multiple", "meta_too_short", "title_too_short", "lang_missing"])
+        issue = self._issue(issue_type)  # severity "hoog"
+        after = totals()
+        self.assertEqual(after["open"], before["open"] + 1)
+        self.assertEqual(after["open_high"], before["open_high"] + 1)
+        self.assertLessEqual(after["open_high"], after["open"])
+
+        item = self._key_for(self._page(), "issue_id", issue.id)
+        self.assertEqual(self._put(item, "reject").status_code, 200)
+        self.assertEqual(totals()["open_high"], before["open_high"])
 
     def test_source_gone_keeps_row(self):
         suggestion = self._suggestion("c3_headings", "## Nieuwe kop\nUitleg bij de kop.", current="Oude kop")

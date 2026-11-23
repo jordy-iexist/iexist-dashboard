@@ -12,7 +12,7 @@ export function LandingPageUploadTabs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-1 rounded-lg border p-1 w-fit">
+      <div className="flex gap-1 rounded-lg border bg-card p-1 w-fit">
         <button
           type="button"
           onClick={() => setActiveTab("csv")}

@@ -2,12 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
   Settings,
   BarChart3,
-  Users,
   LogOut,
   FileText,
   Upload,
@@ -42,17 +41,25 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { type AuthUser } from "@/lib/auth-types";
+import {
+  customerHref,
+  customerIdFromLocation,
+  persistActiveCustomer,
+  readTabCustomerId,
+  subscribeTabCustomer,
+  writeActiveCustomerCookie,
+} from "@/lib/active-customer";
+import {
+  CustomerSwitcher,
+  fetchCustomerOptions,
+  type CustomerOption,
+} from "@/components/klanten/CustomerSwitcher";
 
 const menuItems = [
   {
     title: "Dashboard",
     url: "/dashboard",
     icon: LayoutDashboard,
-  },
-  {
-    title: "Klanten",
-    url: "/dashboard/klanten",
-    icon: Users,
   },
 ];
 
@@ -109,12 +116,113 @@ const subMenuClass = "ml-3.5 border-l-0 pl-1.5";
 const badgeClass =
   "ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/70";
 
+// Server-snapshot voor sessionStorage: op de server en bij hydratie is er geen
+// tabblad-klant, zodat de eerste render overeenkomt met de server-HTML.
+const getServerTabCustomerId = () => null;
+
 export function AppSidebar({
   user,
+  customers: initialCustomers,
+  initialCustomerId,
   ...props
-}: { user: AuthUser } & React.ComponentProps<typeof Sidebar>) {
+}: {
+  user: AuthUser;
+  customers: CustomerOption[];
+  initialCustomerId: string | null;
+} & React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { state, isMobile, setOpen } = useSidebar();
+
+  // Klantenlijst: begint met de server-prop, de kiezer kan hem verversen.
+  const [customers, setCustomers] = React.useState(initialCustomers);
+  const [prevInitialCustomers, setPrevInitialCustomers] =
+    React.useState(initialCustomers);
+  if (initialCustomers !== prevInitialCustomers) {
+    setPrevInitialCustomers(initialCustomers);
+    setCustomers(initialCustomers);
+  }
+
+  // Actieve klant: adres, dan sessionStorage van dit tabblad, dan de cookie.
+  const urlCustomerId = customerIdFromLocation(pathname, searchParams);
+  const tabCustomerId = React.useSyncExternalStore(
+    subscribeTabCustomer,
+    readTabCustomerId,
+    getServerTabCustomerId
+  );
+  const storedCustomerId = tabCustomerId ?? initialCustomerId;
+  // Een id uit het adres geldt altijd (de lijst kan nog niet ververst zijn);
+  // een onthouden id alleen als de klant nog bestaat.
+  const activeCustomerId =
+    urlCustomerId ??
+    (storedCustomerId &&
+    customers.some((customer) => customer.id === storedCustomerId)
+      ? storedCustomerId
+      : null);
+
+  // Klant uit het adres onthouden voor dit tabblad en als laatst gekozen.
+  React.useEffect(() => {
+    if (urlCustomerId) persistActiveCustomer(urlCustomerId);
+  }, [urlCustomerId]);
+
+  // Staat de klant uit het adres niet in de lijst (bijv. net aangemaakt),
+  // haal de lijst dan opnieuw op.
+  const urlCustomerKnown =
+    !urlCustomerId || customers.some((c) => c.id === urlCustomerId);
+  React.useEffect(() => {
+    if (urlCustomerKnown) return;
+    let cancelled = false;
+    void fetchCustomerOptions().then((fresh) => {
+      if (fresh && !cancelled) setCustomers(fresh);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [urlCustomerId, urlCustomerKnown]);
+
+  // Bij terugkeer naar dit tabblad de cookie op de klant van dit tabblad
+  // zetten, zodat een server-redirect in dit tabblad de juiste klant pakt.
+  const tabActiveCustomerId = urlCustomerId ?? tabCustomerId;
+  React.useEffect(() => {
+    if (!tabActiveCustomerId) return;
+    const syncCookie = () => {
+      if (document.visibilityState === "visible") {
+        writeActiveCustomerCookie(tabActiveCustomerId);
+      }
+    };
+    window.addEventListener("focus", syncCookie);
+    document.addEventListener("visibilitychange", syncCookie);
+    return () => {
+      window.removeEventListener("focus", syncCookie);
+      document.removeEventListener("visibilitychange", syncCookie);
+    };
+  }, [tabActiveCustomerId]);
+
+  // Menu-links volgen de actieve klant; zonder klant de gewone adressen.
+  const hrefFor = (
+    section: Parameters<typeof customerHref>[0],
+    fallback: string
+  ) => (activeCustomerId ? customerHref(section, activeCustomerId) : fallback);
+  const customerHomePath = activeCustomerId
+    ? customerHref("home", activeCustomerId)
+    : null;
+  const isPathActive = (url: string): boolean => {
+    if (url === "/dashboard") {
+      return (
+        pathname === "/dashboard" ||
+        (customerHomePath !== null &&
+          (pathname === customerHomePath ||
+            pathname.startsWith(`${customerHomePath}/`)))
+      );
+    }
+    return pathname.startsWith(url);
+  };
+  const menuHref = (url: string) =>
+    url === "/dashboard" ? hrefFor("home", url) : url;
+  const blogHref = (url: string) =>
+    url === "/dashboard/blogs" ? hrefFor("blogs", url) : url;
+  const landingPageHref = (url: string) =>
+    url === "/dashboard/landing-pages" ? hrefFor("landingPages", url) : url;
 
   // "Livegang checklist" staat open op de eigen pagina's, ook als je er vanaf
   // een andere pagina naartoe navigeert (de sidebar blijft dan gemount).
@@ -156,6 +264,11 @@ export function AppSidebar({
           </Link>
           <SidebarTrigger className="ml-auto text-white/70 hover:bg-white/10 hover:text-white group-data-[collapsible=icon]:ml-0" />
         </div>
+        <CustomerSwitcher
+          customers={customers}
+          activeCustomerId={activeCustomerId}
+          onCustomersChange={setCustomers}
+        />
       </SidebarHeader>
 
       <SidebarContent>
@@ -166,10 +279,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => {
-                const isActive =
-                  item.url === "/dashboard"
-                    ? pathname === item.url
-                    : pathname.startsWith(item.url);
+                const isActive = isPathActive(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
@@ -178,7 +288,7 @@ export function AppSidebar({
                       tooltip={item.title}
                       className={itemClass}
                     >
-                      <Link href={item.url}>
+                      <Link href={menuHref(item.url)}>
                         <item.icon />
                         <span>{item.title}</span>
                       </Link>
@@ -214,7 +324,7 @@ export function AppSidebar({
                           isActive={pathname.startsWith(SEO_GEO_URL)}
                           className={subClass}
                         >
-                          <Link href={SEO_GEO_URL}>
+                          <Link href={hrefFor("seoGeo", SEO_GEO_URL)}>
                             <Search />
                             <span>SEO/GEO-scan</span>
                           </Link>
@@ -226,7 +336,7 @@ export function AppSidebar({
                           isActive={pathname.startsWith(GOLIVE_URL)}
                           className={subClass}
                         >
-                          <Link href={GOLIVE_URL}>
+                          <Link href={hrefFor("oplevering", GOLIVE_URL)}>
                             <ListChecks />
                             <span>Livegang</span>
                           </Link>
@@ -238,7 +348,7 @@ export function AppSidebar({
                           isActive={pathname.startsWith(ANALYTICS_URL)}
                           className={subClass}
                         >
-                          <Link href={ANALYTICS_URL}>
+                          <Link href={hrefFor("analytics", ANALYTICS_URL)}>
                             <BarChart3 />
                             <span>Analytics</span>
                           </Link>
@@ -273,7 +383,7 @@ export function AppSidebar({
                               isActive={isActive}
                               className={subClass}
                             >
-                              <Link href={item.url}>
+                              <Link href={blogHref(item.url)}>
                                 <item.icon />
                                 <span>{item.title}</span>
                               </Link>
@@ -311,7 +421,7 @@ export function AppSidebar({
                               isActive={isActive}
                               className={subClass}
                             >
-                              <Link href={item.url}>
+                              <Link href={landingPageHref(item.url)}>
                                 <item.icon />
                                 <span>{item.title}</span>
                               </Link>

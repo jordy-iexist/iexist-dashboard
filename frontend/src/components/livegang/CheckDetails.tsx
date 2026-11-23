@@ -53,7 +53,7 @@ function LinkGroup({ title, rows, total }: { title: string; rows: LinkProblem[];
       <p className="mb-1 text-xs font-medium text-muted-foreground">
         {title} ({total ?? rows.length})
       </p>
-      <ul className="divide-y rounded-md border text-xs">
+      <ul className="divide-y rounded-md border bg-card text-xs">
         {rows.map((row) => (
           <LinkRow key={row.url} row={row} />
         ))}
@@ -140,7 +140,7 @@ function AnchorTag({ anchor }: { anchor: LinkAnchor }) {
 
 function ImageList({ images }: { images: ImageProblem[] }) {
   return (
-    <ul className="divide-y rounded-md border text-xs">
+    <ul className="divide-y rounded-md border bg-card text-xs">
       {images.map((image, index) => (
         <li key={`${index}-${image.src}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
           {image.missing_alt && <Pill tone="red">geen alt</Pill>}
@@ -160,7 +160,7 @@ function ImageList({ images }: { images: ImageProblem[] }) {
 
 function GenericLinkList({ links }: { links: { url: string; text: string }[] }) {
   return (
-    <ul className="divide-y rounded-md border text-xs">
+    <ul className="divide-y rounded-md border bg-card text-xs">
       {links.map((link, index) => (
         <li key={`${index}-${link.url}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
           <span className="font-medium">“{link.text}”</span>

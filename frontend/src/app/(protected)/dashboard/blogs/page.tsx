@@ -7,14 +7,11 @@ import {
   BlogsBatchPublishList,
   type BlogListItem,
 } from "@/components/blogs/BlogsBatchPublishList"
-import {
-  CustomerFilterSelect,
-  type CustomerFilterOption,
-} from "@/components/klanten/CustomerFilterSelect"
 import { CreatedDateFilter } from "@/components/blogs/CreatedDateFilter"
 import { KlantHero } from "@/components/klanten/KlantHero"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { type CustomersResponse } from "@/lib/customer-types"
+import { readActiveCustomerCookie } from "@/lib/active-customer.server"
+import { fetchCustomerList } from "@/lib/customer-api"
 import {
   getBackendApiUrl,
   getBackendAuthorizationValue,
@@ -253,32 +250,21 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
     redirect("/login")
   }
 
+  // Zonder klant in het adres: door naar de lijst van de laatst gekozen klant
+  // (als die nog bestaat). "none" (blogs zonder klant) blijft staan.
+  if (!customerFilter) {
+    const activeCustomerId = await readActiveCustomerCookie()
+    if (activeCustomerId) {
+      const customers = await fetchCustomerList()
+      if (customers.some((customer) => customer.id === activeCustomerId)) {
+        redirect(buildPageHref(page, scope, activeCustomerId, createdDateFromUrl))
+      }
+    }
+  }
+
   let blogs: BlogListItem[] = []
   let totalBlogs = 0
   let errorMessage: string | null = null
-  let customers: CustomerFilterOption[] = []
-
-  try {
-    const customersResponse = await fetch(
-      `${getBackendApiUrl()}/api/customers`,
-      {
-        method: "GET",
-        headers: { Authorization: authorization },
-        cache: "no-store",
-      }
-    )
-    if (customersResponse.ok) {
-      const payload = (await customersResponse.json().catch(() => null)) as
-        | CustomersResponse
-        | null
-      customers = (payload?.websites ?? []).map((customer) => ({
-        id: customer.id,
-        name: customer.name,
-      }))
-    }
-  } catch {
-    // Klantfilter is niet kritiek voor de pagina; lijst blijft leeg.
-  }
 
   try {
     const url = new URL(`${getBackendApiUrl()}/api/blogs`)
@@ -364,21 +350,11 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
             customerWebsiteId={customerFilter}
             basePath="/dashboard/blogs"
           />
-          <CustomerFilterSelect
-            customers={customers}
-            selected={customerFilter}
-            scope={scope}
-            basePath="/dashboard/blogs"
-            extraParams={
-              createdDate.createdOn
-                ? {
-                    created_on: createdDate.createdOn,
-                    created_from: createdDate.createdFrom ?? "",
-                    created_to: createdDate.createdTo ?? "",
-                  }
-                : undefined
-            }
-          />
+          {customerFilter === "none" && (
+            <span className="inline-flex h-9 items-center rounded-full border border-neutral-300 px-4 text-sm text-muted-foreground dark:border-white/20">
+              Zonder klant
+            </span>
+          )}
         </div>
       </div>
 
@@ -389,7 +365,7 @@ export default async function BlogsPage({ searchParams }: BlogsPageProps) {
       )}
 
       {!errorMessage && blogs.length === 0 && (
-        <div className="rounded-lg border p-8 text-center">
+        <div className="rounded-lg border bg-card p-8 text-center">
           <p className="text-muted-foreground">
             Nog geen blogs beschikbaar. Upload een CSV bestand om te starten.
           </p>

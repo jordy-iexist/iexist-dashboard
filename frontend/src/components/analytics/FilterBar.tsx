@@ -9,7 +9,7 @@ import type { AnalyticsFilters } from "@/lib/analytics/api"
 import type { LaunchCustomer } from "@/lib/launch-checklist"
 
 const selectClass =
-  "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+  "h-9 w-full min-w-0 rounded-md border border-input bg-card px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
 
 export type FilterBarProps = {
   /** `null` zolang de klanten laden. */
@@ -85,6 +85,7 @@ export function FilterBar({
                 id={`${id}-van`}
                 type="date"
                 value={filters.start ?? ""}
+                className="bg-card"
                 max={filters.end ?? undefined}
                 aria-invalid={invalidPeriod || undefined}
                 onChange={(e) => onChange({ start: e.target.value || null })}
@@ -98,6 +99,7 @@ export function FilterBar({
                 id={`${id}-tot`}
                 type="date"
                 value={filters.end ?? ""}
+                className="bg-card"
                 min={filters.start ?? undefined}
                 aria-invalid={invalidPeriod || undefined}
                 onChange={(e) => onChange({ end: e.target.value || null })}

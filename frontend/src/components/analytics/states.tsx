@@ -14,7 +14,7 @@ export function EmptyState({ children, className }: { children: React.ReactNode;
 /** Foutmelding van de backend als gewone melding (geen crash). */
 export function ErrorNote({ children }: { children: React.ReactNode }) {
   return (
-    <p role="alert" className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+    <p role="alert" className="rounded-md border border-red-300 bg-card px-3 py-2 text-sm text-red-700 dark:text-red-300">
       {children}
     </p>
   )
@@ -35,10 +35,10 @@ export function InfoNotes({ notes, className }: { notes: string[]; className?: s
   )
 }
 
-/** Opvallende mededeling in een grijs vlak (bijv. "er is nog maar één meting"). */
+/** Opvallende mededeling in een wit vlak (bijv. "er is nog maar één meting"). */
 export function Notice({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+    <p className="flex items-start gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
       <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
       <span>{children}</span>
     </p>

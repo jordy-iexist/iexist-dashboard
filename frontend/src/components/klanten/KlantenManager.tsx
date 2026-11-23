@@ -217,7 +217,7 @@ export function KlantenManager() {
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Zoek op klantnaam..."
                 aria-label="Zoek op klantnaam"
-                className="h-9 w-full pl-8 sm:w-56"
+                className="h-9 w-full bg-card pl-8 sm:w-56"
               />
             </div>
             <select
@@ -258,7 +258,7 @@ export function KlantenManager() {
             Geen klanten gevonden voor deze zoekopdracht.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="overflow-x-auto rounded-lg border bg-card">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50 text-left text-muted-foreground">
@@ -284,7 +284,7 @@ export function KlantenManager() {
                     Categorie
                   </th>
                   <th className="px-3 py-2 text-xs font-medium whitespace-nowrap">
-                    Spreadsheet
+                    Acties
                   </th>
                 </tr>
               </thead>
@@ -338,11 +338,18 @@ export function KlantenManager() {
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      <Button size="sm" variant="outline" asChild>
-                        <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
-                          Spreadsheet
-                        </Link>
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/dashboard/klanten/${customer.id}/spreadsheet`}>
+                            Spreadsheet
+                          </Link>
+                        </Button>
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/dashboard/klanten/${customer.id}/bewerken`}>
+                            Bewerken
+                          </Link>
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -350,6 +357,22 @@ export function KlantenManager() {
             </table>
           </div>
         )}
+
+        {/* Items waarvan de klant bij de upload niet herkend is */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <Link
+            href="/dashboard/blogs?customer_website_id=none"
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Blogs zonder klant
+          </Link>
+          <Link
+            href="/dashboard/landing-pages?customer_website_id=none"
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Landingspagina&apos;s zonder klant
+          </Link>
+        </div>
       </div>
 
       <CategoryManagerDialog

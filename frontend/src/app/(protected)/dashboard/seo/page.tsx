@@ -36,7 +36,7 @@ export default function SeoToolsPage() {
           <Link
             key={tool.title}
             href={tool.href}
-            className="rounded-lg border p-5 transition-colors hover:bg-muted/30"
+            className="rounded-lg border bg-card p-5 transition-colors hover:bg-muted/30"
           >
             <h2 className="text-lg font-semibold">{tool.title}</h2>
             <p className="mt-2 text-sm text-muted-foreground">

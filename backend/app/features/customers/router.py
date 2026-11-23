@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_user_id, utc_now_iso
 from app.db.models import Blog, CustomerCategory, CustomerWebsite, SerpScan, WebsiteMetaRun
 from app.db.session import get_db
+from app.features.customers import quick_wins
+from app.features.customers.rankings import customer_rankings
+from app.features.customers.schemas import CustomerQuickWinsResponse, CustomerRankingsResponse
 from app.features.customers.services import delete_customer_website_cascade
 from app.features.seo_tracker.mappers import to_customer_website_item
 from app.features.seo_tracker.schemas import (
@@ -154,6 +157,79 @@ async def get_customer(
         links_placed_this_month=0,
         pending_blogs=None,
     )
+
+
+@router.get(
+    "/api/customers/{customer_id}/rankings", response_model=CustomerRankingsResponse
+)
+def get_customer_rankings(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Zoekwoordposities van de klant, live uit ProRankTracker; niets wordt opgeslagen.
+
+    Synchrone functie: FastAPI draait hem in de threadpool, zodat de httpx-aanroep
+    naar ProRankTracker de event loop niet blokkeert. Fouten van ProRankTracker
+    geven HTTP 200 met `state: "error"`.
+    """
+    website = (
+        db.query(CustomerWebsite)
+        .filter(CustomerWebsite.id == customer_id)
+        .first()
+    )
+    if not website:
+        raise HTTPException(status_code=404, detail="Klant niet gevonden.")
+    return CustomerRankingsResponse(**customer_rankings(website.base_url or ""))
+
+
+def _customer_or_404(db: Session, customer_id: str) -> CustomerWebsite:
+    website = (
+        db.query(CustomerWebsite)
+        .filter(CustomerWebsite.id == customer_id)
+        .first()
+    )
+    if not website:
+        raise HTTPException(status_code=404, detail="Klant niet gevonden.")
+    return website
+
+
+@router.get(
+    "/api/customers/{customer_id}/quick-wins", response_model=CustomerQuickWinsResponse
+)
+def get_customer_quick_wins(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Quick wins (positie 4–20): bewaarde Ahrefs-stand samengevoegd met ProRankTracker.
+
+    Ahrefs haalt eerst opnieuw op als er nog niets is, de stand ouder is dan
+    AHREFS_QUICK_WINS_TTL_DAYS of het domein is gewijzigd (24 units per rij); de
+    PRT-zoekwoorden worden live opgehaald en niet bewaard. Synchrone functie
+    (threadpool), net als de rankings. Fouten geven HTTP 200 met `state: "error"`
+    of, als één bron wel werkt, een melding in `message`.
+    """
+    website = _customer_or_404(db, customer_id)
+    result = quick_wins.load_merged(db, website)
+    db.commit()
+    return CustomerQuickWinsResponse(**result)
+
+
+@router.post(
+    "/api/customers/{customer_id}/quick-wins/refresh",
+    response_model=CustomerQuickWinsResponse,
+)
+def refresh_customer_quick_wins(
+    customer_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """Quick wins opnieuw ophalen uit Ahrefs en bewaren (knop "Vernieuwen"), samengevoegd met PRT."""
+    website = _customer_or_404(db, customer_id)
+    result = quick_wins.refresh_merged(db, website)
+    db.commit()
+    return CustomerQuickWinsResponse(**result)
 
 
 @router.post("/api/customers", response_model=CustomerWebsiteItem)

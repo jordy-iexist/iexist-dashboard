@@ -630,7 +630,7 @@ export function SeoTracker() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <section className="space-y-4 lg:col-span-1">
-          <div className="rounded-lg border p-4 space-y-3">
+          <div className="rounded-lg border bg-card p-4 space-y-3">
             <h2 className="text-sm font-semibold">Nieuwe website</h2>
             <Input
               placeholder="Naam (bijv. Klant A)"
@@ -667,7 +667,7 @@ export function SeoTracker() {
             </Button>
           </div>
 
-          <div className="rounded-lg border p-4 space-y-2">
+          <div className="rounded-lg border bg-card p-4 space-y-2">
             <h2 className="text-sm font-semibold">Websites</h2>
             {isLoadingWebsites ? (
               <p className="text-sm text-muted-foreground">Websites laden...</p>
@@ -702,14 +702,14 @@ export function SeoTracker() {
 
         <section className="space-y-4 lg:col-span-2">
           {!selectedWebsite ? (
-            <div className="rounded-lg border p-6">
+            <div className="rounded-lg border bg-card p-6">
               <p className="text-sm text-muted-foreground">
                 Selecteer eerst een website.
               </p>
             </div>
           ) : (
             <>
-              <div className="rounded-lg border p-4 space-y-3">
+              <div className="rounded-lg border bg-card p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h2 className="text-lg font-semibold">{selectedWebsite.name}</h2>
@@ -773,7 +773,7 @@ export function SeoTracker() {
                 )}
               </div>
 
-              <div className="rounded-lg border p-4 space-y-3">
+              <div className="rounded-lg border bg-card p-4 space-y-3">
                 <h3 className="text-sm font-semibold">Keywords</h3>
                 <div className="flex gap-2">
                   <Input
@@ -830,7 +830,7 @@ export function SeoTracker() {
                 )}
               </div>
 
-              <div className="rounded-lg border p-4 space-y-3">
+              <div className="rounded-lg border bg-card p-4 space-y-3">
                 <h3 className="text-sm font-semibold">Ranking overzicht</h3>
                 {isLoadingDetails ? (
                   <p className="text-sm text-muted-foreground">Rankings laden...</p>

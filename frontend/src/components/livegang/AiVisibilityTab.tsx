@@ -34,7 +34,7 @@ export function AiVisibilityTab({
 
   if (!snapshot) {
     return (
-      <PanelRow tone="muted" className="text-muted-foreground">
+      <PanelRow tone="muted" className="border bg-card text-muted-foreground">
         Deze scan is gemaakt vóór de ProRankTracker-koppeling en bevat daarom geen AI-zichtbaarheid. Een nieuwe scan
         haalt deze cijfers op.
       </PanelRow>
@@ -43,7 +43,7 @@ export function AiVisibilityTab({
 
   if (snapshot.state === "not_tracked") {
     return (
-      <PanelRow tone="muted" className="text-muted-foreground">
+      <PanelRow tone="muted" className="border bg-card text-muted-foreground">
         Deze site wordt (nog) niet getrackt in ProRankTracker. URL&apos;s en prompts voeg je toe in ProRankTracker zelf;
         de eerstvolgende scan haalt de cijfers daarna op.
       </PanelRow>
@@ -52,7 +52,7 @@ export function AiVisibilityTab({
 
   if (snapshot.state === "not_configured") {
     return (
-      <PanelRow tone="muted" className="text-muted-foreground">
+      <PanelRow tone="muted" className="border bg-card text-muted-foreground">
         ProRankTracker is niet gekoppeld: het API-token ontbreekt op de server. Na het instellen haalt de volgende scan
         de AI-zichtbaarheid op.
       </PanelRow>

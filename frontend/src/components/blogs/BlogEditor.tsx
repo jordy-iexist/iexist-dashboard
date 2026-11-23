@@ -288,7 +288,7 @@ export function BlogEditor({
           )}
 
           {isOwner && (
-            <label className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
+            <label className="inline-flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm">
               <input
                 type="checkbox"
                 checked={isPublic}

@@ -1,4 +1,7 @@
-"""ProRankTracker API v3-client (sync httpx) voor AI Tracking, alleen-lezen.
+"""ProRankTracker API v3-client (sync httpx), alleen-lezen.
+
+Gebruikt voor AI Tracking (AI-zichtbaarheid per prompt) en voor de gewone
+zoekwoordposities per site (`rank_overview`).
 
 Deze client doet uitsluitend GET-requests: POST- en DELETE-endpoints van
 ProRankTracker verbruiken quota of verwijderen data en horen niet bij deze koppeling.
@@ -140,6 +143,17 @@ def prompt_records(url_id: int, prompt: str, *, client: httpx.Client | None = No
         "per_page": PROMPT_RECORDS_PER_PAGE,
     }
     data = _dict(_request("ai/urls", params=params, client=client))
+    return [row for row in (data.get("url_terms") or []) if isinstance(row, dict)]
+
+
+def rank_overview(host: str, *, client: httpx.Client | None = None) -> list[dict[str, Any]]:
+    """Alle gevolgde zoekwoorden (met posities) van één site.
+
+    `host` zonder schema; `bulk_urls` filtert in ProRankTracker op de site.
+    Geeft de rijen uit `url_terms` terug, ook de AI-termen: filteren doet de aanroeper.
+    """
+    params = {"bulk_urls": host, "per_page": REPORT_PER_PAGE}
+    data = _dict(_request("reports/overview", params=params, client=client))
     return [row for row in (data.get("url_terms") or []) if isinstance(row, dict)]
 
 

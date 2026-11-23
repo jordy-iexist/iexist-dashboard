@@ -96,7 +96,7 @@ export function InventoryTab({ scanId, hasAhrefs = false }: { scanId: string; ha
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="overflow-x-auto rounded-lg border bg-card">
         <table className={cn("w-full text-sm", hasAhrefs ? "min-w-[1040px]" : "min-w-[900px]")}>
           <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
             <tr>

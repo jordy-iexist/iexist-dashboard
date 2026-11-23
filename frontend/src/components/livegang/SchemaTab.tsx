@@ -258,7 +258,7 @@ export function SchemaTab({
     }
   }
 
-  if (error && !pages) return <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>
+  if (error && !pages) return <p className="rounded-md border border-red-300 bg-card px-3 py-2 text-sm text-red-700">{error}</p>
   if (!pages) return <p className="text-sm text-muted-foreground">Pagina&apos;s laden…</p>
 
   return (

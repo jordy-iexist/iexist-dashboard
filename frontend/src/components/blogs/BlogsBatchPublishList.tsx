@@ -772,7 +772,7 @@ export function BlogsBatchPublishList({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border p-4 space-y-3">
+      <div className="rounded-lg border bg-card p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <label className="inline-flex items-center gap-2 text-sm">
             <input

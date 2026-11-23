@@ -6,9 +6,10 @@ Fouten worden vertaald naar `AhrefsServiceError` met een `code`.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -21,13 +22,18 @@ MAX_RETRY_WAIT_SECONDS = 15.0
 
 # Kolommen per rapport. De unit-kosten per rij staan in de Ahrefs-reference:
 # top-pages 24 (sum_traffic en top_keyword_volume kosten 10), pages-by-backlinks 8
-# (refdomains_target kost 5), broken-backlinks 5.
+# (refdomains_target kost 5), broken-backlinks 5, organic-keywords 24 (gemeten op het
+# testdomein ahrefs.com met precies deze zes velden; elk extra veld kost meer units).
 TOP_PAGES_FIELDS = (
     "url", "sum_traffic", "keywords", "top_keyword",
     "top_keyword_best_position", "top_keyword_volume",
 )
 BACKLINK_PAGES_FIELDS = ("url_to", "refdomains_target", "dofollow_to_target", "http_code_target")
 BROKEN_BACKLINKS_FIELDS = ("url_from", "url_to", "domain_rating_source", "anchor", "http_code_target")
+ORGANIC_KEYWORDS_FIELDS = (
+    "keyword", "best_position", "best_position_diff", "best_position_url",
+    "volume", "keyword_difficulty",
+)
 DOMAIN_FIELDS = (
     "domain_rating", "refdomains", "backlinks",
     "org_traffic", "org_keywords", "org_keywords_1_3", "org_cost",
@@ -208,6 +214,45 @@ def top_pages(
     if country:
         params["country"] = country
     return _site_explorer("top-pages", "pages", params, client)
+
+
+def organic_keywords(
+    target: str,
+    *,
+    country: str | None = None,
+    position_min: int = 4,
+    position_max: int = 20,
+    limit: int = 50,
+    compare_days: int = 30,
+    on_date: date | None = None,
+    client: httpx.Client | None = None,
+) -> AhrefsResult:
+    """Zoekwoorden waarop het domein rankt binnen `position_min`–`position_max`, hoogste volume eerst.
+
+    Met `date_compared` (`compare_days` terug) komt `best_position_diff` mee: huidige positie
+    min de positie toen, dus negatief bij een stijging en `None` als het zoekwoord toen niet rankte.
+    """
+    today = on_date or date.today()
+    where = {
+        "and": [
+            {"field": "best_position", "is": ["gte", position_min]},
+            {"field": "best_position", "is": ["lte", position_max]},
+        ]
+    }
+    params: dict[str, Any] = {
+        "target": target,
+        "mode": "subdomains",
+        "protocol": "both",
+        "date": today.isoformat(),
+        "date_compared": (today - timedelta(days=compare_days)).isoformat(),
+        "select": ",".join(ORGANIC_KEYWORDS_FIELDS),
+        "where": json.dumps(where, separators=(",", ":")),
+        "order_by": "volume:desc",
+        "limit": limit,
+    }
+    if country:
+        params["country"] = country
+    return _site_explorer("organic-keywords", "keywords", params, client)
 
 
 def pages_by_backlinks(

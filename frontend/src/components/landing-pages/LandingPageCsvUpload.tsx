@@ -164,7 +164,7 @@ export function LandingPageCsvUpload() {
       </div>
 
       {headers.length > 0 && templateFieldNames.length > 0 && (
-        <div className="space-y-4 rounded-lg border p-4">
+        <div className="space-y-4 rounded-lg border bg-card p-4">
           <div>
             <h3 className="text-sm font-semibold">Placeholder mapping</h3>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -225,7 +225,7 @@ export function LandingPageCsvUpload() {
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
-          className="cursor-pointer rounded-lg border-2 border-dashed p-12 transition-colors hover:bg-muted/50"
+          className="cursor-pointer rounded-lg border-2 border-dashed bg-card p-12 transition-colors hover:bg-muted/50"
           onClick={() => document.getElementById("lp-csv-input")?.click()}
         >
           <div className="flex flex-col items-center justify-center gap-4">

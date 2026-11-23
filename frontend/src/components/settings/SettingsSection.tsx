@@ -45,7 +45,7 @@ export function SettingsSection({
   return (
     <section
       className={cn(
-        "grid gap-4 border-t py-8 first:border-t-0 first:pt-0 lg:grid-cols-[14rem_1fr] lg:gap-8",
+        "grid gap-4 border-t py-8 first:border-t-0 first:pt-0 last:pb-0 lg:grid-cols-[14rem_1fr] lg:gap-8",
         className
       )}
     >

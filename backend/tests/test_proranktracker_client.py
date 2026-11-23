@@ -72,6 +72,28 @@ class ProRankTrackerClientTests(unittest.TestCase):
         })
         self.assertEqual(rows, [{"engine": "AIO", "ai_type": "links"}])
 
+    def test_rank_overview_params_and_rows(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["token"] = request.headers.get("X-TOKEN")
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return _ok({"url_terms": [{"name": "koffiekar huren", "rank": "5"}, None], "count": 2,
+                        "page": 1, "per_page": 10000})
+
+        rows = prt.rank_overview("klant.nl", client=_client(handler))
+
+        self.assertEqual((seen["method"], seen["path"]), ("GET", "/v3/reports/overview"))
+        self.assertEqual(seen["token"], "test-token")
+        self.assertEqual(seen["params"], {"bulk_urls": "klant.nl", "per_page": "10000"})
+        self.assertEqual(rows, [{"name": "koffiekar huren", "rank": "5"}])
+
+    def test_rank_overview_without_terms(self):
+        self.assertEqual(prt.rank_overview("klant.nl", client=_client(lambda r: _ok({"url_terms": []}))), [])
+        self.assertEqual(prt.rank_overview("klant.nl", client=_client(lambda r: _ok(None))), [])
+
     def test_quota(self):
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/v3/user/quota")

@@ -215,7 +215,7 @@ export function OverviewTab({ scan }: { scan: LaunchScanDetail }) {
           </section>
 
           {trace?.steps && trace.steps.length > 0 && (
-            <Collapsible className="group/trace rounded-lg border">
+            <Collapsible className="group/trace rounded-lg border bg-card">
               <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-muted-foreground">
                 <span>
                   Agent-stappen: {trace.steps.length} tool-aanroepen · {trace.model} ·{" "}

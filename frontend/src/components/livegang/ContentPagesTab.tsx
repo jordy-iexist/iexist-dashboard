@@ -492,7 +492,7 @@ export function ContentPagesTab({
 
   if (pages === null) {
     return error ? (
-      <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>
+      <p className="rounded-md border border-red-300 bg-card px-3 py-2 text-sm text-red-700">{error}</p>
     ) : (
       <p className="text-sm text-muted-foreground">Pagina&apos;s laden…</p>
     )
@@ -570,7 +570,7 @@ export function ContentPagesTab({
           Je hebt {selected.size} pagina&apos;s geselecteerd; maximaal {maxPages} per analyse.
         </p>
       )}
-      {error && <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-md border border-red-300 bg-card px-3 py-2 text-sm text-red-700">{error}</p>}
       <PollingFailedNotice failing={pollingFailed} />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">

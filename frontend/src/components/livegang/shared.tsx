@@ -351,7 +351,7 @@ const ROW_TONES = {
   default: "",
   muted: "rounded-lg bg-muted/50 px-4 py-3",
   warning: "rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-900/20 dark:text-amber-200",
-  error: "rounded-md border border-red-300 px-3 py-2 text-red-700 dark:text-red-300",
+  error: "rounded-md border border-red-300 bg-card px-3 py-2 text-red-700 dark:text-red-300",
 } as const
 
 export function PanelRow({

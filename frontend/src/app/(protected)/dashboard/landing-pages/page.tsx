@@ -12,11 +12,8 @@ import {
   type LandingPageListResponse,
 } from "@/lib/landing-page-types"
 import { LandingPagesBatchList } from "@/components/landing-pages/LandingPagesBatchList"
-import {
-  CustomerFilterSelect,
-  type CustomerFilterOption,
-} from "@/components/klanten/CustomerFilterSelect"
-import { type CustomersResponse } from "@/lib/customer-types"
+import { readActiveCustomerCookie } from "@/lib/active-customer.server"
+import { fetchCustomerList } from "@/lib/customer-api"
 
 export const metadata = {
   title: "Alle Landingspagina's",
@@ -84,7 +81,7 @@ function PaginationLink({
 }) {
   if (disabled) {
     return (
-      <span className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground">
+      <span className="rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground">
         {label}
       </span>
     )
@@ -93,7 +90,7 @@ function PaginationLink({
   return (
     <Link
       href={href}
-      className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+      className="rounded-md border bg-card px-3 py-1.5 text-sm transition-colors hover:bg-muted"
     >
       {label}
     </Link>
@@ -112,32 +109,21 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
     redirect("/login")
   }
 
+  // Zonder klant in het adres: door naar de lijst van de laatst gekozen klant
+  // (als die nog bestaat). "none" (pagina's zonder klant) blijft staan.
+  if (!customerFilter) {
+    const activeCustomerId = await readActiveCustomerCookie()
+    if (activeCustomerId) {
+      const customers = await fetchCustomerList()
+      if (customers.some((customer) => customer.id === activeCustomerId)) {
+        redirect(buildPageHref(page, scope, activeCustomerId))
+      }
+    }
+  }
+
   let landingPages: LandingPageListItem[] = []
   let total = 0
   let errorMessage: string | null = null
-  let customers: CustomerFilterOption[] = []
-
-  try {
-    const customersResponse = await fetch(
-      `${getBackendApiUrl()}/api/customers`,
-      {
-        method: "GET",
-        headers: { Authorization: authorization },
-        cache: "no-store",
-      }
-    )
-    if (customersResponse.ok) {
-      const payload = (await customersResponse.json().catch(() => null)) as
-        | CustomersResponse
-        | null
-      customers = (payload?.websites ?? []).map((customer) => ({
-        id: customer.id,
-        name: customer.name,
-      }))
-    }
-  } catch {
-    // Klantfilter is niet kritiek voor de pagina; lijst blijft leeg.
-  }
 
   try {
     const url = new URL(`${getBackendApiUrl()}/api/landing-pages`)
@@ -200,20 +186,17 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
             className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
               scope === option.value
                 ? "border-foreground bg-foreground text-background"
-                : "hover:bg-muted"
+                : "bg-card hover:bg-muted"
             }`}
           >
             {option.label}
           </Link>
         ))}
-        <div className="ml-auto">
-          <CustomerFilterSelect
-            customers={customers}
-            selected={customerFilter}
-            scope={scope}
-            basePath="/dashboard/landing-pages"
-          />
-        </div>
+        {customerFilter === "none" && (
+          <span className="ml-auto rounded-full border bg-card px-3 py-1.5 text-sm text-muted-foreground">
+            Zonder klant
+          </span>
+        )}
       </div>
 
       {errorMessage && (
@@ -223,7 +206,7 @@ export default async function LandingPagesPage({ searchParams }: LandingPagesPag
       )}
 
       {!errorMessage && landingPages.length === 0 && (
-        <div className="rounded-lg border p-8 text-center">
+        <div className="rounded-lg border bg-card p-8 text-center">
           <p className="text-muted-foreground">
             Nog geen landingspagina&apos;s beschikbaar. Upload een CSV bestand om te starten.
           </p>

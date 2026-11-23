@@ -127,6 +127,11 @@ def counts(entries: list[Entry]) -> tuple[int, int, int]:
     return statuses.count(OPEN), statuses.count(APPROVED), statuses.count(DONE)
 
 
+def open_high_count(entries: list[Entry]) -> int:
+    """Open punten met severity `hoog`; dezelfde definitie van open als `counts`."""
+    return sum(1 for e in entries if e.status == OPEN and e.field("severity") == "hoog")
+
+
 def to_page_summary(info: PageInfo, entries: list[Entry]) -> PageSummary:
     open_count, approved_count, done_count = counts(entries)
     return PageSummary(url=info.url, path=info.path or path_of(info.url), title=info.title,

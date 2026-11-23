@@ -202,7 +202,7 @@ export function ManualBlogEntry({ onSuccess }: { onSuccess?: () => void }) {
       {/* Spreadsheet table */}
       {!templateError && fields.length > 0 && (
         <div className="panel-iexist space-y-3 p-5">
-          <div className="overflow-x-auto rounded-lg border bg-background">
+          <div className="overflow-x-auto rounded-lg border bg-card">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50">

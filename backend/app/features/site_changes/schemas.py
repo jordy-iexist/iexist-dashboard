@@ -64,6 +64,8 @@ class PageTotals(BaseModel):
     open: int
     approved: int
     done: int
+    # Deel van `open` met severity `hoog`.
+    open_high: int = 0
 
 
 class PagesResponse(BaseModel):

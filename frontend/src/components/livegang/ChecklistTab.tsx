@@ -334,7 +334,7 @@ export function ChecklistTab({
       </div>
 
       {notice && (
-        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        <div className="rounded-md border bg-card px-3 py-2 text-sm">
           <p>
             {notice.text}{" "}
             {notice.boardUrl && (

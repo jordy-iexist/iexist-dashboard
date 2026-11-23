@@ -330,6 +330,14 @@ class Settings(BaseSettings):
     ahrefs_keyword_max_position: int = Field(
         default=20, ge=1, le=100, validation_alias="AHREFS_KEYWORD_MAX_POSITION"
     )
+    # Quick wins op het klantdashboard (positie 4–20): rijen per ophaalactie (24 units per rij)
+    # en hoe lang de bewaarde stand geldig blijft. TTL 0 = alleen verversen via de knop.
+    ahrefs_quick_wins_limit: int = Field(
+        default=50, ge=1, le=200, validation_alias="AHREFS_QUICK_WINS_LIMIT"
+    )
+    ahrefs_quick_wins_ttl_days: int = Field(
+        default=30, ge=0, le=365, validation_alias="AHREFS_QUICK_WINS_TTL_DAYS"
+    )
     ahrefs_request_timeout_seconds: float = Field(
         default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
     )

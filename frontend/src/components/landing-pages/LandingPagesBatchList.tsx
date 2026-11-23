@@ -208,7 +208,7 @@ export function LandingPagesBatchList({
         </div>
       )}
 
-      <div className="rounded-lg border p-4 flex items-center gap-4">
+      <div className="rounded-lg border bg-card p-4 flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
           <input
             type="checkbox"

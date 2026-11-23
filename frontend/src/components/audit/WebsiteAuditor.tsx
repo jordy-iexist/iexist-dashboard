@@ -352,7 +352,7 @@ export function WebsiteAuditor() {
       )}
 
       {/* Start audit form */}
-      <div className="rounded-lg border p-4 space-y-3">
+      <div className="rounded-lg border bg-card p-4 space-y-3">
         <h2 className="font-semibold">Nieuwe audit starten</h2>
         <div className="flex gap-2">
           <Input
@@ -400,7 +400,7 @@ export function WebsiteAuditor() {
                   className={`w-full text-left rounded p-2 text-sm border transition-colors ${
                     activeAudit?.id === audit.id
                       ? "border-primary bg-primary/5"
-                      : "border-transparent hover:border-muted hover:bg-muted/50"
+                      : "border-transparent hover:border-border hover:bg-card"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1">
@@ -419,13 +419,13 @@ export function WebsiteAuditor() {
         {/* Audit detail */}
         <div className="lg:col-span-2">
           {!activeAudit ? (
-            <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
+            <div className="rounded-lg border border-dashed bg-card p-8 text-center text-muted-foreground text-sm">
               Selecteer een audit of start een nieuwe.
             </div>
           ) : (
             <div className="space-y-4">
               {/* Header */}
-              <div className="rounded-lg border p-4 space-y-3">
+              <div className="rounded-lg border bg-card p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="font-semibold break-all">{activeAudit.url}</div>
@@ -554,25 +554,25 @@ export function WebsiteAuditor() {
                   {activeTab === "overview" && activeAudit.summary && (
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <div className="rounded border p-3 text-center">
+                        <div className="rounded border bg-card p-3 text-center">
                           <div className="text-2xl font-bold text-red-600">
                             {activeAudit.summary.critical}
                           </div>
                           <div className="text-xs text-muted-foreground">Kritiek</div>
                         </div>
-                        <div className="rounded border p-3 text-center">
+                        <div className="rounded border bg-card p-3 text-center">
                           <div className="text-2xl font-bold text-yellow-600">
                             {activeAudit.summary.warnings}
                           </div>
                           <div className="text-xs text-muted-foreground">Waarschuwingen</div>
                         </div>
-                        <div className="rounded border p-3 text-center">
+                        <div className="rounded border bg-card p-3 text-center">
                           <div className="text-2xl font-bold text-blue-600">
                             {activeAudit.summary.info}
                           </div>
                           <div className="text-xs text-muted-foreground">Informatie</div>
                         </div>
-                        <div className="rounded border p-3 text-center">
+                        <div className="rounded border bg-card p-3 text-center">
                           <ScoreCircle score={activeAudit.summary.score} />
                           <div className="text-xs text-muted-foreground">Score</div>
                         </div>
@@ -634,7 +634,7 @@ export function WebsiteAuditor() {
                         <p className="text-sm text-muted-foreground">Laden...</p>
                       ) : (
                         pages.map((page) => (
-                          <div key={page.id} className="rounded border p-3 text-sm">
+                          <div key={page.id} className="rounded border bg-card p-3 text-sm">
                             <div className="flex items-center justify-between gap-2">
                               <span className="truncate font-mono text-xs">{page.path}</span>
                               <div className="flex items-center gap-2 shrink-0">
@@ -694,7 +694,7 @@ export function WebsiteAuditor() {
                           onChange={(e) =>
                             handleFilterIssues(e.target.value, issueSeverity)
                           }
-                          className="text-sm border rounded px-2 py-1 bg-background"
+                          className="text-sm border rounded px-2 py-1 bg-card"
                         >
                           <option value="">Alle categorieën</option>
                           {(Object.keys(CATEGORY_LABELS) as AuditCategory[]).map((cat) => (
@@ -708,7 +708,7 @@ export function WebsiteAuditor() {
                           onChange={(e) =>
                             handleFilterIssues(issueCategory, e.target.value)
                           }
-                          className="text-sm border rounded px-2 py-1 bg-background"
+                          className="text-sm border rounded px-2 py-1 bg-card"
                         >
                           <option value="">Alle ernst</option>
                           <option value="critical">Kritiek</option>
@@ -724,7 +724,7 @@ export function WebsiteAuditor() {
                       ) : (
                         <div className="space-y-2">
                           {issues.map((issue) => (
-                            <div key={issue.id} className="rounded border p-3 text-sm space-y-1">
+                            <div key={issue.id} className="rounded border bg-card p-3 text-sm space-y-1">
                               <div className="flex items-start gap-2">
                                 <span
                                   className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-medium ${SEVERITY_COLORS[issue.severity]}`}

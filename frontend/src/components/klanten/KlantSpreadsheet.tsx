@@ -751,7 +751,7 @@ export function KlantSpreadsheet({ customerId }: { customerId: string }) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2">
         <span className="text-xs font-medium text-muted-foreground">
           Eigen kolommen:
         </span>
@@ -855,7 +855,7 @@ export function KlantSpreadsheet({ customerId }: { customerId: string }) {
           Nog geen blogs gekoppeld aan deze klant.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-lg border">
+        <div className="overflow-hidden rounded-lg border bg-card">
           <DataEditor
             ref={gridRef}
             columns={gridColumns}

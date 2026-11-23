@@ -12,7 +12,7 @@ export default function SettingsLayout({
           <SettingsNav />
         </div>
       </aside>
-      <div className="min-w-0 max-w-4xl flex-1">{children}</div>
+      <div className="min-w-0 max-w-4xl flex-1 rounded-xl border bg-card p-6">{children}</div>
     </div>
   )
 }

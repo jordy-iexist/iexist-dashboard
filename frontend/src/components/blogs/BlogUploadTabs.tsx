@@ -19,7 +19,7 @@ export function BlogUploadTabs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex w-fit gap-1 rounded-full bg-neutral-100 p-1">
+      <div className="flex w-fit gap-1 rounded-full border bg-card p-1">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}

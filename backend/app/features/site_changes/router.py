@@ -22,7 +22,13 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.features.launch_checklist.services.discovery import url_key
-from app.features.site_changes.mappers import to_change_item, to_page_detail, to_page_summary, user_names
+from app.features.site_changes.mappers import (
+    open_high_count,
+    to_change_item,
+    to_page_detail,
+    to_page_summary,
+    user_names,
+)
 from app.features.site_changes.schemas import (
     ChangeItem,
     ChangeUpdate,
@@ -104,6 +110,7 @@ async def list_pages(
             open=sum(p.open_count for p in pages),
             approved=sum(p.approved_count for p in pages),
             done=sum(p.done_count for p in pages),
+            open_high=open_high_count(entries),
         ),
         has_sources=sources.has_sources,
     )

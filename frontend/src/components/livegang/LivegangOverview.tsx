@@ -80,7 +80,7 @@ export function LivegangOverview({ variant = "seo-geo" }: { variant?: "seo-geo" 
   }, [customers, query])
 
   if (error) {
-    return <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700">{error}</p>
+    return <p className="rounded-md border border-red-300 bg-card px-3 py-2 text-sm text-red-700">{error}</p>
   }
 
   return (

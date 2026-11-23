@@ -2,11 +2,26 @@ import { Suspense } from 'react'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { getCurrentUser } from '@/lib/auth'
+import { fetchCustomerList } from '@/lib/customer-api'
+import { readActiveCustomerCookie } from '@/lib/active-customer.server'
 
 async function SidebarWithUser() {
-  const user = await getCurrentUser()
+  const [user, customerList, initialCustomerId] = await Promise.all([
+    getCurrentUser(),
+    fetchCustomerList(),
+    readActiveCustomerCookie(),
+  ])
   if (!user) return null
-  return <AppSidebar user={user} variant="inset" />
+  // Alleen wat de klantkiezer nodig heeft naar de client sturen.
+  const customers = customerList.map(({ id, name, domain }) => ({ id, name, domain }))
+  return (
+    <AppSidebar
+      user={user}
+      customers={customers}
+      initialCustomerId={initialCustomerId}
+      variant="inset"
+    />
+  )
 }
 
 export default function ProtectedLayout({

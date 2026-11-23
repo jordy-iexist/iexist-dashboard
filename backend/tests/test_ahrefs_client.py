@@ -78,6 +78,64 @@ class AhrefsClientTests(unittest.TestCase):
         self.assertNotIn("extra", result.data)
         self.assertEqual(result.units, 50)
 
+    def test_organic_keywords_filters_positions_and_compares_30_days(self):
+        seen = {}
+        row = {
+            "keyword": "seo bureau", "best_position": 7, "best_position_diff": -2,
+            "best_position_url": "https://klant.nl/seo/", "volume": 900, "keyword_difficulty": 25,
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json={"keywords": [row, "geen dict"]},
+                headers={"x-api-units-cost-total-actual": "48"},
+            )
+
+        result = ahrefs.organic_keywords(
+            "klant.nl", country="nl", limit=50, on_date=date(2026, 11, 23), client=_client(handler)
+        )
+
+        params = seen["params"]
+        self.assertEqual((seen["method"], seen["path"]), ("GET", "/v3/site-explorer/organic-keywords"))
+        self.assertEqual(params["target"], "klant.nl")
+        self.assertEqual(params["mode"], "subdomains")
+        self.assertEqual(params["protocol"], "both")
+        self.assertEqual(params["country"], "nl")
+        self.assertEqual(params["date"], "2026-11-23")
+        self.assertEqual(params["date_compared"], "2026-10-24")
+        self.assertEqual(params["order_by"], "volume:desc")
+        self.assertEqual(params["limit"], "50")
+        self.assertEqual(
+            params["select"],
+            "keyword,best_position,best_position_diff,best_position_url,volume,keyword_difficulty",
+        )
+        self.assertEqual(json.loads(params["where"]), {"and": [
+            {"field": "best_position", "is": ["gte", 4]},
+            {"field": "best_position", "is": ["lte", 20]},
+        ]})
+        self.assertEqual(result.rows, [row])
+        self.assertEqual(result.units, 48)
+
+    def test_organic_keywords_custom_range_without_country(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"keywords": []})
+
+        result = ahrefs.organic_keywords(
+            "klant.nl", position_min=1, position_max=3, compare_days=7,
+            on_date=date(2026, 3, 2), client=_client(handler),
+        )
+        self.assertNotIn("country", seen["params"])
+        self.assertEqual(seen["params"]["date_compared"], "2026-02-23")
+        where = json.loads(seen["params"]["where"])
+        self.assertEqual([c["is"] for c in where["and"]], [["gte", 1], ["lte", 3]])
+        self.assertEqual((result.rows, result.units), ([], 0))
+
     def test_broken_backlinks_and_pages_by_backlinks_use_their_own_keys(self):
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("/broken-backlinks"):

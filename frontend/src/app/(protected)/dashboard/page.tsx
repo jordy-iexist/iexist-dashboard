@@ -17,6 +17,9 @@ import {
   Users,
 } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth'
+import { customerHref } from '@/lib/active-customer'
+import { readActiveCustomerCookie } from '@/lib/active-customer.server'
+import { fetchCustomerList } from '@/lib/customer-api'
 import { getDisplayName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -155,6 +158,16 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
+  // Laatst gekozen klant: open diens klantpagina. Een verwijderde klant in de
+  // cookie valt buiten de lijst en toont gewoon de welkomstpagina.
+  const activeCustomerId = await readActiveCustomerCookie()
+  if (activeCustomerId) {
+    const customers = await fetchCustomerList()
+    if (customers.some((customer) => customer.id === activeCustomerId)) {
+      redirect(customerHref('home', activeCustomerId))
+    }
+  }
+
   const name = user.email ? getDisplayName(user.email) : 'daar'
 
   return (
@@ -234,7 +247,7 @@ export default async function DashboardPage() {
       </section>
 
       {/* Tip */}
-      <div className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-100 p-4 dark:border-white/10 dark:bg-white/5 text-sm">
+      <div className="flex items-start gap-3 rounded-xl border bg-card p-4 text-sm">
         <Lightbulb className="mt-0.5 size-5 shrink-0 text-black dark:text-white" />
         <p>
           <span className="font-semibold">Tip:</span> stel eerst je blog- en AI-instellingen in via{' '}

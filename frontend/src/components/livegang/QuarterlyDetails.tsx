@@ -789,7 +789,7 @@ function SourcesNote({ checklist }: { checklist: QuarterlyChecklist }) {
   const missing = EXTERNAL_SOURCES.filter((s) => !s.key || !sources?.[s.key])
   if (!missing.length) return null
   return (
-    <section className="space-y-2 rounded-lg border border-dashed p-4">
+    <section className="space-y-2 rounded-lg border border-dashed bg-card p-4">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
         <Plug className="size-4 text-muted-foreground" /> Nog niet gekoppeld: zelf aanvullen in de rapportage
       </h3>

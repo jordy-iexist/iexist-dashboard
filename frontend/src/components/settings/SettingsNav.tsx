@@ -25,8 +25,8 @@ export function SettingsNav() {
                 className={cn(
                   "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                   isActive
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    ? "bg-card font-medium text-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-card/70 hover:text-foreground"
                 )}
               >
                 <item.icon className="size-4" />

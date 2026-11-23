@@ -1191,6 +1191,44 @@ class LaunchSitemapSnapshot(Base):
     )
 
 
+class CustomerQuickWins(Base):
+    """Laatst opgehaalde Ahrefs-quick wins (positie 4–20) per klant voor het klantdashboard.
+
+    `rows` is een lijst al omgezette rijen `{keyword, position, delta, volume, kd, url, kans}`
+    in de volgorde van Ahrefs (volume aflopend). `target` en `country` horen bij de stand:
+    wijzigt het domein of het land, dan wordt opnieuw opgehaald.
+    """
+
+    __tablename__ = "customer_quick_wins"
+
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    target: Mapped[str] = mapped_column(Text, nullable=False)
+    country: Mapped[str] = mapped_column(Text, nullable=False)
+    rows: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Verbruikte Ahrefs-units van de laatste geslaagde ophaalactie.
+    units: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # Laatste geslaagde ophaalactie (ook bij 0 rijen); leeg zolang er nooit iets is opgehaald.
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Fout van de laatste poging; leeg na een geslaagde ophaalactie.
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class LaunchContentPage(Base):
     """Pagina-inhoud van een fase-3 scan (eigen rijen, los van fase 1/2)."""
 

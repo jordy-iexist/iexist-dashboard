@@ -82,7 +82,7 @@ export function VitalsTab({ scanId, measuring }: { scanId: string; measuring: bo
           {measuring ? "Metingen lopen…" : "Er zijn geen Core Web Vitals gemeten."}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
+        <div className="overflow-x-auto rounded-lg border bg-card">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
               <tr>
