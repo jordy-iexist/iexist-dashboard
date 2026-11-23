@@ -22,6 +22,9 @@ def to_customer_website_item(record: dict) -> CustomerWebsiteItem:
         target_blogs_per_month=record.get("target_blogs_per_month"),
         target_links_per_month=record.get("target_links_per_month"),
         spreadsheet_url=record.get("spreadsheet_url"),
+        tone_of_voice=record.get("tone_of_voice"),
+        # Een onbekende waarde in de kolom wordt "niet vastgelegd".
+        form_of_address=record.get("form_of_address") if record.get("form_of_address") in ("je", "u") else None,
         created_by=str(record["created_by"]),
         created_at=record["created_at"],
         updated_at=record["updated_at"],

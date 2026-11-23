@@ -19,8 +19,12 @@ in `output_config.format`, niet `client.messages.parse`. Waarom:
   `stop_reason` en valideren daarna zelf met `output_model.model_validate_json`.
 
 Met `fallbacks="default"` draait Anthropic een door de veiligheidsclassifier geweigerd
-verzoek opnieuw op een aanbevolen model (Claude Opus 5 / Opus 4.8). `AnthropicResult.model`
-is dan het model dat werkelijk antwoordde; reken de kosten met dat model.
+verzoek opnieuw op een aanbevolen model (vanaf Opus 5.5: Opus 5 / Opus 4.8; vanaf Sonnet 5.5
+bijvoorbeeld Sonnet 5). `AnthropicResult.model` is dan het model dat werkelijk antwoordde;
+reken de kosten met dat model.
+
+Standaardmodel: `settings.anthropic_model`; een feature kan per aanroep een ander model
+kiezen met `model=` (de content brief gebruikt `settings.content_brief_model`).
 """
 from __future__ import annotations
 
@@ -38,12 +42,14 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 MAX_RETRIES = 1
 
 # Tarieven in USD per miljoen tokens. `cache_write` is de prijs van een 5-minuten-cache-
-# write; `cache_read` die van een cache-hit. Opus 5 / Opus 4.8 staan erin omdat
+# write; `cache_read` die van een cache-hit. Opus 5 / Opus 4.8 en Sonnet 5 staan erin omdat
 # server-side fallbacks daarop kunnen uitkomen.
 PRICES_PER_MTOK: dict[str, dict[str, float]] = {
     "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_write": 5.0, "cache_read": 0.20},
     "claude-opus-5": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
     "claude-opus-4-8": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_write": 2.5, "cache_read": 0.10},
+    "claude-sonnet-5": {"input": 2.0, "output": 10.0, "cache_write": 2.5, "cache_read": 0.20},
 }
 
 _USAGE_FIELDS = (
@@ -143,12 +149,14 @@ def parse_structured(
     output_model: type[BaseModel],
     effort: str = "medium",
     max_tokens: int = 16000,
+    model: str | None = None,
     client: Any = None,
 ) -> AnthropicResult:
     """Vraag Claude om een antwoord in de vorm van `output_model` en valideer het.
 
     `effort` regelt hoe diep het model nadenkt (`low`/`medium`/`high`/`xhigh`/`max`); thinking
-    staat op dit model altijd aan en telt mee in `max_tokens`. `client` is alleen voor tests.
+    staat op dit model altijd aan en telt mee in `max_tokens`. `model`: None = het
+    standaardmodel (`settings.anthropic_model`). `client` is alleen voor tests.
 
     Eisen aan `output_model` (het schema gaat via `anthropic.transform_schema` naar de API):
     - Elk object krijgt `additionalProperties: false`; extra velden kan Claude dus niet sturen.
@@ -172,12 +180,13 @@ def parse_structured(
             code="not_configured",
         )
 
+    chosen_model = model or settings.anthropic_model
     output_format = {"type": "json_schema", "schema": anthropic.transform_schema(output_model)}
     owns_client = client is None
     api = client or _make_client()
     try:
         response = api.beta.messages.create(
-            model=settings.anthropic_model,
+            model=chosen_model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
@@ -216,7 +225,7 @@ def parse_structured(
     return AnthropicResult(
         parsed=parsed,
         usage=_usage(response.usage),
-        model=str(response.model or settings.anthropic_model),
+        model=str(response.model or chosen_model),
         fallback_used=_fallback_used(response.usage),
     )
 

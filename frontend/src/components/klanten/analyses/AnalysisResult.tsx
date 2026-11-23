@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { CircleAlert, Loader2, Plus, RotateCcw, TriangleAlert } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { CircleAlert, FileText, Loader2, Plus, RotateCcw, TriangleAlert } from "lucide-react"
 
 import { ActionsCard } from "@/components/klanten/analyses/ActionsCard"
 import { AiOverviewCard } from "@/components/klanten/analyses/AiOverviewCard"
@@ -35,6 +36,7 @@ import {
   type KeywordSummary,
   type SourceState,
 } from "@/lib/competitor-analysis"
+import { briefHref, startBrief } from "@/lib/content-brief"
 import { writeUrlParams } from "@/lib/url-state"
 import { cn } from "@/lib/utils"
 
@@ -121,6 +123,8 @@ function ResultHeader({
   keyword,
   detail,
   showSerp,
+  briefError,
+  onBriefError,
 }: {
   customerId: string
   customerName: string
@@ -128,6 +132,8 @@ function ResultHeader({
   keyword: KeywordSummary | null
   detail: KeywordDetail | null
   showSerp: boolean
+  briefError: string | null
+  onBriefError: (message: string | null) => void
 }) {
   const info = detail ?? keyword
   const targetUrl = detail ? detail.target_url : (keyword?.target_url ?? null)
@@ -165,8 +171,21 @@ function ResultHeader({
     <header className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackLink customerId={customerId} customerName={customerName} />
-        {analysis.status !== "completed" && <AnalysisStatusPill status={analysis.status} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {analysis.status !== "completed" && <AnalysisStatusPill status={analysis.status} />}
+          {keyword && (
+            <BriefButton
+              key={keyword.id}
+              customerId={customerId}
+              analysisId={analysis.id}
+              keyword={keyword}
+              onError={onBriefError}
+            />
+          )}
+        </div>
       </div>
+
+      {briefError && <ErrorBlock>De content brief kon niet worden gestart: {briefError}</ErrorBlock>}
 
       <h1 className="text-2xl font-bold tracking-tight break-words sm:text-3xl">
         {info ? `“${info.keyword}”` : "Concurrentieanalyse"}
@@ -199,6 +218,74 @@ function ResultHeader({
         </div>
       )}
     </header>
+  )
+}
+
+// --- Content brief --------------------------------------------------------------------------
+
+/**
+ * Knop naar de content brief van het gekozen zoekwoord. Zonder brief start hij de brief en opent
+ * daarna het scherm; een 409 (bestaat al of loopt al) is geen fout. Alleen voor afgeronde zoekwoorden.
+ */
+function BriefButton({
+  customerId,
+  analysisId,
+  keyword,
+  onError,
+}: {
+  customerId: string
+  analysisId: string
+  keyword: KeywordSummary
+  onError: (message: string | null) => void
+}) {
+  const router = useRouter()
+  const [starting, setStarting] = useState(false)
+  const href = briefHref(customerId, analysisId, keyword.id)
+  const ready = keyword.status === "completed"
+
+  if (keyword.brief_status) {
+    return (
+      <Button asChild size="sm">
+        <Link href={href}>
+          <FileText />
+          Content brief bekijken
+        </Link>
+      </Button>
+    )
+  }
+
+  async function start() {
+    setStarting(true)
+    onError(null)
+    try {
+      await startBrief(analysisId, keyword.id)
+      router.push(href)
+    } catch (err) {
+      if (err instanceof CompetitorAnalysisError && err.status === 409) {
+        router.push(href)
+      } else {
+        onError(errorMessage(err))
+        setStarting(false)
+      }
+    }
+  }
+
+  return (
+    // Een uitgeschakelde knop krijgt geen muisgebeurtenissen; de uitleg staat op de omhulling.
+    <span
+      title={
+        ready
+          ? undefined
+          : keyword.status === "failed"
+            ? "Dit zoekwoord kon niet worden geanalyseerd, dus er is geen basis voor een content brief."
+            : "Kan pas als de analyse van dit zoekwoord klaar is."
+      }
+    >
+      <Button size="sm" onClick={start} disabled={!ready || starting}>
+        {starting ? <Loader2 className="animate-spin" aria-hidden="true" /> : <FileText />}
+        Content brief maken
+      </Button>
+    </span>
   )
 }
 
@@ -276,6 +363,7 @@ export function AnalysisResult({ customerId, customerName, customerDomain, analy
   const [detailAttempt, setDetailAttempt] = useState(0)
   const [canceling, setCanceling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
+  const [briefError, setBriefError] = useState<string | null>(null)
 
   // De analyse ophalen bij het openen (en bij "Opnieuw proberen").
   useEffect(() => {
@@ -344,6 +432,7 @@ export function AnalysisResult({ customerId, customerName, customerDomain, analy
 
   function selectKeyword(keywordId: string) {
     setChosenKeywordId(keywordId)
+    setBriefError(null)
     writeUrlParams({ [KEYWORD_PARAM]: keywordId })
   }
 
@@ -499,6 +588,8 @@ export function AnalysisResult({ customerId, customerName, customerDomain, analy
         keyword={selected}
         detail={detail}
         showSerp={showSerp}
+        briefError={briefError}
+        onBriefError={setBriefError}
       />
 
       {keywords.length > 1 && (

@@ -27,6 +27,8 @@ type ProfileFormState = {
   baseUrl: string
   seoCustomerSince: string
   seoGoals: string
+  toneOfVoice: string
+  formOfAddress: "" | "je" | "u"
   categoryId: string
   targetBlogsPerMonth: string
   targetLinksPerMonth: string
@@ -39,6 +41,8 @@ function toFormState(customer: CustomerWebsiteDetail): ProfileFormState {
     baseUrl: customer.base_url,
     seoCustomerSince: customer.seo_customer_since ?? "",
     seoGoals: customer.seo_goals ?? "",
+    toneOfVoice: customer.tone_of_voice ?? "",
+    formOfAddress: customer.form_of_address ?? "",
     categoryId: customer.category_id ?? "",
     targetBlogsPerMonth:
       typeof customer.target_blogs_per_month === "number"
@@ -124,6 +128,8 @@ export function KlantProfielForm({
       base_url: form.baseUrl.trim(),
       seo_customer_since: form.seoCustomerSince.trim() || null,
       seo_goals: form.seoGoals.trim() || null,
+      tone_of_voice: form.toneOfVoice.trim() || null,
+      form_of_address: form.formOfAddress || null,
       category_id: form.categoryId || null,
       target_blogs_per_month: parsedTarget,
       target_links_per_month: parsedLinksTarget,
@@ -273,6 +279,39 @@ export function KlantProfielForm({
               onChange={(event) => updateField("seoGoals", event.target.value)}
               disabled={isPending}
             />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="profile-tone-of-voice" className="text-sm font-medium">
+              Tone of voice
+            </label>
+            <textarea
+              id="profile-tone-of-voice"
+              aria-describedby="profile-tone-of-voice-help"
+              className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Bijv. nuchter, deskundig, zonder jargon"
+              value={form.toneOfVoice}
+              onChange={(event) => updateField("toneOfVoice", event.target.value)}
+              disabled={isPending}
+            />
+            <p id="profile-tone-of-voice-help" className="text-xs text-muted-foreground">
+              De content brief en de concepttekst volgen dit letterlijk.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="profile-form-of-address" className="text-sm font-medium">
+              Aanspreekvorm
+            </label>
+            <select
+              id="profile-form-of-address"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              value={form.formOfAddress}
+              onChange={(event) => updateField("formOfAddress", event.target.value)}
+              disabled={isPending}
+            >
+              <option value="">Niet vastgelegd</option>
+              <option value="je">Je-vorm</option>
+              <option value="u">U-vorm</option>
+            </select>
           </div>
         </div>
 

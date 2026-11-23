@@ -5,6 +5,10 @@ export type CustomerWebsiteItem = {
   domain: string
   seo_customer_since: string | null
   seo_goals: string | null
+  /** Tone of voice voor teksten; de content brief volgt dit letterlijk. */
+  tone_of_voice: string | null
+  /** Aanspreekvorm in teksten; null = niet vastgelegd. */
+  form_of_address: "je" | "u" | null
   category_id: string | null
   category_name: string | null
   target_blogs_per_month: number | null

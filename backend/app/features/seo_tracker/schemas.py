@@ -1,7 +1,17 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+# Aanspreekvorm in teksten voor de klant; None = niet vastgelegd.
+FormOfAddress = Literal["je", "u"]
+
+
+def _blank_form_is_none(value: object) -> object:
+    """Een lege string (of alleen spaties) voor de aanspreekvorm wordt None."""
+    if isinstance(value, str):
+        return value.strip().lower() or None
+    return value
 
 
 class CustomerWebsiteCreateRequest(BaseModel):
@@ -13,6 +23,13 @@ class CustomerWebsiteCreateRequest(BaseModel):
     target_blogs_per_month: int | None = None
     target_links_per_month: int | None = None
     spreadsheet_url: str | None = None
+    tone_of_voice: str | None = None
+    form_of_address: FormOfAddress | None = None
+
+    @field_validator("form_of_address", mode="before")
+    @classmethod
+    def _form_of_address(cls, value: object) -> object:
+        return _blank_form_is_none(value)
 
 
 class CustomerWebsiteUpdateRequest(BaseModel):
@@ -24,6 +41,13 @@ class CustomerWebsiteUpdateRequest(BaseModel):
     target_blogs_per_month: int | None = None
     target_links_per_month: int | None = None
     spreadsheet_url: str | None = None
+    tone_of_voice: str | None = None
+    form_of_address: FormOfAddress | None = None
+
+    @field_validator("form_of_address", mode="before")
+    @classmethod
+    def _form_of_address(cls, value: object) -> object:
+        return _blank_form_is_none(value)
 
 
 class CustomerWebsiteItem(BaseModel):
@@ -38,6 +62,8 @@ class CustomerWebsiteItem(BaseModel):
     target_blogs_per_month: int | None = None
     target_links_per_month: int | None = None
     spreadsheet_url: str | None = None
+    tone_of_voice: str | None = None
+    form_of_address: FormOfAddress | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime

@@ -53,6 +53,7 @@ from app.features.competitor_analysis.schemas import (
     Cwv,
     Sources,
     SourceStatus,
+    TopicCoverage,
 )
 from app.features.competitor_analysis.services import pipeline
 from app.features.competitor_analysis.services.estimate import runs_analysis
@@ -678,6 +679,12 @@ def _save_insights(run: _Run, keyword: _Keyword, insights: KeywordInsights) -> N
             row.search_intent = insights.search_intent
             if "topics" in run.modules:
                 row.missing_topics = [t.model_dump(mode="json") for t in insights.missing_topics]
+                # De volledige lijst (zonder pagina-id's) voor de content brief ("Onderwerpen 13/13").
+                row.topics = [
+                    TopicCoverage(topic=t.topic, kind=t.kind, covered=t.covered, total=t.total,
+                                  own_covers=t.own_covers).model_dump(mode="json")
+                    for t in insights.topics
+                ]
             if "eeat" in run.modules:
                 for page_id, eeat in insights.eeat.items():
                     page = db.get(CompetitorAnalysisPage, page_id)

@@ -20,6 +20,7 @@ from app.db.models import (
     CompetitorAnalysisAction,
     CompetitorAnalysisKeyword,
     CompetitorAnalysisPage,
+    ContentBrief,
     CustomerWebsite,
 )
 from app.db.session import get_db
@@ -102,8 +103,14 @@ def _keywords(db: Session, analysis_id: str) -> list[CompetitorAnalysisKeyword]:
     )
 
 
+def _brief_statuses(db: Session, analysis_id: str) -> dict[str, str]:
+    """`keyword_id` → status van de content brief, voor het label van de briefknop."""
+    rows = db.query(ContentBrief.keyword_id, ContentBrief.status).filter(ContentBrief.analysis_id == analysis_id)
+    return {keyword_id: status for keyword_id, status in rows}
+
+
 def _detail(db: Session, analysis: CompetitorAnalysis) -> AnalysisDetail:
-    return to_analysis_detail(analysis, _keywords(db, analysis.id))
+    return to_analysis_detail(analysis, _keywords(db, analysis.id), _brief_statuses(db, analysis.id))
 
 
 # --- voorstel ----------------------------------------------------------------------------

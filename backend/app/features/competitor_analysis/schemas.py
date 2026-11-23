@@ -85,6 +85,14 @@ FLAG_METRICS: tuple[FlagMetric, ...] = (
 
 MAX_HEADINGS = 60
 
+# Content brief per zoekwoord (eigen status, los van de analyse): `pending` → `brief` →
+# `concept` → `completed`; "concept opnieuw" gaat `pending` → `concept` → `completed`.
+BriefStatus = Literal["pending", "brief", "concept", "completed", "failed"]
+ACTIVE_BRIEF_STATUSES = {"pending", "brief", "concept"}
+OutlineLevel = Literal["h1", "h2", "h3"]
+FormOfAddress = Literal["je", "u"]
+CheckKey = Literal["topics", "questions", "keyword", "length", "review"]
+
 
 # --- Vorm van de JSON-kolommen ---------------------------------------------------------------
 
@@ -171,6 +179,20 @@ class MissingTopic(BaseModel):
     kind: MissingTopicKind = "topic"
     covered: int = 0
     total: int = 0
+
+
+class TopicCoverage(BaseModel):
+    """Element van `competitor_analysis_keywords.topics`: één onderwerp uit aanroep B.
+
+    `covered`/`total` zoals bij `MissingTopic`; `own_covers` = de eigen pagina behandelt het
+    (altijd False bij een nieuwe of onleesbare eigen pagina).
+    """
+
+    topic: str
+    kind: MissingTopicKind = "topic"
+    covered: int = 0
+    total: int = 0
+    own_covers: bool = False
 
 
 class SourceStatus(BaseModel):
@@ -361,6 +383,8 @@ class KeywordSummary(BaseModel):
     volume: int | None = None
     kd: int | None = None
     ai_state: AiState | None = None
+    # Status van de content brief van dit zoekwoord; None = nog geen brief.
+    brief_status: BriefStatus | None = None
 
 
 class AnalysisDetail(BaseModel):
@@ -501,7 +525,126 @@ class ActionUpdate(BaseModel):
     done: bool
 
 
+# --- Content brief en concepttekst ----------------------------------------------------------
+
+
+class OutlineItem(BaseModel):
+    """Eén kop in de aanbevolen structuur van de brief."""
+
+    level: OutlineLevel
+    text: str
+
+
+class Brief(BaseModel):
+    """`content_briefs.brief`: de content brief (linkerkaart).
+
+    `tone_of_voice` en `form_of_address` komen uit het klantprofiel (door de code ingevuld);
+    `word_count` is de richtlengte die het model kiest; `internal_links` zijn paden uit de
+    sitemap van de klant.
+    """
+
+    goal_intent: list[str] = Field(default_factory=list)
+    title: str = ""
+    meta_description: str = ""
+    outline: list[OutlineItem] = Field(default_factory=list)
+    word_count: int = 0
+    tone_of_voice: str | None = None
+    form_of_address: FormOfAddress | None = None
+    internal_links: list[str] = Field(default_factory=list)
+    schema_types: list[str] = Field(default_factory=list)
+
+
+class ConceptSection(BaseModel):
+    """Eén sectie van de concepttekst; `body` is markdown, `review_note` de gele "Review:"-melding."""
+
+    level: OutlineLevel
+    heading: str
+    body: str = ""
+    review_note: str | None = None
+
+
+class ConceptCheck(BaseModel):
+    """Controlebadge boven de concepttekst, door de code berekend."""
+
+    key: CheckKey
+    label: str
+    ok: bool
+
+
+class Concept(BaseModel):
+    """`content_briefs.concept`: de concepttekst (rechterkaart). `word_count` door de code geteld."""
+
+    version: int = 1
+    word_count: int = 0
+    sections: list[ConceptSection] = Field(default_factory=list)
+    checks: list[ConceptCheck] = Field(default_factory=list)
+
+
+class ContentBrief(BaseModel):
+    """`GET/POST /analyses/{id}/keywords/{kid}/brief` en `POST .../brief/concept`.
+
+    `analysis_date` = afronding van de analyse (anders het aanmaakmoment). `model` = model van
+    de laatste geslaagde aanroep. `ai_usage` = opgeteld verbruik van deze brief (USD).
+    """
+
+    id: str
+    analysis_id: str
+    keyword_id: str
+    keyword: str
+    target_url: str | None = None
+    status: BriefStatus
+    error_message: str | None = None
+    analysis_date: datetime | None = None
+    model: str | None = None
+    ai_usage: AiUsage = Field(default_factory=AiUsage)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    brief: Brief | None = None
+    concept: Concept | None = None
+
+
+class ContentBriefListItem(BaseModel):
+    """Eén brief in het overzicht per klant; `title`/`concept_version`/`word_count` leeg zolang
+    de brief of het concept er nog niet is."""
+
+    id: str
+    analysis_id: str
+    keyword_id: str
+    keyword: str
+    target_url: str | None = None
+    status: BriefStatus
+    error_message: str | None = None
+    title: str | None = None
+    concept_version: int | None = None
+    word_count: int | None = None
+    analysis_date: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class ContentBriefListResponse(BaseModel):
+    """`GET /customers/{cid}/briefs`: nieuwste wijziging eerst."""
+
+    items: list[ContentBriefListItem]
+
+
 __all__ = [
+    "ACTIVE_BRIEF_STATUSES",
+    "ContentBriefListItem",
+    "ContentBriefListResponse",
+    "Brief",
+    "BriefStatus",
+    "CheckKey",
+    "Concept",
+    "ConceptCheck",
+    "ConceptSection",
+    "ContentBrief",
+    "FormOfAddress",
+    "OutlineItem",
+    "OutlineLevel",
+    "TopicCoverage",
     "ACTIVE_STATUSES",
     "ALL_MODULES",
     "FINAL_STATUSES",

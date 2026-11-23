@@ -5,6 +5,7 @@ from app.features.blogs.worker.image_generation import (
 )
 from app.features.blogs.worker.wordpress_publish import publish_blog_to_wordpress_task
 from app.features.competitor_analysis.worker.analysis import run_competitor_analysis_task
+from app.features.competitor_analysis.worker.brief import run_content_brief_task
 from app.features.launch_checklist.worker.content_scan import (
     run_content_analysis_task,
     run_content_scan_task,
@@ -30,6 +31,7 @@ __all__ = [
     "publish_blog_to_wordpress_task",
     "run_competitor_analysis_task",
     "run_content_analysis_task",
+    "run_content_brief_task",
     "run_content_scan_task",
     "run_geo_scan_task",
     "run_golive_scan_task",

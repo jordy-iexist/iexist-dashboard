@@ -11,6 +11,7 @@ import {
   FileText,
   Upload,
   ChevronDown,
+  ClipboardList,
   Search,
   ListChecks,
   Swords,
@@ -78,6 +79,8 @@ const ANALYTICS_URL = "/dashboard/livegang/analytics";
 
 const BLOGS_URL = "/dashboard/blogs";
 const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
+// Past op geen enkel pad: het menu-item "Content briefs" is dan niet actief.
+const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
 
 // Shopify-admin look: compact items, light pill for active, no sub-menu guide line
 const itemClass =
@@ -345,13 +348,18 @@ export function AppSidebar({
     ? customerHref("home", activeCustomerId)
     : null;
   // De concurrentieanalyse staat onder de klantpagina, maar heeft een eigen menu-item.
-  const onAnalyses = sectionFromPathname(pathname) === "analyses";
+  const pathSection = sectionFromPathname(pathname);
+  const onAnalyses = pathSection === "analyses";
+  // Content briefs staan ook onder de klantpagina (het overzicht, en de brief zelf onder
+  // een analyse), maar horen in het menu bij Content.
+  const onContentBriefs = pathSection === "contentBriefs";
   const isPathActive = (url: string): boolean => {
     if (url === "/dashboard") {
       return (
         pathname === "/dashboard" ||
         (customerHomePath !== null &&
           !onAnalyses &&
+          !onContentBriefs &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
       );
@@ -409,6 +417,14 @@ export function AppSidebar({
               icon: Upload,
             },
           ],
+        },
+        {
+          title: "Content briefs",
+          // Het adres bevat de klant en de brief zelf hangt onder een analyse, dus een vast
+          // voorvoegsel is er niet: op die pagina's telt het huidige pad als het adres.
+          url: onContentBriefs ? pathname : CONTENT_BRIEFS_INACTIVE_URL,
+          href: hrefFor("contentBriefs", CUSTOMERS_URL),
+          icon: ClipboardList,
         },
       ],
     },

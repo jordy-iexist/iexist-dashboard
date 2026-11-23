@@ -234,6 +234,8 @@ export type KeywordSummary = {
   volume: number | null
   kd: number | null
   ai_state: AiState | null
+  /** Status van de content brief (zie `lib/content-brief.ts`); null = nog geen brief. */
+  brief_status: string | null
 }
 
 /** `GET /analyses/{id}`; ook het antwoord op starten en annuleren. */

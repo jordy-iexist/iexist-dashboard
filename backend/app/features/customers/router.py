@@ -283,6 +283,10 @@ async def create_customer(
         spreadsheet_url=(payload.spreadsheet_url.strip() or None)
         if isinstance(payload.spreadsheet_url, str)
         else None,
+        tone_of_voice=(payload.tone_of_voice.strip() or None)
+        if isinstance(payload.tone_of_voice, str)
+        else None,
+        form_of_address=payload.form_of_address,
         created_by=user_id,
         created_at=now,
         updated_at=now,
@@ -378,6 +382,14 @@ async def update_customer(
             if isinstance(payload.spreadsheet_url, str)
             else None
         )
+    if "tone_of_voice" in provided:
+        updates["tone_of_voice"] = (
+            payload.tone_of_voice.strip() or None
+            if isinstance(payload.tone_of_voice, str)
+            else None
+        )
+    if "form_of_address" in provided:
+        updates["form_of_address"] = payload.form_of_address
 
     if len(updates) == 1:
         raise HTTPException(status_code=400, detail="Geen wijzigingen ontvangen.")

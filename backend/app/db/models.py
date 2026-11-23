@@ -297,6 +297,9 @@ class CustomerWebsite(Base):
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     seo_customer_since: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     seo_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Schrijfstijl voor teksten (content brief): vrije tekst en de aanspreekvorm "je" | "u".
+    tone_of_voice: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    form_of_address: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     category_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey("customer_categories.id", ondelete="SET NULL"),
@@ -1507,6 +1510,9 @@ class CompetitorAnalysisKeyword(Base):
     search_intent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Lijst van `MissingTopic`.
     missing_topics: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Volledige onderwerpenlijst: lijst van `TopicCoverage`. Leeg (None) bij analyses van vóór
+    # migratie 0041; de content brief valt dan terug op `missing_topics`.
+    topics: Mapped[Any] = mapped_column(JSON, nullable=True)
     # pending | completed | failed
     status: Mapped[str] = mapped_column(
         Text, nullable=False, default="pending", server_default=text("'pending'")
@@ -1627,6 +1633,59 @@ class CompetitorAnalysisAction(Base):
     )
 
 
+class ContentBrief(Base):
+    """Content brief en concepttekst voor één zoekwoord uit een concurrentieanalyse.
+
+    Eén per zoekwoord (`keyword_id` uniek). `brief` is `Brief`, `concept` is `Concept`,
+    `ai_usage` is `AiUsage` (opgeteld over alle aanroepen, ook "concept opnieuw"); de vormen
+    staan in `features/competitor_analysis/schemas.py`. Eigen status, los van de analyse.
+    """
+
+    __tablename__ = "content_briefs"
+    __table_args__ = (
+        UniqueConstraint("keyword_id", name="uq_content_briefs_keyword_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    keyword_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analysis_keywords.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    analysis_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # pending | brief | concept | completed | failed
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default=text("'pending'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    brief: Mapped[Any] = mapped_column(JSON, nullable=True)
+    concept: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Model van de laatste geslaagde aanroep (bij een server-side fallback het werkelijke model).
+    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_usage: Mapped[Any] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -1663,4 +1722,5 @@ __all__ = [
     "CompetitorAnalysisKeyword",
     "CompetitorAnalysisPage",
     "CompetitorAnalysisAction",
+    "ContentBrief",
 ]

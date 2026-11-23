@@ -18,6 +18,7 @@ from app.db.models import (
     CompetitorAnalysisAction,
     CompetitorAnalysisKeyword,
     CompetitorAnalysisPage,
+    ContentBrief as ContentBriefRow,
     User,
 )
 from app.features.competitor_analysis.schemas import (
@@ -28,6 +29,11 @@ from app.features.competitor_analysis.schemas import (
     AiUsage,
     AnalysisDetail,
     AnalysisListItem,
+    Brief,
+    BriefStatus,
+    Concept,
+    ContentBrief,
+    ContentBriefListItem,
     Cwv,
     Eeat,
     Estimate,
@@ -92,7 +98,8 @@ def _position_key(page: CompetitorAnalysisPage) -> tuple:
 
 # --- run -------------------------------------------------------------------------------
 
-def to_keyword_summary(keyword: CompetitorAnalysisKeyword) -> KeywordSummary:
+def to_keyword_summary(keyword: CompetitorAnalysisKeyword, brief_status: str | None = None) -> KeywordSummary:
+    """`brief_status`: status van de content brief van dit zoekwoord (of None)."""
     return KeywordSummary(
         id=keyword.id,
         keyword=keyword.keyword,
@@ -103,6 +110,7 @@ def to_keyword_summary(keyword: CompetitorAnalysisKeyword) -> KeywordSummary:
         volume=keyword.volume,
         kd=keyword.kd,
         ai_state=_choice(keyword.ai_state, AiState),
+        brief_status=_choice(brief_status, BriefStatus),
     )
 
 
@@ -119,8 +127,13 @@ def to_list_item(analysis: CompetitorAnalysis, keywords: list[CompetitorAnalysis
     )
 
 
-def to_analysis_detail(analysis: CompetitorAnalysis, keywords: list[CompetitorAnalysisKeyword]) -> AnalysisDetail:
-    """`keywords` in `sort_order`."""
+def to_analysis_detail(
+    analysis: CompetitorAnalysis,
+    keywords: list[CompetitorAnalysisKeyword],
+    brief_statuses: dict[str, str] | None = None,
+) -> AnalysisDetail:
+    """`keywords` in `sort_order`; `brief_statuses`: `keyword_id` → status van de content brief."""
+    brief_statuses = brief_statuses or {}
     return AnalysisDetail(
         id=analysis.id,
         customer_website_id=analysis.customer_website_id,
@@ -146,7 +159,7 @@ def to_analysis_detail(analysis: CompetitorAnalysis, keywords: list[CompetitorAn
         created_at=analysis.created_at,
         updated_at=analysis.updated_at,
         completed_at=analysis.completed_at,
-        keywords=[to_keyword_summary(k) for k in keywords],
+        keywords=[to_keyword_summary(k, brief_statuses.get(k.id)) for k in keywords],
     )
 
 
@@ -266,6 +279,55 @@ def to_keyword_detail(
         missing_topics=_models(MissingTopic, keyword.missing_topics),
         paa=_model(Paa, keyword.paa),
         ai_overview=_model(AiOverview, keyword.ai_overview),
+    )
+
+
+# --- content brief ---------------------------------------------------------------------
+
+def to_content_brief(
+    row: ContentBriefRow, keyword: CompetitorAnalysisKeyword, analysis: CompetitorAnalysis
+) -> ContentBrief:
+    """Brief + concept van één zoekwoord. Een ongeldige `brief`/`concept`-kolom wordt `None`."""
+    return ContentBrief(
+        id=row.id,
+        analysis_id=row.analysis_id,
+        keyword_id=row.keyword_id,
+        keyword=keyword.keyword,
+        target_url=keyword.target_url,
+        status=_choice(row.status, BriefStatus) or "failed",
+        error_message=row.error_message,
+        analysis_date=analysis.completed_at or analysis.created_at,
+        model=row.model,
+        ai_usage=_model(AiUsage, row.ai_usage) or AiUsage(),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        completed_at=row.completed_at,
+        brief=_model(Brief, row.brief),
+        concept=_model(Concept, row.concept),
+    )
+
+
+def to_content_brief_list_item(
+    row: ContentBriefRow, keyword: CompetitorAnalysisKeyword, analysis: CompetitorAnalysis
+) -> ContentBriefListItem:
+    """Regel in het overzicht van briefs per klant."""
+    brief = _model(Brief, row.brief)
+    concept = _model(Concept, row.concept)
+    return ContentBriefListItem(
+        id=row.id,
+        analysis_id=row.analysis_id,
+        keyword_id=row.keyword_id,
+        keyword=keyword.keyword,
+        target_url=keyword.target_url,
+        status=_choice(row.status, BriefStatus) or "failed",
+        error_message=row.error_message,
+        title=(brief.title or None) if brief is not None else None,
+        concept_version=concept.version if concept is not None else None,
+        word_count=concept.word_count if concept is not None else None,
+        analysis_date=analysis.completed_at or analysis.created_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        completed_at=row.completed_at,
     )
 
 

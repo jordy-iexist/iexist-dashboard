@@ -123,6 +123,25 @@ class AnthropicClientTests(unittest.TestCase):
         self.assertEqual(fake.calls[0]["output_config"]["effort"], "medium")
         self.assertEqual(fake.calls[0]["max_tokens"], 16000)
 
+    def test_model_override(self):
+        fake = FakeClient(_response(model=None))
+        result = _call(fake, model="claude-sonnet-5-5")
+        self.assertEqual(fake.calls[0]["model"], "claude-sonnet-5-5")
+        self.assertEqual(result.model, "claude-sonnet-5-5")  # zonder model in het antwoord: het gekozen model
+        for forbidden in ("temperature", "top_p", "thinking", "tool_choice"):
+            self.assertNotIn(forbidden, fake.calls[0])
+        fake = FakeClient()
+        _call(fake, model=None)
+        self.assertEqual(fake.calls[0]["model"], "claude-opus-5-5")
+
+    def test_cost_usd_sonnet(self):
+        usage = {"input_tokens": 1_000_000, "output_tokens": 100_000}
+        self.assertAlmostEqual(claude.cost_usd(usage, "claude-sonnet-5-5"), 2.0 + 1.0)
+        self.assertAlmostEqual(claude.cost_usd(usage, "claude-sonnet-5"), 2.0 + 1.0)
+        cached = {"cache_creation_input_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000}
+        self.assertAlmostEqual(claude.cost_usd(cached, "claude-sonnet-5-5"), 2.5 + 0.10)
+        self.assertAlmostEqual(claude.cost_usd(cached, "claude-sonnet-5"), 2.5 + 0.20)
+
     def test_unknown_effort_is_rejected_before_call(self):
         fake = FakeClient()
         with self.assertRaises(ValueError):
