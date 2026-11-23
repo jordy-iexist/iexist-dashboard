@@ -259,7 +259,7 @@ def _matched_url(value: Any) -> str | None:
     return None if text is None or text == "None" else text
 
 
-def _best_prt(prt_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def best_prt(prt_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Per zoekwoord de PRT-rij met de beste (laagste) positie; zonder positie telt als slechtst."""
     best: dict[str, tuple[int | None, dict[str, Any]]] = {}
     for raw in prt_rows:
@@ -273,7 +273,7 @@ def _best_prt(prt_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {key: raw for key, (_, raw) in best.items()}
 
 
-def _prt_row(raw: dict[str, Any]) -> dict[str, Any]:
+def convert_prt(raw: dict[str, Any]) -> dict[str, Any]:
     """Eén PRT-rij in de vorm van een quick win (zonder `kans` en `source`)."""
     rank = position(raw.get("rank"))
     month = position(raw.get("monthagorank"))
@@ -301,7 +301,7 @@ def merge(prt_rows: list[dict[str, Any]], ahrefs_rows: list[dict[str, Any]]) -> 
     PRT als die er is, anders uit Ahrefs; de KD alleen uit Ahrefs. `kans` wordt opnieuw
     berekend. Gesorteerd op volume aflopend (zonder volume achteraan), positie, zoekwoord.
     """
-    prt_best = _best_prt(prt_rows)
+    prt_best = best_prt(prt_rows)
     merged: dict[str, dict[str, Any]] = {}
 
     for row in ahrefs_rows:
@@ -312,7 +312,7 @@ def merge(prt_rows: list[dict[str, Any]], ahrefs_rows: list[dict[str, Any]]) -> 
         if raw is None:
             merged[key] = {**row, "source": "ahrefs"}
             continue
-        prt_row = _prt_row(raw)
+        prt_row = convert_prt(raw)
         if not _in_range(prt_row["position"]):
             continue  # PRT meet buiten 4–20: geen quick win
         merged[key] = {
@@ -325,7 +325,7 @@ def merge(prt_rows: list[dict[str, Any]], ahrefs_rows: list[dict[str, Any]]) -> 
     for key, raw in prt_best.items():
         if key in merged:
             continue
-        prt_row = _prt_row(raw)
+        prt_row = convert_prt(raw)
         if _in_range(prt_row["position"]) and prt_row["keyword"]:
             merged[key] = {**prt_row, "source": "prt"}
 

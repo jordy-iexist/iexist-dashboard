@@ -48,6 +48,7 @@ celery_app.conf.update(
         "app.worker.tasks.run_golive_scan_task": {"queue": "audit"},
         "app.worker.tasks.run_sitemap_monitor_dispatch_task": {"queue": "audit"},
         "app.worker.tasks.run_sitemap_monitor_task": {"queue": "audit"},
+        "app.worker.tasks.run_competitor_analysis_task": {"queue": "audit"},
     },
     # Celery beat (service `beat`, precies één instantie). Tijden in `timezone` hierboven.
     beat_schedule={
@@ -67,4 +68,5 @@ celery_app.autodiscover_tasks([
     "app.features.seo_meta.worker",
     "app.features.website_audit.worker",
     "app.features.launch_checklist.worker",
+    "app.features.competitor_analysis.worker",
 ])

@@ -9,11 +9,45 @@ import httpx
 from app.services.ahrefs import client as ahrefs
 from app.services.ahrefs.client import AhrefsServiceError
 
-SETTINGS = SimpleNamespace(ahrefs_api_key="test-key", ahrefs_request_timeout_seconds=5.0)
+SETTINGS = SimpleNamespace(
+    ahrefs_api_key="test-key", ahrefs_request_timeout_seconds=5.0, ahrefs_country="nl"
+)
 
 
 def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _serp_row(position, types, url=None, title=None, **metrics):
+    row = {
+        "position": position, "url": url, "title": title, "type": types, "page_type": None,
+        "domain_rating": None, "url_rating": None, "refdomains": None, "backlinks": None,
+        "keywords": None, "update_date": "2026-11-22T14:53:16Z",
+    }
+    row.update(metrics)
+    return row
+
+
+# Vorm van een echte serp-overview-respons (top_positions=10, "seo bureau", nl),
+# geanonimiseerd: features tussen de organische resultaten en sitelinks op dezelfde positie.
+SERP_PAYLOAD = {"positions": [
+    _serp_row(1, ["organic"], "https://bureau-a.nl/", "Bureau A", page_type="/Core_Page,/Core_Page/Homepage",
+              domain_rating=20.0, url_rating=9.0, refdomains=664),
+    _serp_row(1, ["sitelink"], "https://bureau-a.nl/team", "Team"),
+    _serp_row(2, ["ai_overview"]),
+    _serp_row(2, ["ai_overview_sitelink"], "https://bureau-a.nl/", "Bureau A"),
+    _serp_row(2, ["ai_overview_sitelink"], "https://bureau-b.nl/seo/", "SEO bij B"),
+    _serp_row(2, ["ai_overview_sitelink"], "https://bureau-b.nl/seo/", "SEO bij B"),
+    _serp_row(3, ["question"], title="Wat is een SEO bureau?"),
+    _serp_row(3, ["question"], title="Hoeveel kost SEO per maand?"),
+    _serp_row(5, ["organic"], "https://bureau-b.nl/seo/", "SEO bij B", page_type="/Landing_Page/Service_Page",
+              domain_rating=54.0, refdomains=65),
+    _serp_row(4, ["organic"], "https://vergelijker.nl/seo", "186 bureaus vergeleken", page_type="/Listing_Collection",
+              domain_rating=67.0, refdomains=7),
+    _serp_row(6, ["organic", "snippet"], "https://bureau-c.nl/", "Bureau C", domain_rating=35.0, refdomains=0),
+    _serp_row(7, ["organic"], "https://bureau-a.nl/", "Bureau A (tweede keer)"),
+    _serp_row(8, ["organic"], "https://bureau-d.nl/", "Bureau D", domain_rating=52.0, refdomains=79),
+]}
 
 
 class AhrefsClientTests(unittest.TestCase):
@@ -190,6 +224,185 @@ class AhrefsClientTests(unittest.TestCase):
         payload = {"limits_and_usage": {"subscription": "Standard", "units_usage_workspace": 1200}}
         data = ahrefs.limits_and_usage(client=_client(lambda r: httpx.Response(200, json=payload)))
         self.assertEqual(data["subscription"], "Standard")
+
+    def test_serp_overview_sends_keyword_country_and_reads_positions(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json=SERP_PAYLOAD,
+                headers={"x-api-units-cost-total-actual": "315", "x-api-cache": "hit"},
+            )
+
+        result = ahrefs.serp_overview(" seo bureau ", top_positions=15, client=_client(handler))
+
+        params = seen["params"]
+        self.assertEqual((seen["method"], seen["path"]), ("GET", "/v3/serp-overview/serp-overview"))
+        self.assertEqual(params["keyword"], "seo bureau")
+        self.assertEqual(params["country"], "nl")  # standaard settings.ahrefs_country
+        self.assertEqual(params["top_positions"], "15")
+        self.assertNotIn("date", params)
+        self.assertEqual(params["select"].split(","), list(ahrefs.SERP_FIELDS))
+        self.assertNotIn("traffic", params["select"].split(","))
+        self.assertEqual(len(result.rows), len(SERP_PAYLOAD["positions"]))
+        self.assertEqual(result.rows[0]["type"], ["organic"])
+        self.assertEqual(result.units, 315)
+        self.assertTrue(result.cached)
+
+    def test_serp_overview_explicit_country(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"positions": []})
+
+        result = ahrefs.serp_overview("seo agency", country="be", client=_client(handler))
+        self.assertEqual(seen["params"]["country"], "be")
+        self.assertEqual(seen["params"]["top_positions"], "10")
+        self.assertEqual((result.rows, result.units), ([], 0))
+
+    def test_keywords_overview_joins_keywords_and_reads_intents(self):
+        seen = {}
+        row = {
+            "keyword": "seo bureau", "volume": 3900, "difficulty": 30,
+            "intents": {"informational": True, "navigational": False, "commercial": True,
+                        "transactional": False, "branded": False, "local": True},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"keywords": [row]}, headers={"x-api-units-cost-total-actual": "62"})
+
+        result = ahrefs.keywords_overview(
+            ["seo bureau", " zoekmachine optimalisatie ", "seo bureau", "", "a, b"],
+            country="nl", client=_client(handler),
+        )
+
+        params = seen["params"]
+        self.assertEqual((seen["method"], seen["path"]), ("GET", "/v3/keywords-explorer/overview"))
+        self.assertEqual(params["keywords"], "seo bureau,zoekmachine optimalisatie")
+        self.assertEqual(params["country"], "nl")
+        self.assertEqual(params["select"], "keyword,volume,difficulty,intents")
+        self.assertEqual(result.rows, [row])
+        self.assertTrue(result.rows[0]["intents"]["commercial"])
+        self.assertEqual(result.units, 62)
+
+    def test_keywords_overview_without_keywords_skips_request(self):
+        def handler(request):
+            raise AssertionError("geen request verwacht")
+
+        result = ahrefs.keywords_overview(["", "  "], client=_client(handler))
+        self.assertEqual((result.rows, result.units), ([], 0))
+
+    def test_url_metrics_uses_exact_mode_and_maps_targets_by_index(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["body"] = json.loads(request.content)
+            # Echte vorm: url zonder protocol, `index` volgt de invoer.
+            return httpx.Response(
+                200,
+                json={"targets": [
+                    {"index": 1, "url": "klant.nl/", "domain_rating": 34.0, "url_rating": 20.0, "refdomains": 210},
+                    {"index": 0, "url": "klant.nl/diensten/seo/", "domain_rating": 34.0, "url_rating": 8.0,
+                     "refdomains": 3},
+                ]},
+                headers={"x-api-units-cost-total": "50", "x-api-units-cost-total-actual": "50"},
+            )
+
+        result = ahrefs.url_metrics(
+            ["https://klant.nl/diensten/seo/", " https://klant.nl/ ", ""], client=_client(handler)
+        )
+
+        self.assertEqual((seen["method"], seen["path"]), ("POST", "/v3/batch-analysis/batch-analysis"))
+        self.assertEqual(seen["body"]["select"], ["index", "url", "domain_rating", "url_rating", "refdomains"])
+        self.assertEqual(seen["body"]["targets"], [
+            {"url": "https://klant.nl/diensten/seo/", "mode": "exact", "protocol": "both"},
+            {"url": "https://klant.nl/", "mode": "exact", "protocol": "both"},
+        ])
+        self.assertNotIn("country", seen["body"])
+        by_target = {row["target"]: row for row in result.rows}
+        self.assertEqual(by_target["https://klant.nl/diensten/seo/"]["refdomains"], 3)
+        self.assertEqual(by_target["https://klant.nl/"]["url_rating"], 20.0)
+        self.assertEqual(result.units, 50)
+        self.assertFalse(result.cached)
+
+    def test_url_metrics_splits_over_100_targets_and_sums_units(self):
+        bodies = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            bodies.append(body)
+            rows = [{"index": i, "url": t["url"], "refdomains": i} for i, t in enumerate(body["targets"])]
+            return httpx.Response(200, json={"targets": rows}, headers={"x-api-units-cost-total-actual": "50"})
+
+        urls = [f"https://klant.nl/p{i}" for i in range(150)]
+        result = ahrefs.url_metrics(urls, client=_client(handler))
+
+        self.assertEqual([len(b["targets"]) for b in bodies], [100, 50])
+        self.assertEqual(len(result.rows), 150)
+        self.assertEqual(result.rows[120]["target"], "https://klant.nl/p120")
+        self.assertEqual(result.units, 100)
+
+    def test_url_metrics_without_urls_skips_request(self):
+        def handler(request):
+            raise AssertionError("geen request verwacht")
+
+        result = ahrefs.url_metrics([], client=_client(handler))
+        self.assertEqual((result.rows, result.units, result.cached), ([], 0, False))
+
+    def test_url_metrics_forbidden_raises(self):
+        with self.assertRaises(AhrefsServiceError) as ctx:
+            ahrefs.url_metrics(
+                ["https://klant.nl/"],
+                client=_client(lambda r: httpx.Response(403, json={"error": "insufficient units"})),
+            )
+        self.assertEqual(ctx.exception.code, "forbidden")
+        self.assertIn("insufficient units", str(ctx.exception))
+
+    def test_organic_rows_skips_features_and_duplicates(self):
+        result = ahrefs.AhrefsResult(rows=SERP_PAYLOAD["positions"])
+
+        rows = ahrefs.organic_rows(result, 10)
+
+        self.assertEqual(
+            [row["url"] for row in rows],
+            ["https://bureau-a.nl/", "https://vergelijker.nl/seo", "https://bureau-b.nl/seo/",
+             "https://bureau-c.nl/", "https://bureau-d.nl/"],
+        )
+        self.assertEqual([row["organic_position"] for row in rows], [1, 2, 3, 4, 5])
+        self.assertEqual([row["position"] for row in rows], [1, 4, 5, 6, 8])
+        self.assertEqual(rows[1]["domain_rating"], 67.0)
+        self.assertEqual([row["url"] for row in ahrefs.organic_rows(result, 2)],
+                         ["https://bureau-a.nl/", "https://vergelijker.nl/seo"])
+        self.assertNotIn("organic_position", SERP_PAYLOAD["positions"][0])
+
+    def test_serp_features_lists_non_organic_types(self):
+        result = ahrefs.AhrefsResult(rows=SERP_PAYLOAD["positions"])
+        self.assertEqual(
+            ahrefs.serp_features(result),
+            ["ai_overview", "ai_overview_sitelink", "question", "sitelink", "snippet"],
+        )
+        self.assertEqual(ahrefs.serp_features(ahrefs.AhrefsResult(rows=[_serp_row(1, ["organic"], "https://a.nl/")])), [])
+
+    def test_ai_overview_sources_and_people_also_ask(self):
+        result = ahrefs.AhrefsResult(rows=SERP_PAYLOAD["positions"])
+        self.assertEqual(ahrefs.ai_overview_sources(result), [
+            {"url": "https://bureau-a.nl/", "title": "Bureau A"},
+            {"url": "https://bureau-b.nl/seo/", "title": "SEO bij B"},
+        ])
+        self.assertEqual(
+            ahrefs.people_also_ask(result), ["Wat is een SEO bureau?", "Hoeveel kost SEO per maand?"]
+        )
+        empty = ahrefs.AhrefsResult()
+        self.assertEqual((ahrefs.ai_overview_sources(empty), ahrefs.people_also_ask(empty)), ([], []))
 
 
 if __name__ == "__main__":

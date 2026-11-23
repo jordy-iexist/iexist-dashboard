@@ -9,6 +9,7 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
 export type CustomerSection =
   | "home"
+  | "analyses"
   | "seoGeo"
   | "oplevering"
   | "analytics"
@@ -78,6 +79,8 @@ export function customerHref(
   switch (section) {
     case "home":
       return `/dashboard/klanten/${id}`
+    case "analyses":
+      return `/dashboard/klanten/${id}/analyses`
     case "seoGeo":
       return `/dashboard/livegang/seo-geo/${id}`
     case "oplevering":
@@ -93,11 +96,13 @@ export function customerHref(
 
 // Het onderdeel met een klantversie waar dit pad onder valt, of null.
 export function sectionFromPathname(pathname: string): CustomerSection | null {
-  const [root, section, first] = segmentsOf(pathname)
+  const [root, section, first, second] = segmentsOf(pathname)
   if (root !== "dashboard") return null
 
   if (section === "klanten") {
-    return first && first !== "nieuw" ? "home" : null
+    if (!first || first === "nieuw") return null
+    // Concurrentieanalyse (lijst, wizard en resultaat); klant wisselen gaat naar de lijst.
+    return second === "analyses" ? "analyses" : "home"
   }
   if (section === "livegang") {
     if (first === "seo-geo") return "seoGeo"

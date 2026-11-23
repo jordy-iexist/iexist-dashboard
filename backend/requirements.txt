@@ -4,6 +4,7 @@ sqlalchemy
 psycopg[binary]
 celery[redis]
 openai
+anthropic>=2.12,<3
 python-multipart
 python-dotenv
 pydantic-settings

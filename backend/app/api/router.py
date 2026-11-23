@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.features.auth.router import router as auth_router
 from app.features.blogs.router import router as blogs_router
+from app.features.competitor_analysis.router import router as competitor_analysis_router
 from app.features.customers.router import router as customers_router
 from app.features.customers.sheet_router import router as customer_sheet_router
 from app.features.landing_pages.router import router as landing_pages_router
@@ -30,3 +31,4 @@ router.include_router(launch_checklist_analytics_router)
 router.include_router(launch_checklist_fix_prompt_router)
 router.include_router(launch_checklist_schema_markup_router)
 router.include_router(site_changes_router)
+router.include_router(competitor_analysis_router)

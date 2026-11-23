@@ -12,9 +12,16 @@ import {
   Upload,
   ChevronDown,
   Search,
-  ScanLine,
-  Globe,
   ListChecks,
+  Swords,
+  Newspaper,
+  Globe,
+  Radar,
+  ChartLine,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -46,6 +53,7 @@ import {
   customerIdFromLocation,
   persistActiveCustomer,
   readTabCustomerId,
+  sectionFromPathname,
   subscribeTabCustomer,
   writeActiveCustomerCookie,
 } from "@/lib/active-customer";
@@ -63,49 +71,13 @@ const menuItems = [
   },
 ];
 
-const LIVEGANG_URL = "/dashboard/livegang";
+const CUSTOMERS_URL = "/dashboard/klanten";
 const SEO_GEO_URL = "/dashboard/livegang/seo-geo";
 const GOLIVE_URL = "/dashboard/livegang/oplevering";
 const ANALYTICS_URL = "/dashboard/livegang/analytics";
 
-const blogItems = [
-  {
-    title: "Alle blogs",
-    url: "/dashboard/blogs",
-    icon: FileText,
-  },
-  {
-    title: "CSV Upload",
-    url: "/dashboard/blogs/upload",
-    icon: Upload,
-  },
-];
-
-const landingPageItems = [
-  { title: "Alle pagina's", url: "/dashboard/landing-pages", icon: FileText },
-  { title: "CSV Upload", url: "/dashboard/landing-pages/upload", icon: Upload },
-];
-
-const seoItems = [
-  {
-    title: "SEO Tracker",
-    url: "/dashboard/seo/tracker",
-    icon: Search,
-  },
-  {
-    title: "Meta Generator",
-    url: "/dashboard/seo/meta-generator",
-    icon: FileText,
-  },
-];
-
-const auditItems = [
-  {
-    title: "Website Audit",
-    url: "/dashboard/audit",
-    icon: ScanLine,
-  },
-];
+const BLOGS_URL = "/dashboard/blogs";
+const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
 
 // Shopify-admin look: compact items, light pill for active, no sub-menu guide line
 const itemClass =
@@ -113,8 +85,176 @@ const itemClass =
 const subClass =
   "h-7 rounded-lg text-[13px] text-white/70 hover:bg-white/10 hover:text-white data-[active=true]:bg-white/10 data-[active=true]:font-semibold data-[active=true]:text-white [&>svg]:text-white/60 data-[active=true]:[&>svg]:text-white";
 const subMenuClass = "ml-3.5 border-l-0 pl-1.5";
-const badgeClass =
-  "ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/70";
+
+type NavLeafItem = {
+  title: string;
+  /** Adres waarop het item actief is (prefix). */
+  url: string;
+  /** Adres waar de link heen gaat (kan de actieve klant bevatten). */
+  href: string;
+  icon: LucideIcon;
+};
+
+type NavGroupItem = NavLeafItem & {
+  /** Derde niveau: verschijnt in een eigen paneel rechts naast de sidebar. */
+  children?: NavLeafItem[];
+};
+
+type NavGroupConfig = {
+  title: string;
+  icon: LucideIcon;
+  items: NavGroupItem[];
+};
+
+// Het item met het langste passende adres is actief, zodat een subpagina
+// (bijv. /blogs/upload) niet ook het bovenliggende item (/blogs) oplicht.
+function activeItemUrl(items: NavLeafItem[], pathname: string) {
+  return (
+    items
+      .map((item) => item.url)
+      .filter((url) => pathname.startsWith(url))
+      .sort((a, b) => b.length - a.length)[0] ?? null
+  );
+}
+
+// Uitklapbare kop in het menu. Staat open op de eigen pagina's, ook als je er
+// vanaf een andere pagina naartoe navigeert (de sidebar blijft dan gemount).
+function NavGroup({
+  group,
+  pathname,
+  onOpenSubNav,
+}: {
+  group: NavGroupConfig;
+  pathname: string;
+  /** Klik op een item met een derde niveau: het paneel (weer) openen. */
+  onOpenSubNav: (url: string) => void;
+}) {
+  const { state, isMobile, setOpen } = useSidebar();
+
+  // Op mobiel is er geen ruimte voor het paneel rechts: daar staan de items
+  // van het derde niveau gewoon in de groep zelf.
+  const items: NavGroupItem[] = isMobile
+    ? group.items.flatMap((item) => item.children ?? [item])
+    : group.items;
+  const activeUrl = activeItemUrl(items, pathname);
+  const onGroup = activeUrl !== null;
+
+  const [groupOpen, setGroupOpen] = React.useState(onGroup);
+  const [wasOnGroup, setWasOnGroup] = React.useState(onGroup);
+  if (onGroup !== wasOnGroup) {
+    setWasOnGroup(onGroup);
+    if (onGroup) setGroupOpen(true);
+  }
+
+  // Ingeklapt tot iconen is het submenu verborgen: klappen we dan alleen de groep
+  // open, dan gebeurt er zichtbaar niets. Daarom eerst de sidebar uitklappen.
+  const openFromIcon = (event: React.MouseEvent) => {
+    if (state !== "collapsed" || isMobile) return;
+    event.preventDefault();
+    setOpen(true);
+    setGroupOpen(true);
+  };
+
+  return (
+    <Collapsible
+      asChild
+      open={groupOpen}
+      onOpenChange={setGroupOpen}
+      className="group/collapsible"
+    >
+      <SidebarMenuItem>
+        <CollapsibleTrigger asChild onClick={openFromIcon}>
+          <SidebarMenuButton
+            isActive={onGroup}
+            tooltip={group.title}
+            className={itemClass}
+          >
+            <group.icon />
+            <span>{group.title}</span>
+            <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenuSub className={subMenuClass}>
+            {items.map((item) => (
+              <SidebarMenuSubItem key={item.url}>
+                <SidebarMenuSubButton
+                  asChild
+                  isActive={item.url === activeUrl}
+                  className={subClass}
+                >
+                  <Link
+                    href={item.href}
+                    onClick={
+                      item.children ? () => onOpenSubNav(item.url) : undefined
+                    }
+                  >
+                    <item.icon />
+                    <span>{item.title}</span>
+                    {item.children && <ChevronRight className="ml-auto" />}
+                  </Link>
+                </SidebarMenuSubButton>
+              </SidebarMenuSubItem>
+            ))}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
+  );
+}
+
+// Paneel voor het derde niveau, vast tegen de rechterkant van de sidebar.
+// Staat zichtbaar zolang je op een pagina van het bovenliggende item bent.
+function SubNavPanel({
+  item,
+  pathname,
+  onClose,
+}: {
+  item: NavGroupItem;
+  pathname: string;
+  onClose: () => void;
+}) {
+  const children = item.children ?? [];
+  const activeUrl = activeItemUrl(children, pathname);
+  return (
+    <aside
+      aria-label={item.title}
+      className="sticky top-0 hidden h-svh w-52 shrink-0 flex-col border-l border-white/10 bg-sidebar p-2 text-sidebar-foreground md:flex"
+    >
+      <div className="flex h-10 items-center gap-2 px-2">
+        <item.icon className="size-4 text-white/70" />
+        <span className="truncate text-sm font-semibold text-white">
+          {item.title}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={`${item.title}-menu sluiten`}
+          title="Menu sluiten"
+          className="ml-auto flex size-7 items-center justify-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+      </div>
+      <SidebarMenu className="mt-2">
+        {children.map((child) => (
+          <SidebarMenuItem key={child.url}>
+            <SidebarMenuButton
+              asChild
+              isActive={child.url === activeUrl}
+              className={itemClass}
+            >
+              <Link href={child.href}>
+                <child.icon />
+                <span>{child.title}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </SidebarMenu>
+    </aside>
+  );
+}
 
 // Server-snapshot voor sessionStorage: op de server en bij hydratie is er geen
 // tabblad-klant, zodat de eerste render overeenkomt met de server-HTML.
@@ -132,8 +272,6 @@ export function AppSidebar({
 } & React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { state, isMobile, setOpen } = useSidebar();
-
   // Klantenlijst: begint met de server-prop, de kiezer kan hem verversen.
   const [customers, setCustomers] = React.useState(initialCustomers);
   const [prevInitialCustomers, setPrevInitialCustomers] =
@@ -148,7 +286,7 @@ export function AppSidebar({
   const tabCustomerId = React.useSyncExternalStore(
     subscribeTabCustomer,
     readTabCustomerId,
-    getServerTabCustomerId
+    getServerTabCustomerId,
   );
   const storedCustomerId = tabCustomerId ?? initialCustomerId;
   // Een id uit het adres geldt altijd (de lijst kan nog niet ververst zijn);
@@ -201,16 +339,19 @@ export function AppSidebar({
   // Menu-links volgen de actieve klant; zonder klant de gewone adressen.
   const hrefFor = (
     section: Parameters<typeof customerHref>[0],
-    fallback: string
+    fallback: string,
   ) => (activeCustomerId ? customerHref(section, activeCustomerId) : fallback);
   const customerHomePath = activeCustomerId
     ? customerHref("home", activeCustomerId)
     : null;
+  // De concurrentieanalyse staat onder de klantpagina, maar heeft een eigen menu-item.
+  const onAnalyses = sectionFromPathname(pathname) === "analyses";
   const isPathActive = (url: string): boolean => {
     if (url === "/dashboard") {
       return (
         pathname === "/dashboard" ||
         (customerHomePath !== null &&
+          !onAnalyses &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
       );
@@ -219,342 +360,234 @@ export function AppSidebar({
   };
   const menuHref = (url: string) =>
     url === "/dashboard" ? hrefFor("home", url) : url;
-  const blogHref = (url: string) =>
-    url === "/dashboard/blogs" ? hrefFor("blogs", url) : url;
-  const landingPageHref = (url: string) =>
-    url === "/dashboard/landing-pages" ? hrefFor("landingPages", url) : url;
 
-  // "Livegang checklist" staat open op de eigen pagina's, ook als je er vanaf
-  // een andere pagina naartoe navigeert (de sidebar blijft dan gemount).
-  const onLivegang = pathname.startsWith(LIVEGANG_URL);
-  const [livegangOpen, setLivegangOpen] = React.useState(onLivegang);
-  const [wasOnLivegang, setWasOnLivegang] = React.useState(onLivegang);
-  if (onLivegang !== wasOnLivegang) {
-    setWasOnLivegang(onLivegang);
-    if (onLivegang) setLivegangOpen(true);
+  const navGroups: NavGroupConfig[] = [
+    {
+      title: "Website",
+      icon: Globe,
+      items: [
+        {
+          title: "Livegang",
+          url: GOLIVE_URL,
+          href: hrefFor("oplevering", GOLIVE_URL),
+          icon: ListChecks,
+        },
+      ],
+    },
+    {
+      title: "Vindbaarheid",
+      icon: Radar,
+      items: [
+        {
+          title: "SEO/GEO-scan",
+          url: SEO_GEO_URL,
+          href: hrefFor("seoGeo", SEO_GEO_URL),
+          icon: Search,
+        },
+      ],
+    },
+    {
+      title: "Content",
+      icon: Newspaper,
+      items: [
+        {
+          title: "Blogs",
+          url: BLOGS_URL,
+          href: hrefFor("blogs", BLOGS_URL),
+          icon: FileText,
+          children: [
+            {
+              title: "Alle blogs",
+              url: BLOGS_URL,
+              href: hrefFor("blogs", BLOGS_URL),
+              icon: List,
+            },
+            {
+              title: "Blog CSV-upload",
+              url: BLOG_UPLOAD_URL,
+              href: BLOG_UPLOAD_URL,
+              icon: Upload,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      title: "Rapportage",
+      icon: BarChart3,
+      items: [
+        {
+          title: "Analytics",
+          url: ANALYTICS_URL,
+          href: hrefFor("analytics", ANALYTICS_URL),
+          icon: ChartLine,
+        },
+      ],
+    },
+  ];
+
+  // Staat je op een pagina van een item met een derde niveau, dan komt dat
+  // niveau in een eigen paneel rechts naast de sidebar.
+  const subNavItem = navGroups
+    .flatMap((group) => group.items)
+    .find((item) => item.children && pathname.startsWith(item.url));
+  const subNavUrl = subNavItem?.url ?? null;
+
+  // Het paneel kan dicht met het pijltje. Het gaat weer open als je in het
+  // menu op het item klikt, of als je de sectie verlaat en later terugkomt.
+  const [closedSubNavUrl, setClosedSubNavUrl] = React.useState<string | null>(
+    null,
+  );
+  const [prevSubNavUrl, setPrevSubNavUrl] = React.useState(subNavUrl);
+  if (subNavUrl !== prevSubNavUrl) {
+    setPrevSubNavUrl(subNavUrl);
+    setClosedSubNavUrl(null);
   }
-
-  // Ingeklapt tot iconen is het submenu verborgen: klappen we dan alleen de groep
-  // open, dan gebeurt er zichtbaar niets. Daarom eerst de sidebar uitklappen.
-  const openLivegangFromIcon = (event: React.MouseEvent) => {
-    if (state !== "collapsed" || isMobile) return;
-    event.preventDefault();
-    setOpen(true);
-    setLivegangOpen(true);
-  };
+  const showSubNav = subNavItem && closedSubNavUrl !== subNavItem.url;
 
   return (
-    <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
-        <div className="flex h-10 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <Link
-            href="/dashboard"
-            className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
-          >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white">
-              <img
-                src="/iExist-favicon-X-blauwgeel.svg"
-                alt="Logo"
-                className="size-4"
-              />
-            </span>
-            <span className="truncate text-sm font-semibold text-white">
-              iExist
-            </span>
-          </Link>
-          <SidebarTrigger className="ml-auto text-white/70 hover:bg-white/10 hover:text-white group-data-[collapsible=icon]:ml-0" />
-        </div>
-        <CustomerSwitcher
-          customers={customers}
-          activeCustomerId={activeCustomerId}
-          onCustomersChange={setCustomers}
-        />
-      </SidebarHeader>
+    <>
+      <Sidebar collapsible="icon" {...props}>
+        <SidebarHeader>
+          <div className="flex h-10 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <Link
+              href="/dashboard"
+              className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
+            >
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white">
+                <img
+                  src="/iExist-favicon-X-blauwgeel.svg"
+                  alt="Logo"
+                  className="size-4"
+                />
+              </span>
+              <span className="truncate text-sm font-semibold text-white">
+                iExist
+              </span>
+            </Link>
+            <SidebarTrigger className="ml-auto text-white/70 hover:bg-white/10 hover:text-white group-data-[collapsible=icon]:ml-0" />
+          </div>
+          <CustomerSwitcher
+            customers={customers}
+            activeCustomerId={activeCustomerId}
+            onCustomersChange={setCustomers}
+          />
+        </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs text-white/50">
-            Navigatie
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {menuItems.map((item) => {
-                const isActive = isPathActive(item.url);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      tooltip={item.title}
-                      className={itemClass}
-                    >
-                      <Link href={menuHref(item.url)}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-xs text-white/50">
+              Navigatie
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {menuItems.map((item) => {
+                  const isActive = isPathActive(item.url);
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        tooltip={item.title}
+                        className={itemClass}
+                      >
+                        <Link href={menuHref(item.url)}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
 
-              {/* Livegang checklist Dropdown */}
-              <Collapsible
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={onAnalyses}
+                    tooltip="Concurrentieanalyse"
+                    className={itemClass}
+                  >
+                    <Link href={hrefFor("analyses", CUSTOMERS_URL)}>
+                      <Swords />
+                      <span>Concurrentieanalyse</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                {navGroups.map((group) => (
+                  <NavGroup
+                    key={group.title}
+                    group={group}
+                    pathname={pathname}
+                    onOpenSubNav={() => setClosedSubNavUrl(null)}
+                  />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 asChild
-                open={livegangOpen}
-                onOpenChange={setLivegangOpen}
-                className="group/collapsible"
+                isActive={pathname.startsWith("/dashboard/settings")}
+                tooltip="Instellingen"
+                className={itemClass}
               >
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild onClick={openLivegangFromIcon}>
-                    <SidebarMenuButton
-                      isActive={onLivegang}
-                      tooltip="Livegang checklist"
-                      className={itemClass}
-                    >
-                      <ListChecks />
-                      <span>Livegang checklist</span>
-                      <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className={subMenuClass}>
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname.startsWith(SEO_GEO_URL)}
-                          className={subClass}
-                        >
-                          <Link href={hrefFor("seoGeo", SEO_GEO_URL)}>
-                            <Search />
-                            <span>SEO/GEO-scan</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname.startsWith(GOLIVE_URL)}
-                          className={subClass}
-                        >
-                          <Link href={hrefFor("oplevering", GOLIVE_URL)}>
-                            <ListChecks />
-                            <span>Livegang</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname.startsWith(ANALYTICS_URL)}
-                          className={subClass}
-                        >
-                          <Link href={hrefFor("analytics", ANALYTICS_URL)}>
-                            <BarChart3 />
-                            <span>Analytics</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-
-              {/* Blog Generator Dropdown */}
-              <Collapsible asChild className="group/collapsible">
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip="Blog Generator"
-                      className={itemClass}
-                    >
-                      <FileText />
-                      <span>Blog Generator</span>
-                      <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className={subMenuClass}>
-                      {blogItems.map((item) => {
-                        const isActive = pathname === item.url;
-                        return (
-                          <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton
-                              asChild
-                              isActive={isActive}
-                              className={subClass}
-                            >
-                              <Link href={blogHref(item.url)}>
-                                <item.icon />
-                                <span>{item.title}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-
-              {/* Landingspagina's Dropdown */}
-              <Collapsible asChild className="group/collapsible">
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      isActive={pathname.startsWith("/dashboard/landing-pages")}
-                      tooltip="Landingspagina's"
-                      className={itemClass}
-                    >
-                      <Globe />
-                      <span>Landingspagina&apos;s</span>
-                      <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className={subMenuClass}>
-                      {landingPageItems.map((item) => {
-                        const isActive = pathname === item.url;
-                        return (
-                          <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton
-                              asChild
-                              isActive={isActive}
-                              className={subClass}
-                            >
-                              <Link href={landingPageHref(item.url)}>
-                                <item.icon />
-                                <span>{item.title}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        );
-                      })}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-
-              <Collapsible asChild className="group/collapsible">
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip="SEO Tools"
-                      className={`${itemClass} text-white/60`}
-                    >
-                      <Search />
-                      <span>SEO Tools</span>
-                      <span className={badgeClass}>Binnenkort</span>
-                      <ChevronDown className="ml-1 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className={subMenuClass}>
-                      {seoItems.map((item) => (
-                        <SidebarMenuSubItem key={item.title}>
-                          <SidebarMenuSubButton
-                            aria-disabled
-                            className={`${subClass} cursor-not-allowed opacity-50`}
-                          >
-                            <item.icon />
-                            <span>{item.title}</span>
-                            <span className={badgeClass}>Binnenkort</span>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-
-              <Collapsible asChild className="group/collapsible">
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip="Audit Tools"
-                      className={`${itemClass} text-white/60`}
-                    >
-                      <ScanLine />
-                      <span>Audit Tools</span>
-                      <span className={badgeClass}>Binnenkort</span>
-                      <ChevronDown className="ml-1 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className={subMenuClass}>
-                      {auditItems.map((item) => (
-                        <SidebarMenuSubItem key={item.title}>
-                          <SidebarMenuSubButton
-                            aria-disabled
-                            className={`${subClass} cursor-not-allowed opacity-50`}
-                          >
-                            <item.icon />
-                            <span>{item.title}</span>
-                            <span className={badgeClass}>Binnenkort</span>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={pathname.startsWith("/dashboard/settings")}
-              tooltip="Instellingen"
-              className={itemClass}
-            >
-              <Link href="/dashboard/settings">
-                <Settings />
-                <span>Instellingen</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              tooltip={user.email}
-              className="cursor-default rounded-lg hover:bg-white/10 hover:text-white"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-xs font-semibold text-black">
-                {user.email.charAt(0).toUpperCase()}
-              </span>
-              <span className="flex min-w-0 flex-col gap-0.5 leading-none">
-                <span className="truncate text-[13px] font-medium text-white">
-                  {user.email}
+                <Link href="/dashboard/settings">
+                  <Settings />
+                  <span>Instellingen</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="lg"
+                tooltip={user.email}
+                className="cursor-default rounded-lg hover:bg-white/10 hover:text-white"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-xs font-semibold text-black">
+                  {user.email.charAt(0).toUpperCase()}
                 </span>
-                <span className="text-xs text-white/50">Account</span>
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              tooltip="Uitloggen"
-              className={itemClass}
-            >
-              <form action="/api/auth/signout" method="POST">
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-2"
-                >
-                  <LogOut />
-                  <span>Uitloggen</span>
-                </button>
-              </form>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+                <span className="flex min-w-0 flex-col gap-0.5 leading-none">
+                  <span className="truncate text-[13px] font-medium text-white">
+                    {user.email}
+                  </span>
+                  <span className="text-xs text-white/50">Account</span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                tooltip="Uitloggen"
+                className={itemClass}
+              >
+                <form action="/api/auth/signout" method="POST">
+                  <button
+                    type="submit"
+                    className="flex w-full items-center gap-2"
+                  >
+                    <LogOut />
+                    <span>Uitloggen</span>
+                  </button>
+                </form>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
 
-      <SidebarRail />
-    </Sidebar>
+        <SidebarRail />
+      </Sidebar>
+      {showSubNav && (
+        <SubNavPanel
+          item={subNavItem}
+          pathname={pathname}
+          onClose={() => setClosedSubNavUrl(subNavItem.url)}
+        />
+      )}
+    </>
   );
 }

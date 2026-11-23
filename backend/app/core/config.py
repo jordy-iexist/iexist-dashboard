@@ -342,6 +342,36 @@ class Settings(BaseSettings):
         default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
     )
 
+    # Claude (Anthropic) voor de concurrentieanalyse: één bureausleutel. Zonder sleutel loopt
+    # de analyse door en krijgen de AI-kaarten "niet ingesteld"; daarom niet verplicht.
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(
+        default="claude-opus-5-5", validation_alias="ANTHROPIC_MODEL"
+    )
+    # Grens per aanroep (de aanroepen streamen niet: dit is de hele generatietijd).
+    anthropic_timeout_seconds: float = Field(
+        default=300.0, ge=30, le=600, validation_alias="ANTHROPIC_TIMEOUT_SECONDS"
+    )
+
+    # Concurrentieanalyse per klant: maximaal aantal zoekwoorden per analyse.
+    competitor_analysis_max_keywords: int = Field(
+        default=10, ge=1, le=50, validation_alias="COMPETITOR_ANALYSIS_MAX_KEYWORDS"
+    )
+    # Hard budget voor de PageSpeed-metingen; wat dan niet af is krijgt "niet op tijd gemeten".
+    competitor_analysis_vitals_budget_seconds: int = Field(
+        default=480,
+        ge=30,
+        le=1200,
+        validation_alias="COMPETITOR_ANALYSIS_VITALS_BUDGET_SECONDS",
+    )
+    # Tijd per zoekwoord voor de eigen Google-poging ("Mensen vragen ook", AI Overview).
+    competitor_analysis_google_timeout_seconds: float = Field(
+        default=25.0,
+        ge=5,
+        le=120,
+        validation_alias="COMPETITOR_ANALYSIS_GOOGLE_TIMEOUT_SECONDS",
+    )
+
     # ProRankTracker AI Tracking (livegang fase 1, 2 en 4): AI-zichtbaarheid per site.
     # Alleen-lezen: URL's en prompts worden in ProRankTracker zelf beheerd.
     proranktracker_api_token: str = Field(

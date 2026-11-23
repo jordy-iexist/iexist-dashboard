@@ -1388,6 +1388,245 @@ class SiteChange(Base):
     )
 
 
+class CompetitorAnalysis(Base):
+    """Eén run van de concurrentieanalyse voor een klant (één of meer zoekwoorden).
+
+    De vorm van de JSON-kolommen staat in `features/competitor_analysis/schemas.py`:
+    `modules` en `warnings` zijn lijsten, `sources` is `Sources`, `estimate` is `Estimate`,
+    `ai_usage` is `AiUsage`. Medianen worden niet opgeslagen maar bij het lezen berekend.
+    """
+
+    __tablename__ = "competitor_analyses"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    # pending | serp | fetching | analyzing | completed | failed | canceled
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default=text("'pending'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    warnings: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Instellingen uit de wizard.
+    country: Mapped[str] = mapped_column(Text, nullable=False)
+    top_n: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default=text("10")
+    )
+    exclude_aggregators: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    modules: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Voortgangstellers.
+    total_keywords: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    done_keywords: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    total_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    fetched_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    failed_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    vitals_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    vitals_measured: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # Werkelijk verbruik naast de schatting vooraf.
+    ahrefs_units: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    ai_usage: Mapped[Any] = mapped_column(JSON, nullable=True)
+    estimate: Mapped[Any] = mapped_column(JSON, nullable=True)
+    sources: Mapped[Any] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class CompetitorAnalysisKeyword(Base):
+    """Eén zoekwoord binnen een concurrentieanalyse, met de SERP-gegevens en de AI-uitkomst.
+
+    `target_url` leeg = er komt een nieuwe pagina (geen eigen pagina om te vergelijken).
+    `keyword_key` is het genormaliseerde zoekwoord (`customers.rankings.keyword_key`).
+    """
+
+    __tablename__ = "competitor_analysis_keywords"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    analysis_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    keyword_key: Mapped[str] = mapped_column(Text, nullable=False)
+    target_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    own_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # prt | ahrefs
+    own_position_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    volume: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    kd: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Lijst van actieve intenties (namen), lijst van SERP-featuretypes.
+    intents: Mapped[Any] = mapped_column(JSON, nullable=True)
+    serp_features: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Datum van de SERP-stand zoals Ahrefs hem geeft (ISO-tekst).
+    serp_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # `Paa` en `AiOverview` uit de eigen Google-poging (of Ahrefs).
+    paa: Mapped[Any] = mapped_column(JSON, nullable=True)
+    ai_overview: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # ok | not_configured | error | skipped; leeg zolang de AI-stap nog niet gedraaid heeft.
+    ai_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    serp_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    search_intent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Lijst van `MissingTopic`.
+    missing_topics: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # pending | completed | failed
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default=text("'pending'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class CompetitorAnalysisPage(Base):
+    """Eén pagina bij één zoekwoord: een concurrent uit de top X of de eigen doelpagina.
+
+    De paginatekst wordt niet bewaard; alleen de uitgelezen kenmerken (`onpage` = `OnPage`,
+    `eeat` = `Eeat`, `cwv` = `Cwv`). `ahrefs` bewaart de overige Ahrefs-velden van de SERP-rij.
+    """
+
+    __tablename__ = "competitor_analysis_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    keyword_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analysis_keywords.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    analysis_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    is_own: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Positie in de SERP; leeg voor een eigen pagina buiten de top X.
+    position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    final_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    domain: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    serp_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Ruwe Ahrefs-waarde; `page_type` is de eigen indeling (dienst | product | ... | overig).
+    ahrefs_page_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    page_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Vergelijkingssite of gids; leeg zolang de pagina nog niet is ingedeeld.
+    is_aggregator: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # Telt niet mee in de medianen.
+    is_excluded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # aggregator | own_site
+    exclude_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    domain_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    refdomains: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ahrefs: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # ok | blocked | not_html | error; leeg zolang de pagina nog niet is opgehaald.
+    fetch_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fetch_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    onpage: Mapped[Any] = mapped_column(JSON, nullable=True)
+    eeat: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Lab-meting mobiel (ms), scalair voor de mediaan; details in `cwv`.
+    lcp_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cwv: Mapped[Any] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class CompetitorAnalysisAction(Base):
+    """Verbeterpunt bij één zoekwoord. Eigen tabel, zodat afvinken één update is.
+
+    `impact` en `effort`: hoog | middel | laag. `category`: een van de modules
+    (serp | onpage | topics | authority | tech | eeat).
+    """
+
+    __tablename__ = "competitor_analysis_actions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    keyword_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analysis_keywords.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    analysis_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("competitor_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    impact: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    effort: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    done_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    done_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -1420,4 +1659,8 @@ __all__ = [
     "LandingPage",
     "LandingPageGenerationSettings",
     "SiteChange",
+    "CompetitorAnalysis",
+    "CompetitorAnalysisKeyword",
+    "CompetitorAnalysisPage",
+    "CompetitorAnalysisAction",
 ]

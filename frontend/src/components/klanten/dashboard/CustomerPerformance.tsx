@@ -3,6 +3,7 @@ import { KpiCard, type KpiTone } from "@/components/klanten/dashboard/KpiCard"
 import { QuickWinsCard } from "@/components/klanten/dashboard/QuickWinsCard"
 import { RecentAnalysesCard } from "@/components/klanten/dashboard/RecentAnalysesCard"
 import { formatDecimal, roundTo, TrendArrow } from "@/components/klanten/dashboard/trend"
+import { fetchRecentAnalyses } from "@/lib/competitor-analysis.server"
 import {
   fetchCustomerImprovements,
   fetchCustomerQuickWins,
@@ -50,6 +51,9 @@ function quickWinsValue(quickWins: CustomerQuickWins) {
   return quickWins.rows.length.toLocaleString("nl-NL")
 }
 
+/** Zoveel analyses toont de kaart "Recente analyses". */
+const RECENT_ANALYSES_LIMIT = 3
+
 // KPI-rij, Quick wins-card en de twee cards eronder; staat in een Suspense omdat Pro Rank
 // Tracker live wordt bevraagd en Ahrefs bij een verouderde stand opnieuw wordt opgehaald.
 export async function CustomerPerformance({
@@ -59,10 +63,12 @@ export async function CustomerPerformance({
   customerId: string
   customerName: string
 }) {
-  const [rankings, quickWins, improvements] = await Promise.all([
+  // Alle vier faal-veilig: een fout geeft een lege toestand, nooit een kapotte pagina.
+  const [rankings, quickWins, improvements, analyses] = await Promise.all([
     fetchCustomerRankings(customerId),
     fetchCustomerQuickWins(customerId),
     fetchCustomerImprovements(customerId),
+    fetchRecentAnalyses(customerId, RECENT_ANALYSES_LIMIT),
   ])
 
   const ok = rankings.state === "ok"
@@ -96,10 +102,10 @@ export async function CustomerPerformance({
         {improvementsCard(customerId, improvements)}
       </div>
 
-      <QuickWinsCard quickWins={quickWins} />
+      <QuickWinsCard customerId={customerId} quickWins={quickWins} />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <RecentAnalysesCard />
+        <RecentAnalysesCard customerId={customerId} analyses={analyses} />
         <ContentGapsCard rankings={rankings} customerName={customerName} />
       </div>
     </>

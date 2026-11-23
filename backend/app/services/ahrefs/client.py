@@ -39,6 +39,40 @@ DOMAIN_FIELDS = (
     "org_traffic", "org_keywords", "org_keywords_1_3", "org_cost",
 )
 
+# Concurrentieanalyse (gemeten 23-11-2026, "seo bureau", land nl). Een gewoon veld kost
+# 1 unit per rij; de velden met een eigen prijs staan in de reference.
+#
+# serp-overview: rijen onder `positions`, `type` is echt een lijst (bv. ["organic"]).
+#   `position` is de plek van het SERP-blok, niet de organische rang: features tellen mee
+#   en sitelinks delen de positie van hun resultaat. top_positions=10 gaf 21 rijen
+#   (posities 1-10) met maar 8 organische resultaten: 1 organic + 2 sitelink, 2 ai_overview
+#   + 6 ai_overview_sitelink, 3 vier keer question, 4-10 organic. Haal dus ruimer op
+#   (`SERP_EXTRA_POSITIONS`) en gebruik `organic_rows()`. Kosten: 15 units per rij
+#   (refdomains 5 + tien velden van 1), dus 315 voor deze aanroep; feature-rijen tellen mee.
+#   `traffic` (10 units) laten we weg, we tonen het niet.
+#   - ai_overview: één rij zonder url/title.
+#   - ai_overview_sitelink: url + title gevuld, metrieken leeg. Dit zijn de bronnen die
+#     Google in de AI Overview citeert (`ai_overview_sources()`).
+#   - question ("Mensen vragen ook"): vraagtekst in `title`, url leeg (`people_also_ask()`).
+#   - Alleen organic-rijen hebben page_type, DR, UR, refdomains, backlinks en keywords.
+#     `page_type` is een kommagescheiden string, bv. "/Landing_Page,/Landing_Page/Service_Page".
+# keywords-explorer/overview: rijen onder `keywords`, niet in invoervolgorde. 31 units per
+#   zoekwoord (volume, difficulty en intents 10, keyword 1); 62 voor twee zoekwoorden.
+#   Bundel zoekwoorden in één aanroep (de API rekent vermoedelijk minimaal 50 per request).
+#   `intents` is een object met booleans informational/navigational/commercial/
+#   transactional/branded/local.
+# batch-analysis met mode exact: rijen onder `targets` met `index` (volgorde van de invoer)
+#   en `url` zonder protocol ("ahrefs.com/blog/"); koppel dus op `index`. Nominaal 50 units
+#   voor twee URL's (minimum per request; per rij 1+1+1+1+5 = 9), op ahrefs.com 0.
+SERP_FIELDS = (
+    "position", "url", "title", "type", "page_type", "domain_rating", "url_rating",
+    "refdomains", "backlinks", "keywords", "update_date",
+)
+SERP_EXTRA_POSITIONS = 5
+KEYWORDS_OVERVIEW_FIELDS = ("keyword", "volume", "difficulty", "intents")
+URL_METRICS_FIELDS = ("index", "url", "domain_rating", "url_rating", "refdomains")
+BATCH_MAX_TARGETS = 100
+
 
 class AhrefsServiceError(Exception):
     def __init__(self, message: str, code: str = "ahrefs_error"):
@@ -285,6 +319,138 @@ def broken_backlinks(
         "limit": limit,
     }
     return _site_explorer("broken-backlinks", "backlinks", params, client)
+
+
+def serp_overview(
+    keyword: str,
+    *,
+    country: str | None = None,
+    top_positions: int = 10,
+    client: httpx.Client | None = None,
+) -> AhrefsResult:
+    """De laatst bekende Google-SERP van een zoekwoord, inclusief SERP-features.
+
+    `top_positions` telt SERP-blokken, geen organische resultaten (zie het commentaar
+    bovenin). Voor de top N organische pagina's: vraag `N + SERP_EXTRA_POSITIONS` op en
+    filter met `organic_rows()`.
+    """
+    params: dict[str, Any] = {
+        "select": ",".join(SERP_FIELDS),
+        "keyword": keyword.strip(),
+        "country": country or settings.ahrefs_country,
+        "top_positions": top_positions,
+    }
+    payload, response = _request("GET", "/serp-overview/serp-overview", params=params, client=client)
+    return _result(payload, response, "positions")
+
+
+def keywords_overview(
+    keywords: list[str], *, country: str | None = None, client: httpx.Client | None = None
+) -> AhrefsResult:
+    """Volume, moeilijkheid (`difficulty`) en zoekintentie voor een lijst zoekwoorden.
+
+    Eén aanroep voor alle zoekwoorden; de API scheidt op komma's, dus zoekwoorden met een
+    komma vallen af. De rijen komen niet in de volgorde van de invoer terug.
+    """
+    cleaned = list(dict.fromkeys(k.strip() for k in keywords if k and k.strip() and "," not in k))
+    if not cleaned:
+        return AhrefsResult()
+    params: dict[str, Any] = {
+        "select": ",".join(KEYWORDS_OVERVIEW_FIELDS),
+        "country": country or settings.ahrefs_country,
+        "keywords": ",".join(cleaned),
+    }
+    payload, response = _request("GET", "/keywords-explorer/overview", params=params, client=client)
+    return _result(payload, response, "keywords")
+
+
+def url_metrics(urls: list[str], *, client: httpx.Client | None = None) -> AhrefsResult:
+    """DR, UR en verwijzende domeinen van losse pagina's (batch-analysis, `mode: exact`).
+
+    Per request maximaal `BATCH_MAX_TARGETS` URL's; meer wordt in delen opgehaald. Ahrefs
+    geeft `url` zonder protocol terug, dus elke rij krijgt `target` met de URL zoals
+    opgegeven (gekoppeld via `index`).
+    """
+    targets = [u.strip() for u in urls if u and u.strip()]
+    rows: list[dict[str, Any]] = []
+    units = 0
+    cached = bool(targets)
+    for start in range(0, len(targets), BATCH_MAX_TARGETS):
+        chunk = targets[start:start + BATCH_MAX_TARGETS]
+        body = {
+            "select": list(URL_METRICS_FIELDS),
+            "targets": [{"url": url, "mode": "exact", "protocol": "both"} for url in chunk],
+        }
+        payload, response = _request("POST", "/batch-analysis/batch-analysis", json=body, client=client)
+        for row in _rows(payload, "targets"):
+            index = row.get("index")
+            target = chunk[index] if isinstance(index, int) and 0 <= index < len(chunk) else None
+            rows.append({**row, "target": target})
+        units += _units(response)
+        cached = cached and response.headers.get("x-api-cache") == "hit"
+    return AhrefsResult(rows=rows, units=units, cached=cached)
+
+
+def _types(row: dict[str, Any]) -> list[str]:
+    value = row.get("type")
+    if isinstance(value, str):
+        return [value]
+    return [t for t in (value or []) if isinstance(t, str)]
+
+
+def _position(row: dict[str, Any]) -> float:
+    value = row.get("position")
+    return float(value) if isinstance(value, (int, float)) else float("inf")
+
+
+def organic_rows(result: AhrefsResult, top_n: int) -> list[dict[str, Any]]:
+    """De top N organische resultaten uit `serp_overview`, op positie en zonder dubbele URL's.
+
+    Elke rij krijgt `organic_position` (1..N): de rang onder de organische resultaten.
+    `position` blijft de SERP-positie van Ahrefs, waarin features meetellen.
+    """
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for row in sorted(result.rows, key=_position):
+        url = (row.get("url") or "").strip()
+        if "organic" not in _types(row) or not url or url in seen:
+            continue
+        seen.add(url)
+        rows.append({**row, "organic_position": len(rows) + 1})
+        if len(rows) >= top_n:
+            break
+    return rows
+
+
+def serp_features(result: AhrefsResult) -> list[str]:
+    """Gesorteerde lijst van de feature-types in de SERP, alles behalve `organic`."""
+    return sorted({t for row in result.rows for t in _types(row)} - {"organic"})
+
+
+def ai_overview_sources(result: AhrefsResult) -> list[dict[str, Any]]:
+    """Bronnen die Google in de AI Overview citeert: `url` en `title`, op volgorde, zonder dubbelen."""
+    seen: set[str] = set()
+    sources: list[dict[str, Any]] = []
+    for row in sorted(result.rows, key=_position):
+        url = (row.get("url") or "").strip()
+        if "ai_overview_sitelink" not in _types(row) or not url or url in seen:
+            continue
+        seen.add(url)
+        sources.append({"url": url, "title": row.get("title")})
+    return sources
+
+
+def people_also_ask(result: AhrefsResult) -> list[str]:
+    """Vragen uit "Mensen vragen ook" (rijen van type `question`, vraag in `title`)."""
+    seen: set[str] = set()
+    questions: list[str] = []
+    for row in sorted(result.rows, key=_position):
+        title = (row.get("title") or "").strip()
+        if "question" not in _types(row) or not title or title in seen:
+            continue
+        seen.add(title)
+        questions.append(title)
+    return questions
 
 
 def limits_and_usage(*, client: httpx.Client | None = None) -> dict[str, Any]:
