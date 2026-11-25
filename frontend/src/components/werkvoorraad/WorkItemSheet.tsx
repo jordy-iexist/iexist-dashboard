@@ -142,7 +142,6 @@ function SheetBody({
       <SheetHeader className="gap-2 pr-10">
         {view ? (
           <>
-            <KindBadge kind={view.kind} />
             <SheetTitle className="text-lg leading-snug break-words">{view.title}</SheetTitle>
             <SheetDescription>
               {view.customer_name} · {SOURCE_LABELS[view.source]}
@@ -150,7 +149,6 @@ function SheetBody({
           </>
         ) : (
           <>
-            <Skeleton className="h-5 w-20" />
             <SheetTitle className="sr-only">Taak laden</SheetTitle>
             <Skeleton className="h-6 w-3/4" />
             <Skeleton className="h-4 w-1/2" />

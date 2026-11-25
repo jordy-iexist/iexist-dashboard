@@ -56,6 +56,8 @@ celery_app.conf.update(
         # Werkvoorraad Search Console: per klant een paar seconden Google, niet achter scans in `audit`.
         "app.worker.tasks.run_work_queue_gsc_dispatch_task": {"queue": "default"},
         "app.worker.tasks.run_work_queue_gsc_task": {"queue": "default"},
+        # Bureau-overzicht: posities van alle klanten, een paar GET's per klant naar ProRankTracker.
+        "agency_overview.refresh_rank_snapshots": {"queue": "default"},
     },
     # Celery beat (service `beat`, precies één instantie). Tijden in `timezone` hierboven.
     beat_schedule={
@@ -75,6 +77,12 @@ celery_app.conf.update(
                 minute=0,
             ),
         },
+        # Dagelijkse momentopname van de posities voor het bureau-overzicht (07:00). De taak
+        # kijkt zelf naar AGENCY_RANKINGS_ENABLED (noodrem).
+        "bureau-overzicht-posities-dagelijks": {
+            "task": "agency_overview.refresh_rank_snapshots",
+            "schedule": crontab(hour=7, minute=0),
+        },
     },
 )
 
@@ -88,4 +96,5 @@ celery_app.autodiscover_tasks([
     "app.features.competitor_analysis.worker",
     "app.features.monthly_report.worker",
     "app.features.work_queue.worker",
+    "app.features.agency_overview.worker",
 ])

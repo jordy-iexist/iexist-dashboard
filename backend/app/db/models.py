@@ -1236,6 +1236,43 @@ class CustomerQuickWins(Base):
     )
 
 
+class CustomerRankSnapshot(Base):
+    """Dagelijkse momentopname van de ProRankTracker-posities per klant voor het bureau-overzicht.
+
+    `state`: ok | not_configured | not_tracked | error (zoals de rankings van het klantdashboard).
+    `keywords`, `top10` en `top10_month_ago` zijn alleen gevuld bij `ok`; `top10_month_ago` blijft
+    leeg als ProRankTracker geen positie van een maand geleden gaf. `drops` is een lijst
+    `{keyword, rank, month_ago_rank, url}` (grootste daling eerst; `rank` leeg = niet in de top 100).
+    De regels staan in `features/agency_overview/services/rank_snapshots.py`.
+    """
+
+    __tablename__ = "customer_rank_snapshots"
+
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    keywords: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    top10: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    top10_month_ago: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    drops: Mapped[Any] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Tijdstip van de laatste ophaalpoging (ook bij een fout).
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class LaunchContentPage(Base):
     """Pagina-inhoud van een fase-3 scan (eigen rijen, los van fase 1/2)."""
 
@@ -1838,4 +1875,5 @@ __all__ = [
     "ContentBrief",
     "MonthlyReport",
     "WorkItem",
+    "CustomerRankSnapshot",
 ]

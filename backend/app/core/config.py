@@ -305,6 +305,14 @@ class Settings(BaseSettings):
         validation_alias="WORK_QUEUE_GSC_HOUR",
     )
 
+    # Bureau-overzicht: dagelijkse momentopname van de ProRankTracker-posities per klant
+    # (Celery beat, 07:00 Europe/Amsterdam). Globale noodrem; de knop "Posities vernieuwen"
+    # werkt ook als deze uit staat.
+    agency_rankings_enabled: bool = Field(
+        default=True,
+        validation_alias="AGENCY_RANKINGS_ENABLED",
+    )
+
     # Monday.com: actiepunten en checklistpunten uit de livegang doorzetten.
     monday_api_token: str = Field(default="", validation_alias="MONDAY_API_TOKEN")
     monday_api_version: str = Field(

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.features.agency_overview.router import router as agency_overview_router
 from app.features.auth.router import router as auth_router
 from app.features.blogs.router import router as blogs_router
 from app.features.competitor_analysis.brief_router import router as competitor_analysis_brief_router
@@ -38,3 +39,4 @@ router.include_router(competitor_analysis_router)
 router.include_router(competitor_analysis_brief_router)
 router.include_router(monthly_report_router)
 router.include_router(work_queue_router)
+router.include_router(agency_overview_router)

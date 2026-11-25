@@ -1,3 +1,4 @@
+from app.features.agency_overview.worker.tasks import refresh_rank_snapshots_task
 from app.features.blogs.worker.blog_generation import generate_blog_task
 from app.features.blogs.worker.image_generation import (
     enqueue_blog_image_generation,
@@ -34,6 +35,7 @@ __all__ = [
     "generate_blog_task",
     "generate_landing_page_task",
     "publish_blog_to_wordpress_task",
+    "refresh_rank_snapshots_task",
     "run_competitor_analysis_task",
     "run_content_analysis_task",
     "run_content_brief_task",

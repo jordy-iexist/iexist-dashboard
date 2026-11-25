@@ -32,6 +32,7 @@ import {
   Building2,
   FileChartColumn,
   Kanban,
+  LayoutGrid,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,6 +83,7 @@ import {
 } from "@/lib/seo-geo-sections";
 import { settingsNavGroups } from "@/components/settings/settings-nav-items";
 import { WORK_BOARD_URL, workBoardHref } from "@/lib/work-queue";
+import { AGENCY_OVERVIEW_URL } from "@/lib/agency-overview";
 
 const menuItems = [
   {
@@ -606,6 +608,19 @@ export function AppSidebar({
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith(AGENCY_OVERVIEW_URL)}
+                    tooltip="Bureau-overzicht"
+                    className={itemClass}
+                  >
+                    <Link href={AGENCY_OVERVIEW_URL}>
+                      <LayoutGrid />
+                      <span>Bureau-overzicht</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
