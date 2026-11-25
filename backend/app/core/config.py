@@ -284,6 +284,27 @@ class Settings(BaseSettings):
         validation_alias="SITEMAP_MONITOR_MAX_PAGES_PER_RUN",
     )
 
+    # Werkvoorraad: wekelijkse Search Console-ronde (Celery beat) die per klant de kaart
+    # "Title & meta herschrijven" bijwerkt. Globale noodrem.
+    work_queue_gsc_enabled: bool = Field(
+        default=True,
+        validation_alias="WORK_QUEUE_GSC_ENABLED",
+    )
+    # Dag van de week zoals celery `crontab(day_of_week=...)`: 0 = zondag, 1 = maandag.
+    work_queue_gsc_weekday: int = Field(
+        default=1,
+        ge=0,
+        le=6,
+        validation_alias="WORK_QUEUE_GSC_WEEKDAY",
+    )
+    # Uur (Europe/Amsterdam) waarop de wekelijkse ronde start; na de sitemap-monitor.
+    work_queue_gsc_hour: int = Field(
+        default=6,
+        ge=0,
+        le=23,
+        validation_alias="WORK_QUEUE_GSC_HOUR",
+    )
+
     # Monday.com: actiepunten en checklistpunten uit de livegang doorzetten.
     monday_api_token: str = Field(default="", validation_alias="MONDAY_API_TOKEN")
     monday_api_version: str = Field(

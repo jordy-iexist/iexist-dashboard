@@ -53,6 +53,9 @@ celery_app.conf.update(
         "app.worker.tasks.run_content_brief_task": {"queue": "default"},
         # Maandrapport: cijfers ophalen en één Claude-aanroep.
         "app.worker.tasks.run_monthly_report_task": {"queue": "default"},
+        # Werkvoorraad Search Console: per klant een paar seconden Google, niet achter scans in `audit`.
+        "app.worker.tasks.run_work_queue_gsc_dispatch_task": {"queue": "default"},
+        "app.worker.tasks.run_work_queue_gsc_task": {"queue": "default"},
     },
     # Celery beat (service `beat`, precies één instantie). Tijden in `timezone` hierboven.
     beat_schedule={
@@ -61,6 +64,16 @@ celery_app.conf.update(
         "sitemap-monitor-dagelijks": {
             "task": "app.worker.tasks.run_sitemap_monitor_dispatch_task",
             "schedule": crontab(hour=settings.sitemap_monitor_hour, minute=0),
+        },
+        # Wekelijkse Search Console-ronde van de werkvoorraad (standaard maandag 06:00). De
+        # dispatcher kijkt zelf naar WORK_QUEUE_GSC_ENABLED (noodrem).
+        "werkvoorraad-search-console-wekelijks": {
+            "task": "app.worker.tasks.run_work_queue_gsc_dispatch_task",
+            "schedule": crontab(
+                day_of_week=settings.work_queue_gsc_weekday,
+                hour=settings.work_queue_gsc_hour,
+                minute=0,
+            ),
         },
     },
 )
@@ -74,4 +87,5 @@ celery_app.autodiscover_tasks([
     "app.features.launch_checklist.worker",
     "app.features.competitor_analysis.worker",
     "app.features.monthly_report.worker",
+    "app.features.work_queue.worker",
 ])

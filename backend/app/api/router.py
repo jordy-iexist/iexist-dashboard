@@ -17,6 +17,7 @@ from app.features.site_changes.router import router as site_changes_router
 from app.features.seo_tracker.router import router as seo_tracker_router
 from app.features.seo_meta.router import router as seo_meta_router
 from app.features.website_audit.router import router as website_audit_router
+from app.features.work_queue.router import router as work_queue_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -36,3 +37,4 @@ router.include_router(site_changes_router)
 router.include_router(competitor_analysis_router)
 router.include_router(competitor_analysis_brief_router)
 router.include_router(monthly_report_router)
+router.include_router(work_queue_router)

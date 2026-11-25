@@ -10,6 +10,7 @@ import { Pill } from "@/components/livegang/shared"
 import { Button } from "@/components/ui/button"
 import { newAnalysisHref } from "@/lib/competitor-analysis"
 import type { OpportunityRow } from "@/lib/search-console-insights"
+import { workBoardHref } from "@/lib/work-queue"
 import { cn } from "@/lib/utils"
 
 // Kolommen zonder breedte (Zoekterm en Pagina) delen de resterende ruimte.
@@ -163,8 +164,8 @@ export function OpportunitiesTable({
           <Button variant="outline" disabled title="Binnenkort">
             Laat Claude titles voorstellen
           </Button>
-          <Button disabled title="Binnenkort" className="font-semibold">
-            Maak taken ({rows.length.toLocaleString("nl-NL")})
+          <Button asChild className="font-semibold">
+            <Link href={workBoardHref({ customerId, source: "search_console" })}>Bekijk op de werkvoorraad</Link>
           </Button>
         </div>
       </div>

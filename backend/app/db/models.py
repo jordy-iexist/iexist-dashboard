@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -1733,6 +1734,71 @@ class MonthlyReport(Base):
     )
 
 
+class WorkItem(Base):
+    """Kaart op de werkvoorraad: een gebundelde groep punten uit één bron, of een eigen taak.
+
+    `source`: scan | analysis | search_console | site_changes | manual. `group_key` is de vaste
+    sleutel van de groep binnen (klant, bron); leeg bij een eigen taak. `active_key` is gelijk
+    aan `group_key` zolang de kaart in todo/doing/review staat en anders NULL, zodat er per
+    groep hooguit één open kaart is en afgeronde of verwijderde kaarten blijven bestaan.
+    `status`: todo | doing | review | done | removed. `kind`: ctr | techniek | content | links |
+    update | rapport. `severity`: hoog | middel | laag. `items` is een momentopname: lijst van
+    `{key, title, url, severity, ref, suppress_key}` (zie `features/work_queue/services/types.py`).
+    `resolved_by_source`: vanzelf afgerond omdat de bron niets open meer heeft.
+    """
+
+    __tablename__ = "work_items"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "source", "active_key", name="uq_work_item_active"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    group_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    active_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="todo", server_default=text("'todo'"), index=True
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    # Zonder aantal; de frontend zet `item_count` en de eenheid erachter.
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        Text, nullable=False, default="middel", server_default=text("'middel'")
+    )
+    item_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # Zwaar; alleen laden waar de lijst nodig is (detail, sync bij een gewijzigde groep).
+    items: Mapped[Any] = mapped_column(JSON, nullable=True, deferred=True)
+    # sha1 over de itemsleutels en de ernst; gelijk = niets bijwerken.
+    fingerprint: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # Volgorde binnen de kolom (oplopend); slepen zet de positie tussen de buren.
+    position: Mapped[float] = mapped_column(Float, nullable=False)
+    assignee_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolved_by_source: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    done_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    done_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    # Leeg = automatisch aangemaakt door de synchronisatie.
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -1771,4 +1837,5 @@ __all__ = [
     "CompetitorAnalysisAction",
     "ContentBrief",
     "MonthlyReport",
+    "WorkItem",
 ]

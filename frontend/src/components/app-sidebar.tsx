@@ -31,6 +31,7 @@ import {
   MousePointerClick,
   Building2,
   FileChartColumn,
+  Kanban,
   type LucideIcon,
 } from "lucide-react";
 
@@ -80,6 +81,7 @@ import {
   type SeoGeoSlug,
 } from "@/lib/seo-geo-sections";
 import { settingsNavGroups } from "@/components/settings/settings-nav-items";
+import { WORK_BOARD_URL, workBoardHref } from "@/lib/work-queue";
 
 const menuItems = [
   {
@@ -598,6 +600,36 @@ export function AppSidebar({
         </SidebarHeader>
 
         <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-xs text-white/50">
+              Bureau
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith(WORK_BOARD_URL)}
+                    tooltip="Werkvoorraad"
+                    className={itemClass}
+                  >
+                    {/* Vanaf een klantpagina gefilterd op die klant; op het bord zelf alle klanten. */}
+                    <Link
+                      href={
+                        urlCustomerId
+                          ? workBoardHref({ customerId: urlCustomerId })
+                          : WORK_BOARD_URL
+                      }
+                    >
+                      <Kanban />
+                      <span>Werkvoorraad</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
           <SidebarGroup>
             <SidebarGroupLabel className="text-xs text-white/50">
               Navigatie

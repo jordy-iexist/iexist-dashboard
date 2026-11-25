@@ -23,6 +23,10 @@ from app.features.monthly_report.worker.report import run_monthly_report_task
 from app.features.seo_meta.worker.seo_meta import run_website_meta_optimization_task
 from app.features.seo_tracker.worker.seo_scans import scan_website_keywords_task
 from app.features.website_audit.worker.website_audit import run_website_audit_task
+from app.features.work_queue.worker.search_console import (
+    run_work_queue_gsc_dispatch_task,
+    run_work_queue_gsc_task,
+)
 
 __all__ = [
     "enqueue_blog_image_generation",
@@ -43,5 +47,7 @@ __all__ = [
     "run_sitemap_monitor_task",
     "run_website_meta_optimization_task",
     "run_website_audit_task",
+    "run_work_queue_gsc_dispatch_task",
+    "run_work_queue_gsc_task",
     "scan_website_keywords_task",
 ]

@@ -275,6 +275,27 @@ def collect_entries(db: Session, customer_id: str, only_key: str | None = None) 
     return sources, entries
 
 
+def suggestion_entries(db: Session, customer_id: str) -> tuple[dict[str, PageInfo], list[Entry]]:
+    """Alleen de AI-tekstvoorstellen (voor de werkvoorraad), zonder de scan-actiepunten te laden.
+
+    Bron: de voorstellen van de laatste voltooide fase 3-scan plus de rijen met een beslissing
+    over een voorstel (ook als de bron weg is), samengevoegd zoals in `collect_entries`.
+    """
+    pages: dict[str, PageInfo] = {}
+    items: dict[str, SourceItem] = {}
+    content_scan = latest_completed_scan(db, customer_id, 3)
+    if content_scan is not None:
+        items = _suggestion_items(db, content_scan, None, pages)
+    rows = (
+        db.query(SiteChange)
+        .filter(SiteChange.customer_website_id == customer_id, SiteChange.source_kind == KIND_SUGGESTION)
+        .all()
+    )
+    for row in rows:
+        pages.setdefault(row.url_key, PageInfo(url=row.page_url, path=path_of(row.page_url)))
+    return pages, merge_entries(items, rows)
+
+
 # --- schema -----------------------------------------------------------------------
 
 def schema_summary(db: Session, customer_id: str, ukey: str) -> dict[str, Any] | None:

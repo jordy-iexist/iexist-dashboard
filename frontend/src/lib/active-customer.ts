@@ -3,6 +3,7 @@
 // importeren. De server-only cookielezer staat in `active-customer.server.ts`.
 
 import { isSeoGeoSlug, seoGeoSectionHref } from "@/lib/seo-geo-sections"
+import { WORK_BOARD_URL, workBoardHref } from "@/lib/work-queue"
 
 export const ACTIVE_CUSTOMER_COOKIE = "active_customer_id"
 export const ACTIVE_CUSTOMER_STORAGE_KEY = "active_customer_id"
@@ -145,6 +146,10 @@ export function switchHref(pathname: string, newCustomerId: string): string {
   const [root, section, first, second, third, ...rest] = segmentsOf(pathname)
 
   if (root === "dashboard") {
+    // Werkvoorraad (bureaubreed): op het bord blijven, gefilterd op de nieuwe klant.
+    if (`/${root}/${section ?? ""}` === WORK_BOARD_URL) {
+      return workBoardHref({ customerId: newCustomerId })
+    }
     // Subpagina van de SEO/GEO-scan: dezelfde subpagina van de nieuwe klant.
     // Het basisadres en de printpagina gaan zoals de rest naar het basisadres.
     if (
