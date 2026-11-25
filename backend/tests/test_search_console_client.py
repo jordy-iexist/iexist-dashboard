@@ -71,6 +71,54 @@ class SearchConsoleClientTests(unittest.TestCase):
             "rowLimit": 250, "dimensions": ["query"],
         })
 
+    def test_search_analytics_start_row_and_row_limit_cap(self):
+        service, http = _service((200, {"rows": []}), (200, {"rows": []}))
+        gsc.search_analytics("sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2), dimensions=("page",),
+                             row_limit=10, start_row=0, service=service)
+        gsc.search_analytics("sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2), dimensions=("page",),
+                             row_limit=99_999, start_row=25_000, service=service)
+        first, second = (json.loads(request[2]) for request in http.request_sequence)
+        # startRow 0 staat niet in de body: die blijft gelijk aan vroeger.
+        self.assertEqual(first, {"startDate": "2026-01-01", "endDate": "2026-01-02", "type": "web",
+                                 "rowLimit": 10, "dimensions": ["page"]})
+        self.assertEqual((second["rowLimit"], second["startRow"]), (25_000, 25_000))
+
+    def test_search_analytics_all_pages_until_short_page(self):
+        def page(*keys):
+            return {"rows": [{"keys": [k], "clicks": 1, "impressions": 10, "ctr": 0.1, "position": 3} for k in keys]}
+
+        service, http = _service((200, page("a", "b")), (200, page("c", "d")), (200, page("e")))
+        rows, truncated = gsc.search_analytics_all(
+            "sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2), dimensions=("query", "page"),
+            page_size=2, max_rows=10, service=service,
+        )
+        self.assertEqual([r["keys"][0] for r in rows], ["a", "b", "c", "d", "e"])
+        self.assertFalse(truncated)
+        bodies = [json.loads(request[2]) for request in http.request_sequence]
+        self.assertEqual([b.get("startRow") for b in bodies], [None, 2, 4])
+        self.assertEqual({b["rowLimit"] for b in bodies}, {2})
+        self.assertEqual(bodies[0]["dimensions"], ["query", "page"])
+
+    def test_search_analytics_all_stops_at_max_rows(self):
+        def page(n):
+            return {"rows": [{"keys": [str(i)], "clicks": 0, "impressions": 1, "ctr": 0, "position": 1}
+                             for i in range(n)]}
+
+        service, http = _service((200, page(2)), (200, page(1)))
+        rows, truncated = gsc.search_analytics_all(
+            "sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2), dimensions=("query",),
+            page_size=2, max_rows=3, service=service,
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(truncated)
+        self.assertEqual([json.loads(r[2])["rowLimit"] for r in http.request_sequence], [2, 1])
+
+    def test_search_analytics_all_empty(self):
+        service, http = _service((200, {}))
+        self.assertEqual(gsc.search_analytics_all("sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2),
+                                                  dimensions=("query",), service=service), ([], False))
+        self.assertEqual(json.loads(http.request_sequence[0][2])["rowLimit"], gsc.MAX_ROW_LIMIT)
+
     def test_search_analytics_without_data_is_empty(self):
         service, _ = _service((200, {"responseAggregationType": "byProperty"}))
         self.assertEqual(gsc.search_analytics("sc-domain:klant.nl", date(2026, 1, 1), date(2026, 1, 2),

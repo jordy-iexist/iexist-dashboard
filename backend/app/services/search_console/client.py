@@ -28,6 +28,9 @@ NUM_RETRIES = 2
 # Rechten waarmee de API data teruggeeft; een niet-geverifieerde property doet dat niet.
 READABLE_PERMISSIONS = {"siteOwner", "siteFullUser", "siteRestrictedUser"}
 
+# Maximaal aantal rijen per searchAnalytics-request (grens van de API).
+MAX_ROW_LIMIT = 25_000
+
 # Codes waarbij verder proberen geen zin heeft.
 FATAL_CODES = {"not_configured", "token_expired", "forbidden"}
 
@@ -146,21 +149,26 @@ def search_analytics(
     *,
     dimensions: tuple[str, ...] = (),
     row_limit: int = 1,
+    start_row: int = 0,
     service: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Prestaties (zoekresultaten op het web) over een periode.
 
     Zonder `dimensions` één rij met de totalen van de property; anders per rij
-    `keys` in de volgorde van de dimensies. Geen data = lege lijst.
+    `keys` in de volgorde van de dimensies. Geen data = lege lijst. `row_limit`
+    wordt afgekapt op MAX_ROW_LIMIT (het maximum van de API); met `start_row`
+    haal je de volgende pagina op.
     """
     body: dict[str, Any] = {
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
         "type": "web",
-        "rowLimit": max(1, row_limit),
+        "rowLimit": min(max(1, row_limit), MAX_ROW_LIMIT),
     }
     if dimensions:
         body["dimensions"] = list(dimensions)
+    if start_row > 0:
+        body["startRow"] = start_row
     payload = _execute(lambda svc: svc.searchanalytics().query(siteUrl=site_url, body=body), service)
     rows = []
     for row in payload.get("rows") or []:
@@ -174,6 +182,36 @@ def search_analytics(
             "position": float(row.get("position") or 0),
         })
     return rows
+
+
+def search_analytics_all(
+    site_url: str,
+    start: date,
+    end: date,
+    *,
+    dimensions: tuple[str, ...],
+    page_size: int = MAX_ROW_LIMIT,
+    max_rows: int = 50_000,
+    service: Any | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Alle rijen van een rapport, pagina voor pagina: `(rijen, afgekapt)`.
+
+    Haalt pagina's van `page_size` rijen op tot een pagina korter is dan gevraagd
+    (dan is alles binnen) of tot `max_rows` bereikt is; `afgekapt` is dan True,
+    want er kunnen meer rijen zijn.
+    """
+    page_size = min(max(1, page_size), MAX_ROW_LIMIT)
+    svc = service if service is not None else get_service()
+    rows: list[dict[str, Any]] = []
+    while len(rows) < max_rows:
+        limit = min(page_size, max_rows - len(rows))
+        page = search_analytics(
+            site_url, start, end, dimensions=dimensions, row_limit=limit, start_row=len(rows), service=svc
+        )
+        rows.extend(page)
+        if len(page) < limit:
+            return rows, False
+    return rows, True
 
 
 def list_sitemaps(site_url: str, *, service: Any | None = None) -> list[dict[str, Any]]:
@@ -252,6 +290,7 @@ def inspect_url(site_url: str, url: str, *, service: Any | None = None) -> dict[
 
 __all__ = [
     "FATAL_CODES",
+    "MAX_ROW_LIMIT",
     "SCOPES",
     "SearchConsoleServiceError",
     "get_service",
@@ -260,4 +299,5 @@ __all__ = [
     "list_sitemaps",
     "list_sites",
     "search_analytics",
+    "search_analytics_all",
 ]

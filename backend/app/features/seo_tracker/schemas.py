@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+from app.features.customers.profile import CustomerProfile
 
 # Aanspreekvorm in teksten voor de klant; None = niet vastgelegd.
 FormOfAddress = Literal["je", "u"]
@@ -25,6 +27,8 @@ class CustomerWebsiteCreateRequest(BaseModel):
     spreadsheet_url: str | None = None
     tone_of_voice: str | None = None
     form_of_address: FormOfAddress | None = None
+    # Het klantprofiel kan meteen bij het aanmaken worden meegegeven (één stap).
+    profile: CustomerProfile | None = None
 
     @field_validator("form_of_address", mode="before")
     @classmethod
@@ -43,6 +47,8 @@ class CustomerWebsiteUpdateRequest(BaseModel):
     spreadsheet_url: str | None = None
     tone_of_voice: str | None = None
     form_of_address: FormOfAddress | None = None
+    # Niet meegestuurd = ongemoeid, null = leegmaken, object = het hele profiel vervangen.
+    profile: CustomerProfile | None = None
 
     @field_validator("form_of_address", mode="before")
     @classmethod
@@ -69,7 +75,14 @@ class CustomerWebsiteItem(BaseModel):
     updated_at: datetime
 
 
-class CustomerWebsiteDetailResponse(CustomerWebsiteItem):
+class CustomerWebsiteProfileItem(CustomerWebsiteItem):
+    """Klant mét klantprofiel (detail en PATCH). De lijst krijgt geen profiel: die wordt bij
+    elke pagina voor de sidebar opgehaald."""
+
+    profile: CustomerProfile = Field(default_factory=CustomerProfile)
+
+
+class CustomerWebsiteDetailResponse(CustomerWebsiteProfileItem):
     placed_this_month: int = 0
     links_placed_this_month: int = 0
     pending_blogs: int | None = None

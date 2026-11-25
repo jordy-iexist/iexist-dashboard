@@ -22,6 +22,10 @@ Invoer: een `BriefInput` met de gegevens uit de database (de taak `worker/brief.
 De paginateksten van concurrenten worden niet bewaard; de agent werkt met koppen, cijfers en
 de onderwerpenlijst.
 
+Klantprofiel (`Customer.profile`): feiten komen in <klant>, schrijfregels in `style_rules`,
+alleen wat is ingevuld; een leeg profiel laat de prompts zoals ze waren. Alle ingevulde waarden
+gaan door `_safe`/`_escape`, zodat ze geen promptblok kunnen sluiten.
+
 Fouten: een `AnthropicServiceError` gaat door naar de aanroeper, behalve code
 `not_configured`: dat wordt `state="not_configured"`.
 """
@@ -48,6 +52,13 @@ from app.features.competitor_analysis.schemas import (
 )
 from app.features.competitor_analysis.services import comparison
 from app.features.competitor_analysis.services.insights import NOT_CONFIGURED_MESSAGE, _clip
+from app.features.customers.profile import (
+    MAX_AVOID_WORD_CHARS,
+    MAX_LIST_ITEM_CHARS,
+    MAX_SERVICE_CHARS,
+    MAX_TEXT_CHARS,
+    CustomerProfile,
+)
 from app.services.anthropic import client as claude
 from app.services.anthropic.client import AnthropicServiceError
 
@@ -106,6 +117,17 @@ def _get(obj: Any, name: str) -> Any:
     return getattr(obj, name, None)
 
 
+def _escape(text: str) -> str:
+    """`<` en `>` → `‹` en `›`: een ingevulde waarde kan zo geen promptblok (`</klant>`,
+    `</tone-of-voice>`) sluiten of openen."""
+    return text.replace("<", "‹").replace(">", "›")
+
+
+def _safe(text: Any, limit: int) -> str:
+    """`_clip` (witruimte samengevoegd, afgekapt) plus `_escape`; voor waarden uit het klantprofiel."""
+    return _escape(_clip(text, limit))
+
+
 # =============================================================================================
 # Invoer
 # =============================================================================================
@@ -113,13 +135,18 @@ def _get(obj: Any, name: str) -> Any:
 
 @dataclass
 class Customer:
-    """Klantgegevens voor de opdracht. `form_of_address`: "je", "u" of None (niet vastgelegd)."""
+    """Klantgegevens voor de opdracht. `form_of_address`: "je", "u" of None (niet vastgelegd).
+
+    `profile`: het klantprofiel (`parse_profile` van de kolom); leeg = de prompt is zoals zonder
+    profiel.
+    """
 
     name: str
     domain: str | None = None
     seo_goals: str | None = None
     tone_of_voice: str | None = None
     form_of_address: str | None = None
+    profile: CustomerProfile = field(default_factory=CustomerProfile)
 
 
 @dataclass
@@ -254,11 +281,45 @@ _CLAIMS_RULE = """\
 certificeringen, garanties of andere claims over de klant. Wat niet in <klant> of \
 <eigen-pagina> staat, weet je niet."""
 
+# Aanvulling op `_CLAIMS_RULE`, alleen als het klantprofiel diensten, cases, reviews of
+# certificeringen bevat (zie `_profile_format`).
+_PROOF_RULE = """
+- Noem alleen bedragen, cases, reviews en certificeringen die letterlijk in <klant> staan, \
+precies zoals ze daar staan. Andere bedragen of bewijzen bestaan voor jou niet."""
+
+# Aanvulling op de omschrijving van <klant> in de systeemprompts, alleen met een ingevuld profiel.
+_PROFILE_DESCRIPTION = (
+    ", plus de ingevulde feiten uit het klantprofiel (bedrijf, werkgebied, doelgroep, diensten "
+    "en prijzen, USP's, reviews, certificeringen, team en cases)"
+)
+
+
+def _has_profile_facts(profile: CustomerProfile) -> bool:
+    """Staat er iets uit het profiel in <klant>? (Schrijfregels en voorbeeld-URL's tellen niet.)"""
+    return any((
+        profile.company_type, profile.service_area, profile.target_audience, profile.specialties,
+        profile.services, profile.usps, profile.reviews, profile.certifications, profile.team, profile.cases,
+    ))
+
+
+def _has_proof(profile: CustomerProfile) -> bool:
+    return bool(profile.services or profile.cases or profile.reviews or profile.certifications)
+
+
+def _profile_format(customer: Customer) -> dict[str, str]:
+    """De profielafhankelijke stukken van BRIEF_SYSTEM en CONCEPT_SYSTEM; leeg profiel = ""."""
+    profile = customer.profile
+    return {
+        "customer_extra": _PROFILE_DESCRIPTION if _has_profile_facts(profile) else "",
+        "proof_rule": _PROOF_RULE if _has_proof(profile) else "",
+    }
+
 
 def style_rules(customer: Customer) -> str:
     """Schrijfstijl uit het klantprofiel; de agent volgt die letterlijk."""
     lines: list[str] = []
-    tone = (customer.tone_of_voice or "").strip()
+    # Regels blijven staan (alleen `<` en `>` worden onschadelijk gemaakt).
+    tone = _escape((customer.tone_of_voice or "").strip())
     if tone:
         lines.append(
             "- Volg de tone of voice van de klant letterlijk:\n<tone-of-voice>\n" + tone + "\n</tone-of-voice>"
@@ -278,6 +339,27 @@ def style_rules(customer: Customer) -> str:
             "overal vol."
         )
     lines.append("- Schrijf begrijpelijk Nederlands: korte zinnen, actieve vorm, geen jargon zonder uitleg.")
+
+    # Harde regels uit het klantprofiel, elk alleen als ingevuld.
+    profile = customer.profile
+    level = _safe(profile.language_level, MAX_TEXT_CHARS)
+    if level:
+        lines.append(f"- Taalniveau: {level}. Houd je hier overal aan.")
+    avoid = [w for w in (_safe(word, MAX_AVOID_WORD_CHARS) for word in profile.avoid_words) if w]
+    if avoid:
+        lines.append(f"- Gebruik deze woorden nooit: {', '.join(avoid)}.")
+    cta = _safe(profile.fixed_cta, MAX_TEXT_CHARS)
+    if cta:
+        lines.append(
+            "- Gebruik als call-to-action altijd deze vaste tekst van de klant:\n<vaste-cta>\n" + cta + "\n</vaste-cta>"
+        )
+    rules = [r for r in (_safe(rule, MAX_LIST_ITEM_CHARS) for rule in profile.content_rules) if r]
+    if rules:
+        numbered = "\n".join(f"{i}. {rule}" for i, rule in enumerate(rules, start=1))
+        lines.append(
+            "- Volg deze regels van de klant letterlijk:\n"
+            "<regels-klant>\n" + numbered + "\n</regels-klant>"
+        )
     return "\n".join(lines)
 
 
@@ -318,14 +400,59 @@ def _customer_block(customer: Customer) -> str:
     form = {"je": "je (informeel)", "u": "u (formeel)"}.get(customer.form_of_address or "", "niet vastgelegd")
     lines = [
         "<klant>",
-        f"naam: {_clip(customer.name, 200) or 'onbekend'}",
+        f"naam: {_safe(customer.name, 200) or 'onbekend'}",
         f"domein: {customer.domain or 'onbekend'}",
-        f"SEO-doelen: {(customer.seo_goals or '').strip() or 'niet ingevuld'}",
+        f"SEO-doelen: {_escape((customer.seo_goals or '').strip()) or 'niet ingevuld'}",
         f"tone of voice: {'zie Schrijfstijl' if (customer.tone_of_voice or '').strip() else 'niet ingevuld'}",
         f"aanspreekvorm: {form}",
+        *_profile_lines(customer.profile),
         "</klant>",
     ]
     return "\n".join(lines)
+
+
+def _profile_lines(profile: CustomerProfile) -> list[str]:
+    """Feiten uit het klantprofiel voor <klant>, elk alleen als ingevuld. Voorbeeld-URL's niet
+    (de agent kan geen pagina's ophalen); de schrijfregels staan in `style_rules`."""
+    lines: list[str] = []
+    for label, value in (
+        ("type bedrijf", profile.company_type),
+        ("werkgebied", profile.service_area),
+        ("doelgroep", profile.target_audience),
+        ("specialisaties", profile.specialties),
+    ):
+        text = _safe(value, MAX_TEXT_CHARS)
+        if text:
+            lines.append(f"{label}: {text}")
+
+    services = []
+    for service in profile.services:
+        name = _safe(service.name, MAX_SERVICE_CHARS)
+        price = _safe(service.price, MAX_SERVICE_CHARS)
+        if name:
+            services.append(f"- {name}: {price}" if price else f"- {name}")
+    if services:
+        source = _safe(profile.services_source, MAX_TEXT_CHARS)
+        lines.append(f"diensten en prijzen (bron: {source}):" if source else "diensten en prijzen:")
+        lines += services
+
+    usps = [u for u in (_safe(usp, MAX_LIST_ITEM_CHARS) for usp in profile.usps) if u]
+    if usps:
+        lines.append("USP's:")
+        lines += [f"- {usp}" for usp in usps]
+    for label, value in (
+        ("reviews", profile.reviews),
+        ("certificeringen", profile.certifications),
+        ("team (auteurs)", profile.team),
+    ):
+        text = _safe(value, MAX_TEXT_CHARS)
+        if text:
+            lines.append(f"{label}: {text}")
+    cases = [c for c in (_safe(case, MAX_LIST_ITEM_CHARS) for case in profile.cases) if c]
+    if cases:
+        lines.append("cases (met toestemming van de klant):")
+        lines += [f"- {case}" for case in cases]
+    return lines
 
 
 def _page_facts(page: Any) -> list[str]:
@@ -470,7 +597,7 @@ basis van jouw brief. Schrijf in helder, zakelijk Nederlands.
 ## Gegevens
 - De kop: het zoekwoord, cijfers uit Ahrefs, wat Google toont, de zoekintentie, de AI \
 Overview-bronnen en "Mensen vragen ook" (id's V1, V2, ...).
-- <klant>: naam, domein, SEO-doelen en aanspreekvorm van de klant.
+- <klant>: naam, domein, SEO-doelen en aanspreekvorm van de klant{customer_extra}.
 - <eigen-pagina>: de huidige pagina van de klant, of de melding dat er een nieuwe pagina komt.
 - <feiten>: cijfers per pagina, door code berekend: die kloppen. [ROOD] betekent duidelijk \
 slechter dan de mediaan; neem die markering nooit over.
@@ -502,7 +629,7 @@ uit die lijst; is de lijst leeg, geef dan een lege lijst.
 Article, LocalBusiness), alleen als de inhoud ze rechtvaardigt.
 
 ## Regels
-{claims_rule}
+{claims_rule}{proof_rule}
 - Zet geen beloftes in title, meta of koppen die de klant mogelijk niet kan waarmaken.
 - Neem geen tekst letterlijk over van concurrenten.
 {own_rules}"""
@@ -543,7 +670,7 @@ def build_brief_prompt(inp: BriefInput) -> BriefPrompt:
     state = own_state(inp)
     system = BRIEF_SYSTEM.format(
         data_rule=_DATA_RULE, style=style_rules(inp.customer), claims_rule=_CLAIMS_RULE,
-        own_rules=_BRIEF_OWN_RULES[state],
+        own_rules=_BRIEF_OWN_RULES[state], **_profile_format(inp.customer),
     )
     parts = [
         *_keyword_lines(inp, ids),
@@ -686,7 +813,7 @@ het concept na voordat het live gaat; er wordt nooit automatisch gepubliceerd.
 ## Gegevens
 - <brief>: de content brief: doel, title, meta description, koppenstructuur, richtlengte, \
 interne links en schema.
-- <klant>: naam, domein, SEO-doelen en aanspreekvorm.
+- <klant>: naam, domein, SEO-doelen en aanspreekvorm{customer_extra}.
 - <eigen-pagina>: de huidige pagina van de klant, of de melding dat de pagina nieuw is.
 - <onderwerpen> (id's T1, T2, ...) en "Mensen vragen ook" (id's V1, V2, ...): wat de tekst \
 moet behandelen.
@@ -713,7 +840,7 @@ over wat moet worden gecontroleerd of aangevuld (bijvoorbeeld een prijs of een k
 
 ## Regels
 {claims_rule} Heb je zo'n gegeven nodig, schrijf dan een duidelijke plaatshouder tussen \
-vierkante haken (bijvoorbeeld [vanaf-prijs invullen]) en zet een review_note bij die sectie.
+vierkante haken (bijvoorbeeld [vanaf-prijs invullen]) en zet een review_note bij die sectie.{proof_rule}
 - Neem geen zinnen over van concurrenten.
 - Neem de markering [ROOD] nooit over.
 {own_rules}"""
@@ -763,7 +890,7 @@ def build_concept_prompt(inp: BriefInput, brief: Brief) -> ConceptPrompt:
     state = own_state(inp)
     system = CONCEPT_SYSTEM.format(
         data_rule=_DATA_RULE.replace(" en <concurrent>", ""), style=style_rules(inp.customer),
-        claims_rule=_CLAIMS_RULE, own_rules=_CONCEPT_OWN_RULES[state],
+        claims_rule=_CLAIMS_RULE, own_rules=_CONCEPT_OWN_RULES[state], **_profile_format(inp.customer),
     )
     question_lines = ["Mensen vragen ook:"]
     question_lines += [f"- {qid}: {q}" for qid, q in ids.questions.items()] or ["niet beschikbaar"]

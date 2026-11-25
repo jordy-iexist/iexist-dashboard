@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CategoryManagerDialog } from "@/components/klanten/CategoryManagerDialog"
+import { customerHref } from "@/lib/active-customer"
 import {
   type CustomerCategory,
   type CustomerWebsiteListItem,
@@ -345,7 +346,7 @@ export function KlantenManager() {
                           </Link>
                         </Button>
                         <Button size="sm" variant="outline" asChild>
-                          <Link href={`/dashboard/klanten/${customer.id}/bewerken`}>
+                          <Link href={customerHref("profiel", customer.id)}>
                             Bewerken
                           </Link>
                         </Button>

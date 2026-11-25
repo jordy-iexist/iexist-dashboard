@@ -9,9 +9,14 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_user_id, utc_now_iso
 from app.db.models import Blog, CustomerCategory, CustomerWebsite, SerpScan, WebsiteMetaRun
 from app.db.session import get_db
-from app.features.customers import quick_wins
+from app.features.customers import quick_wins, search_console_insights
+from app.features.customers.profile import CustomerProfile, parse_profile
 from app.features.customers.rankings import customer_rankings
-from app.features.customers.schemas import CustomerQuickWinsResponse, CustomerRankingsResponse
+from app.features.customers.schemas import (
+    CustomerQuickWinsResponse,
+    CustomerRankingsResponse,
+    CustomerSearchConsoleInsightsResponse,
+)
 from app.features.customers.services import delete_customer_website_cascade
 from app.features.seo_tracker.mappers import to_customer_website_item
 from app.features.seo_tracker.schemas import (
@@ -23,6 +28,7 @@ from app.features.seo_tracker.schemas import (
     CustomerWebsiteDetailResponse,
     CustomerWebsiteItem,
     CustomerWebsiteListItem,
+    CustomerWebsiteProfileItem,
     CustomerWebsitesListResponse,
     CustomerWebsiteUpdateRequest,
 )
@@ -152,6 +158,7 @@ async def get_customer(
     )
     return CustomerWebsiteDetailResponse(
         **base.model_dump(),
+        profile=parse_profile(website.profile),
         placed_this_month=placed_this_month,
         # Placeholder until linkbuilding registration exists.
         links_placed_this_month=0,
@@ -232,7 +239,31 @@ def refresh_customer_quick_wins(
     return CustomerQuickWinsResponse(**result)
 
 
-@router.post("/api/customers", response_model=CustomerWebsiteItem)
+@router.get(
+    "/api/customers/{customer_id}/search-console-insights",
+    response_model=CustomerSearchConsoleInsightsResponse,
+)
+def get_customer_search_console_insights(
+    customer_id: str,
+    days: int = Query(default=28),
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
+    """KPI's, CTR-kansen, niet-gevolgde zoektermen en dalende pagina's uit Search Console.
+
+    Live uit Google (het berekende antwoord blijft een uur in het geheugen); niets wordt
+    opgeslagen. Synchrone functie (threadpool), net als de rankings. Altijd HTTP 200 met
+    `state`, behalve 404 bij een onbekende klant en 422 als `days` niet 7, 28 of 90 is.
+    """
+    if days not in search_console_insights.ALLOWED_DAYS:
+        raise HTTPException(status_code=422, detail="days moet 7, 28 of 90 zijn.")
+    website = _customer_or_404(db, customer_id)
+    return CustomerSearchConsoleInsightsResponse(
+        **search_console_insights.customer_insights(website, days)
+    )
+
+
+@router.post("/api/customers", response_model=CustomerWebsiteProfileItem)
 async def create_customer(
     payload: CustomerWebsiteCreateRequest,
     user_id: str = Depends(require_user_id),
@@ -287,6 +318,10 @@ async def create_customer(
         if isinstance(payload.tone_of_voice, str)
         else None,
         form_of_address=payload.form_of_address,
+        # Klantprofiel meteen bij het aanmaken; niet meegestuurd of leeg = geen profiel.
+        profile=payload.profile.model_dump()
+        if payload.profile is not None and payload.profile != CustomerProfile()
+        else None,
         created_by=user_id,
         created_at=now,
         updated_at=now,
@@ -295,7 +330,7 @@ async def create_customer(
     db.commit()
     db.refresh(website)
     category_names = _category_name_map(db, [website.category_id])
-    return to_customer_website_item(
+    base = to_customer_website_item(
         {
             **_row_to_dict(website),
             "category_name": category_names.get(str(website.category_id))
@@ -303,9 +338,12 @@ async def create_customer(
             else None,
         }
     )
+    return CustomerWebsiteProfileItem(
+        **base.model_dump(), profile=parse_profile(website.profile)
+    )
 
 
-@router.patch("/api/customers/{customer_id}", response_model=CustomerWebsiteItem)
+@router.patch("/api/customers/{customer_id}", response_model=CustomerWebsiteProfileItem)
 async def update_customer(
     customer_id: str,
     payload: CustomerWebsiteUpdateRequest,
@@ -390,6 +428,11 @@ async def update_customer(
         )
     if "form_of_address" in provided:
         updates["form_of_address"] = payload.form_of_address
+    if "profile" in provided:
+        # null = leegmaken, een object vervangt het hele (al opgeschoonde) profiel.
+        updates["profile"] = (
+            payload.profile.model_dump() if payload.profile is not None else None
+        )
 
     if len(updates) == 1:
         raise HTTPException(status_code=400, detail="Geen wijzigingen ontvangen.")
@@ -407,13 +450,16 @@ async def update_customer(
     if not updated_website:
         raise HTTPException(status_code=500, detail="Kon klant niet bijwerken.")
     category_names = _category_name_map(db, [updated_website.category_id])
-    return to_customer_website_item(
+    base = to_customer_website_item(
         {
             **_row_to_dict(updated_website),
             "category_name": category_names.get(str(updated_website.category_id))
             if updated_website.category_id
             else None,
         }
+    )
+    return CustomerWebsiteProfileItem(
+        **base.model_dump(), profile=parse_profile(updated_website.profile)
     )
 
 

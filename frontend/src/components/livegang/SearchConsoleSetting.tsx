@@ -14,8 +14,18 @@ import {
 /**
  * Search Console-property van de klant: tonen welke de fase 4-scan gebruikt
  * (automatisch gevonden op domein of handmatig gekozen) en een andere kiezen.
+ * `note` vervangt de zin onder de keuzelijst; `onChanged` volgt na een geslaagde
+ * opslag, "Automatisch kiezen" en "Lijst verversen".
  */
-export function SearchConsoleSetting({ customerId }: { customerId: string }) {
+export function SearchConsoleSetting({
+  customerId,
+  note,
+  onChanged,
+}: {
+  customerId: string
+  note?: string
+  onChanged?: () => void
+}) {
   const [settings, setSettings] = useState<SearchConsoleSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -38,13 +48,18 @@ export function SearchConsoleSetting({ customerId }: { customerId: string }) {
     void load()
   }, [load])
 
-  async function run(action: () => Promise<SearchConsoleSettings | void>, closeAfter = false) {
+  async function run(
+    action: () => Promise<SearchConsoleSettings | void>,
+    closeAfter = false,
+    notify = false
+  ) {
     setBusy(true)
     setError(null)
     try {
       const result = await action()
       if (result) setSettings(result)
       if (closeAfter) setEditing(false)
+      if (notify) onChanged?.()
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -120,7 +135,7 @@ export function SearchConsoleSetting({ customerId }: { customerId: string }) {
                 size="sm"
                 variant="ghost"
                 disabled={busy}
-                onClick={() => void run(() => setSearchConsoleProperty(customerId, null))}
+                onClick={() => void run(() => setSearchConsoleProperty(customerId, null), false, true)}
               >
                 Automatisch kiezen
               </Button>
@@ -137,7 +152,7 @@ export function SearchConsoleSetting({ customerId }: { customerId: string }) {
           className="flex flex-wrap items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (choice) void run(() => setSearchConsoleProperty(customerId, choice), true)
+            if (choice) void run(() => setSearchConsoleProperty(customerId, choice), true, true)
           }}
         >
           <select
@@ -179,11 +194,11 @@ export function SearchConsoleSetting({ customerId }: { customerId: string }) {
             variant="ghost"
             disabled={busy}
             title="Haal de lijst met properties opnieuw op bij Google"
-            onClick={() => void run(() => load(true))}
+            onClick={() => void run(() => load(true), false, true)}
           >
             <RefreshCw /> Lijst verversen
           </Button>
-          <p className="w-full text-xs text-muted-foreground">De keuze geldt vanaf de volgende scan.</p>
+          <p className="w-full text-xs text-muted-foreground">{note ?? "De keuze geldt vanaf de volgende scan."}</p>
         </form>
       )}
 

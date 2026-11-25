@@ -57,7 +57,7 @@ export function BriefCard({ brief, customerId }: { brief: Brief; customerId: str
 
   const profileLink = (
     <Link
-      href={`${customerHref("home", customerId)}/bewerken`}
+      href={customerHref("profiel", customerId)}
       className="underline underline-offset-2 hover:text-foreground"
     >
       klantprofiel

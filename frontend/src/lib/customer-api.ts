@@ -1,3 +1,4 @@
+import { cache } from "react"
 import { notFound, redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -19,6 +20,11 @@ import {
   type CustomerWebsiteDetail,
   type CustomerWebsiteListItem,
 } from "@/lib/customer-types"
+import {
+  failedInsights,
+  parseSearchConsoleInsights,
+  type SearchConsoleInsights,
+} from "@/lib/search-console-insights"
 
 // Klantenlijst voor server-componenten (o.a. de sidebar). Faalt nooit hard:
 // zonder autorisatie of bij een fout komt er een lege lijst terug.
@@ -344,3 +350,40 @@ export async function fetchCustomerImprovements(
     return null
   }
 }
+
+// Search Console-inzichten (KPI's, CTR-kansen, niet-gevolgde zoektermen, dalende pagina's).
+// Faalt nooit hard: zonder autorisatie, bij een HTTP-fout of een onverwacht antwoord komt
+// er `state: "error"` terug. Met `cache` haalt één paginalading het maar één keer op, ook
+// als de kop (exportknop, property) en de inhoud het allebei vragen.
+export const fetchCustomerSearchConsoleInsights = cache(
+  async (customerId: string, days: number): Promise<SearchConsoleInsights> => {
+    noStore()
+
+    const authorization = await getBackendAuthorizationValue()
+    if (!authorization) {
+      return failedInsights(days)
+    }
+
+    try {
+      const response = await fetch(
+        `${getBackendApiUrl()}/api/customers/${encodeURIComponent(customerId)}/search-console-insights?days=${days}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: authorization,
+          },
+          cache: "no-store",
+        }
+      )
+
+      if (!response.ok) {
+        return failedInsights(days)
+      }
+
+      const payload: unknown = await response.json().catch(() => null)
+      return parseSearchConsoleInsights(payload, days)
+    } catch {
+      return failedInsights(days)
+    }
+  }
+)

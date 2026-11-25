@@ -30,6 +30,7 @@ from app.features.competitor_analysis.brief_router import router as brief_router
 from app.features.competitor_analysis.router import router as analysis_router
 from app.features.competitor_analysis.schemas import ContentBrief as ContentBriefSchema
 from app.features.customers import router as customers_module
+from app.features.customers.profile import CustomerProfile
 from app.features.customers.router import router as customers_router
 from app.worker.tasks import run_content_brief_task
 
@@ -355,6 +356,87 @@ class CustomerProfileStyleTest(_Base):
                                            json={"form_of_address": "jij"}).status_code, 422)
         detail = self.client.get(f"/api/customers/{customer_id}").json()
         self.assertEqual(detail["form_of_address"], "je")
+
+
+class CustomerProfileFieldTest(_Base):
+    """Het klantprofiel (`profile`) via GET/PATCH /api/customers/{id}; de lijst heeft het niet."""
+
+    def setUp(self):
+        super().setUp()
+        self._patch(customers_module, "utc_now_iso", _now)
+        self.detail_url = f"/api/customers/{self.customer_id}"
+
+    def test_detail_without_profile_gives_empty_profile(self):
+        body = self.client.get(self.detail_url).json()
+        self.assertEqual(body["profile"], CustomerProfile().model_dump())
+        self.assertEqual(body["profile"]["services"], [])
+
+    def test_save_and_read_back(self):
+        response = self.client.patch(self.detail_url, json={"profile": {
+            "company_type": "  SEO-bureau ", "usps": ["Snel", "", "snel", "Eerlijk"],
+            "services": [{"name": "SEO-traject", "price": "vanaf € 750 per maand"}, {"name": "", "price": "€ 1"}],
+            "onbekend": "weg",
+        }})
+        self.assertEqual(response.status_code, 200, response.text)
+        profile = response.json()["profile"]
+        self.assertEqual(profile["company_type"], "SEO-bureau")
+        self.assertEqual(profile["usps"], ["Snel", "Eerlijk"])
+        self.assertEqual(profile["services"], [{"name": "SEO-traject", "price": "vanaf € 750 per maand"}])
+        self.assertNotIn("onbekend", profile)
+        self.assertEqual(set(profile), set(CustomerProfile.model_fields))
+
+        detail = self.client.get(self.detail_url).json()
+        self.assertEqual(detail["profile"], profile)
+        with self.Session() as db:
+            self.assertEqual(db.get(CustomerWebsite, self.customer_id).profile["usps"], ["Snel", "Eerlijk"])
+
+    def test_patch_without_profile_leaves_it_and_null_clears_it(self):
+        self.client.patch(self.detail_url, json={"profile": {"team": "Jan"}})
+        body = self.client.patch(self.detail_url, json={"tone_of_voice": "Warm."}).json()
+        self.assertEqual((body["tone_of_voice"], body["profile"]["team"]), ("Warm.", "Jan"))
+        # Een nieuw object vervangt het hele profiel.
+        body = self.client.patch(self.detail_url, json={"profile": {"usps": ["Snel"]}}).json()
+        self.assertEqual((body["profile"]["team"], body["profile"]["usps"]), ("", ["Snel"]))
+
+        body = self.client.patch(self.detail_url, json={"profile": None}).json()
+        self.assertEqual(body["profile"], CustomerProfile().model_dump())
+        with self.Session() as db:
+            self.assertIsNone(db.get(CustomerWebsite, self.customer_id).profile)
+
+    def test_wrong_type_is_422(self):
+        response = self.client.patch(self.detail_url, json={"profile": {"usps": 5}})
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_with_profile_in_one_step(self):
+        response = self.client.post("/api/customers", json={
+            "name": "Nieuw", "base_url": "https://nieuw-met-profiel.nl", "form_of_address": "je",
+            "profile": {"company_type": " Bakkerij ", "usps": ["Vers", "vers", ""],
+                        "services": [{"name": "Taart", "price": "vanaf € 25"}]},
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["profile"]["company_type"], "Bakkerij")
+        self.assertEqual(body["profile"]["usps"], ["Vers"])
+        self.assertEqual(body["profile"]["services"], [{"name": "Taart", "price": "vanaf € 25"}])
+        detail = self.client.get(f"/api/customers/{body['id']}").json()
+        self.assertEqual(detail["profile"], body["profile"])
+
+    def test_create_without_or_with_empty_profile_stores_none(self):
+        for index, extra in enumerate(({}, {"profile": {}}, {"profile": {"usps": [" "]}})):
+            response = self.client.post("/api/customers", json={
+                "name": f"Leeg {index}", "base_url": f"https://leeg-{index}.nl", **extra,
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual(body["profile"], CustomerProfile().model_dump())
+            with self.Session() as db:
+                self.assertIsNone(db.get(CustomerWebsite, body["id"]).profile)
+
+    def test_list_has_no_profile(self):
+        self.client.patch(self.detail_url, json={"profile": {"team": "Jan"}})
+        websites = self.client.get("/api/customers").json()["websites"]
+        self.assertTrue(websites)
+        self.assertTrue(all("profile" not in w for w in websites))
 
 
 if __name__ == "__main__":

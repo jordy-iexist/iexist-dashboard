@@ -300,6 +300,9 @@ class CustomerWebsite(Base):
     # Schrijfstijl voor teksten (content brief): vrije tekst en de aanspreekvorm "je" | "u".
     tone_of_voice: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     form_of_address: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    # Klantprofiel (bedrijf, diensten en prijzen, USP's, bewijs, regels voor AI-content). De vorm
+    # en het opschonen staan in features/customers/profile.py; lezen altijd via `parse_profile`.
+    profile: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     category_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey("customer_categories.id", ondelete="SET NULL"),

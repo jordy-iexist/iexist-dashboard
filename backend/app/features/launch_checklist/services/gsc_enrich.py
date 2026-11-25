@@ -101,10 +101,13 @@ def _span(start: date, end: date) -> dict[str, Any]:
     return {"start": start.isoformat(), "end": end.isoformat(), "days": (end - start).days + 1}
 
 
-def periods(today: date | None = None) -> dict[str, tuple[date, date]]:
-    """Meetperiode, de even lange periode ervoor en dezelfde periode vorig jaar."""
+def periods(today: date | None = None, days: int | None = None) -> dict[str, tuple[date, date]]:
+    """Meetperiode, de even lange periode ervoor en dezelfde periode vorig jaar.
+
+    Zonder `days` is de meetperiode GSC_PERIOD_DAYS lang (de kwartaalscan).
+    """
     today = today or datetime.now(timezone.utc).date()
-    days = settings.gsc_period_days
+    days = days or settings.gsc_period_days
     end = today - timedelta(days=settings.gsc_data_lag_days)
     start = end - timedelta(days=days - 1)
     prev_end = start - timedelta(days=1)

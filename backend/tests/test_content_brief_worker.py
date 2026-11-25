@@ -204,6 +204,37 @@ class FullRunTest(_Base):
         checks = {c["key"]: c for c in row.concept["checks"]}
         self.assertEqual(checks["topics"]["label"], "Onderwerpen 1/1")
 
+    def test_customer_profile_reaches_both_prompts(self):
+        with self.Session() as db:
+            db.get(CustomerWebsite, self.customer_id).profile = {
+                "usps": ["Maandelijks opzegbaar", "maandelijks opzegbaar"],
+                "services": [{"name": "SEO-traject", "price": "vanaf € 750 per maand"}],
+                "avoid_words": ["ontzorgen"], "example_urls": ["https://voorbeeld.nl/"], "onbekend": True,
+            }
+            db.commit()
+        brief_id = self.add_brief()
+        self.replies(AnthropicResult(parsed=brief_out(), usage=USAGE, model="claude-sonnet-5-5"),
+                     AnthropicResult(parsed=concept_out(), usage=USAGE, model="claude-sonnet-5-5"))
+        worker.run_content_brief_task.run(brief_id)
+        self.assertEqual(self.get(brief_id).status, "completed")
+        for call in self.prompts:
+            self.assertEqual(call["prompt"].count("- Maandelijks opzegbaar"), 1)
+            self.assertIn("- SEO-traject: vanaf € 750 per maand", call["prompt"])
+            self.assertIn("Gebruik deze woorden nooit: ontzorgen.", call["system"])
+            self.assertIn("Noem alleen bedragen", call["system"])
+            self.assertNotIn("voorbeeld.nl", call["prompt"] + call["system"])
+
+    def test_broken_profile_is_ignored(self):
+        with self.Session() as db:
+            db.get(CustomerWebsite, self.customer_id).profile = ["geen", "object"]
+            db.commit()
+        brief_id = self.add_brief()
+        self.replies(AnthropicResult(parsed=brief_out(), usage=USAGE, model="claude-sonnet-5-5"),
+                     AnthropicResult(parsed=concept_out(), usage=USAGE, model="claude-sonnet-5-5"))
+        worker.run_content_brief_task.run(brief_id)
+        self.assertEqual(self.get(brief_id).status, "completed")
+        self.assertNotIn("USP's", self.prompts[0]["prompt"])
+
     def test_not_pending_does_nothing(self):
         brief_id = self.add_brief(status="completed")
         parse = self.replies()

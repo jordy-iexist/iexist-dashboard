@@ -94,3 +94,109 @@ class CustomerQuickWinsResponse(BaseModel):
     # True als er `limit` rijen zijn (er kunnen er meer zijn).
     capped: bool = False
     rows: list[CustomerQuickWinRow] = Field(default_factory=list)
+
+
+# --- Search Console-inzichten -------------------------------------------------------------
+
+class SearchConsolePeriod(BaseModel):
+    start: str
+    end: str
+    days: int
+
+
+class SearchConsoleTotals(BaseModel):
+    clicks: int
+    impressions: int
+    # 0–1
+    ctr: float
+    # Leeg als er geen vertoningen waren.
+    position: float | None = None
+
+
+class SearchConsoleOpportunityRow(BaseModel):
+    query: str
+    page: str
+    impressions: int
+    clicks: int
+    ctr: float
+    expected_ctr: float
+    position: float
+    # Vertoningen × verwachte CTR − klikken.
+    missed_clicks: int
+    # Andere pagina's die op deze zoekterm vertoond werden.
+    other_pages: int
+    advice_code: Literal["improve_snippet_top", "improve_snippet", "improve_position", "check_intent"]
+    advice: str
+
+
+class SearchConsoleOpportunities(BaseModel):
+    state: Literal["ok", "unavailable"]
+    message: str | None = None
+    rows: list[SearchConsoleOpportunityRow] = Field(default_factory=list)
+    # Aantal kansen vóór het afkappen op 100.
+    total: int = 0
+    # Som van de gemiste klikken omgerekend naar 30 dagen, afgerond; leeg onder 5.
+    potential_clicks_per_month: int | None = None
+    # Merkzoektermen die aan de regels voldeden maar zijn weggelaten.
+    brand_excluded: int = 0
+    # True als Google meer rijen had dan opgehaald (de kansen kunnen onvolledig zijn).
+    truncated: bool = False
+    min_impressions: int
+
+
+class SearchConsoleUntrackedRow(BaseModel):
+    query: str
+    impressions: int
+    clicks: int
+    position: float
+
+
+class SearchConsoleUntracked(BaseModel):
+    state: Literal["ok", "prt_not_tracked", "prt_not_configured", "prt_error", "unavailable"]
+    message: str | None = None
+    rows: list[SearchConsoleUntrackedRow] = Field(default_factory=list)
+    total: int = 0
+    # Aantal verschillende zoekwoorden in ProRankTracker (alleen bij state ok).
+    tracked_keywords: int = 0
+
+
+class SearchConsoleDecliningRow(BaseModel):
+    page: str
+    clicks: int
+    clicks_prev: int
+    # Negatief: klikken nu − klikken vorige periode.
+    delta: int
+    # In procenten, negatief (bijv. -35.2).
+    pct: float
+    impressions: int
+    impressions_prev: int
+    ctr: float
+    ctr_prev: float | None = None
+    position: float | None = None
+    position_prev: float | None = None
+    cause_code: Literal["no_impressions", "position_drop", "less_demand", "lower_ctr"]
+    cause: str
+
+
+class SearchConsoleDeclining(BaseModel):
+    state: Literal["ok", "unavailable"]
+    message: str | None = None
+    rows: list[SearchConsoleDecliningRow] = Field(default_factory=list)
+    total: int = 0
+
+
+class CustomerSearchConsoleInsightsResponse(BaseModel):
+    state: Literal["ok", "not_configured", "token_expired", "no_property", "property_inaccessible", "error"]
+    message: str | None = None
+    days: int
+    property: str | None = None
+    property_source: Literal["manual", "auto"] | None = None
+    fetched_at: str | None = None
+    period: SearchConsolePeriod
+    previous: SearchConsolePeriod
+    # Alleen bij state ok; `totals_previous` is ook leeg als de vorige periode niet opgehaald kon worden.
+    totals: SearchConsoleTotals | None = None
+    totals_previous: SearchConsoleTotals | None = None
+    opportunities: SearchConsoleOpportunities | None = None
+    untracked: SearchConsoleUntracked | None = None
+    declining: SearchConsoleDeclining | None = None

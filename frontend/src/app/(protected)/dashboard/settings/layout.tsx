@@ -1,18 +1,9 @@
-import { SettingsNav } from "@/components/settings/SettingsNav"
-
+// Het menu van Instellingen staat in het paneel naast de sidebar (app-sidebar.tsx);
+// op smal scherm dient het overzicht (page.tsx) als menu.
 export default function SettingsLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return (
-    <div className="flex gap-10">
-      <aside className="hidden w-52 shrink-0 md:block">
-        <div className="sticky top-20">
-          <SettingsNav />
-        </div>
-      </aside>
-      <div className="min-w-0 max-w-4xl flex-1 rounded-xl border bg-card p-6">{children}</div>
-    </div>
-  )
+  return <div className="min-w-0 max-w-4xl rounded-xl border bg-card p-6">{children}</div>
 }

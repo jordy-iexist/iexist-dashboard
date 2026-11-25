@@ -19,10 +19,45 @@ export type CustomerWebsiteItem = {
   updated_at: string
 }
 
+/** Dienst met prijs uit het klantprofiel; Claude noemt alleen deze bedragen. */
+export type CustomerService = {
+  name: string
+  price: string
+}
+
+/**
+ * Klantprofiel: feiten, bewijs en schrijfregels die met de content brief en de
+ * concepttekst aan Claude worden meegegeven. Lege strings en lege lijsten = niet ingevuld.
+ * Naam, website, toon en aanspreekvorm staan niet hierin maar op de klant zelf.
+ */
+export type CustomerProfile = {
+  company_type: string
+  service_area: string
+  target_audience: string
+  specialties: string
+  services: CustomerService[]
+  /** Waar de prijzen vandaan komen, bijv. "prijslijst 2026". */
+  services_source: string
+  usps: string[]
+  reviews: string
+  certifications: string
+  team: string
+  /** Cases die met toestemming van de klant genoemd mogen worden. */
+  cases: string[]
+  language_level: string
+  fixed_cta: string
+  /** Alleen bewaard en getoond; gaan niet naar Claude. */
+  example_urls: string[]
+  avoid_words: string[]
+  content_rules: string[]
+}
+
 export type CustomerWebsiteDetail = CustomerWebsiteItem & {
   placed_this_month: number
   links_placed_this_month: number
   pending_blogs: number | null
+  /** Ontbreekt bij een oudere backend; behandel dat als een leeg profiel. */
+  profile?: CustomerProfile | null
 }
 
 export type CustomerWebsiteListItem = CustomerWebsiteItem & {

@@ -1,13 +1,36 @@
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
+import { Building2, ChevronRight } from "lucide-react"
 
-import { settingsNavGroups } from "@/components/settings/settings-nav-items"
+import {
+  settingsNavGroups,
+  type SettingsNavGroup,
+} from "@/components/settings/settings-nav-items"
+import { customerHref } from "@/lib/active-customer"
+import { readActiveCustomerCookie } from "@/lib/active-customer.server"
 
 export const metadata = {
   title: "Instellingen",
 }
 
-export default function SettingsPage() {
+// Overzicht van alle instellingen. Op smal scherm is het paneel naast de
+// sidebar verborgen; dan is dit het menu.
+export default async function SettingsPage() {
+  const customerId = await readActiveCustomerCookie()
+
+  // Klantprofiel hoort bij de gekozen klant; zonder klant eerst naar de lijst.
+  const customerGroup: SettingsNavGroup = {
+    title: "Klant",
+    items: [
+      {
+        title: "Klantprofiel",
+        description:
+          "Bedrijf, diensten, tone of voice en regels voor AI-content van de gekozen klant",
+        href: customerId ? customerHref("profiel", customerId) : "/dashboard/klanten",
+        icon: Building2,
+      },
+    ],
+  }
+
   return (
     <div className="space-y-8">
       <div className="space-y-1">
@@ -17,7 +40,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {settingsNavGroups.map((group) => (
+      {[...settingsNavGroups, customerGroup].map((group) => (
         <div key={group.title} className="space-y-2">
           <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {group.title}

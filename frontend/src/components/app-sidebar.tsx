@@ -28,6 +28,8 @@ import {
   CalendarRange,
   Activity,
   ClipboardCheck,
+  MousePointerClick,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -55,6 +57,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { type AuthUser } from "@/lib/auth-types";
+import { cn } from "@/lib/utils";
 import {
   customerHref,
   customerIdFromLocation,
@@ -75,6 +78,7 @@ import {
   seoGeoSectionHref,
   type SeoGeoSlug,
 } from "@/lib/seo-geo-sections";
+import { settingsNavGroups } from "@/components/settings/settings-nav-items";
 
 const menuItems = [
   {
@@ -93,6 +97,9 @@ const BLOGS_URL = "/dashboard/blogs";
 const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
 // Past op geen enkel pad: het menu-item "Content briefs" is dan niet actief.
 const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
+const SETTINGS_URL = "/dashboard/settings";
+// Past op geen enkel pad: zonder actieve klant is "Klantprofiel" nooit actief.
+const CUSTOMER_PROFILE_INACTIVE_URL = "#klantprofiel";
 
 // Iconen van de subpagina's van de SEO/GEO-scan (derde niveau in het menu).
 // Radar (Monitor in de scan zelf) is hier al het icoon van de groep Vindbaarheid.
@@ -119,6 +126,8 @@ type NavLeafItem = {
   /** Adres waar de link heen gaat (kan de actieve klant bevatten). */
   href: string;
   icon: LucideIcon;
+  /** Kopje in het paneel; verschijnt boven het eerste item van elk kopje. */
+  heading?: string;
 };
 
 type NavGroupItem = NavLeafItem & {
@@ -263,8 +272,19 @@ function SubNavPanel({
         </button>
       </div>
       <SidebarMenu className="mt-2">
-        {children.map((child) => (
+        {children.map((child, index) => (
           <SidebarMenuItem key={child.url}>
+            {child.heading &&
+              child.heading !== children[index - 1]?.heading && (
+                <SidebarGroupLabel
+                  className={cn(
+                    "text-xs text-white/50",
+                    index > 0 && "mt-3",
+                  )}
+                >
+                  {child.heading}
+                </SidebarGroupLabel>
+              )}
             <SidebarMenuButton
               asChild
               isActive={child.url === activeUrl}
@@ -373,16 +393,23 @@ export function AppSidebar({
   // De concurrentieanalyse staat onder de klantpagina, maar heeft een eigen menu-item.
   const pathSection = sectionFromPathname(pathname);
   const onAnalyses = pathSection === "analyses";
+  // Search Console-inzichten: ook onder de klantpagina, met een eigen menu-item.
+  const onSearchConsole = pathSection === "searchConsole";
   // Content briefs staan ook onder de klantpagina (het overzicht, en de brief zelf onder
   // een analyse), maar horen in het menu bij Content.
   const onContentBriefs = pathSection === "contentBriefs";
+  // Het klantprofiel staat onder de klantpagina, maar hoort in het menu bij Instellingen.
+  const onProfile = pathSection === "profiel";
+  const onSettings = pathname.startsWith(SETTINGS_URL) || onProfile;
   const isPathActive = (url: string): boolean => {
     if (url === "/dashboard") {
       return (
         pathname === "/dashboard" ||
         (customerHomePath !== null &&
           !onAnalyses &&
+          !onSearchConsole &&
           !onContentBriefs &&
+          !onProfile &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
       );
@@ -477,11 +504,43 @@ export function AppSidebar({
     },
   ];
 
+  // Instellingen (onderin de sidebar) opent hetzelfde paneel: eerst de pagina's
+  // van de medewerker, daarna het profiel van de gekozen klant.
+  const settingsItem: NavGroupItem = {
+    title: "Instellingen",
+    url: SETTINGS_URL,
+    href: SETTINGS_URL,
+    icon: Settings,
+    children: [
+      ...settingsNavGroups.flatMap((group) =>
+        group.items.map((item) => ({
+          title: item.title,
+          url: item.href,
+          href: item.href,
+          icon: item.icon,
+          heading: group.title,
+        })),
+      ),
+      {
+        title: "Klantprofiel",
+        // Zonder klant gaat de link naar de klantenlijst en is het item nooit actief.
+        url: activeCustomerId
+          ? customerHref("profiel", activeCustomerId)
+          : CUSTOMER_PROFILE_INACTIVE_URL,
+        href: hrefFor("profiel", CUSTOMERS_URL),
+        icon: Building2,
+        heading: "Klant",
+      },
+    ],
+  };
+
   // Staat je op een pagina van een item met een derde niveau, dan komt dat
   // niveau in een eigen paneel rechts naast de sidebar.
-  const subNavItem = navGroups
-    .flatMap((group) => group.items)
-    .find((item) => item.children && pathname.startsWith(item.url));
+  const subNavItem = onSettings
+    ? settingsItem
+    : navGroups
+        .flatMap((group) => group.items)
+        .find((item) => item.children && pathname.startsWith(item.url));
   const subNavUrl = subNavItem?.url ?? null;
 
   // Het paneel kan dicht met het pijltje. Het gaat weer open als je in het
@@ -565,6 +624,20 @@ export function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={onSearchConsole}
+                    tooltip="Search Console"
+                    className={itemClass}
+                  >
+                    <Link href={hrefFor("searchConsole", CUSTOMERS_URL)}>
+                      <MousePointerClick />
+                      <span>Search Console</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
                 {navGroups.map((group) => (
                   <NavGroup
                     key={group.title}
@@ -583,13 +656,18 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                isActive={pathname.startsWith("/dashboard/settings")}
+                isActive={onSettings}
                 tooltip="Instellingen"
                 className={itemClass}
               >
-                <Link href="/dashboard/settings">
+                {/* Opent het paneel (weer); op mobiel is het overzicht het menu. */}
+                <Link
+                  href={SETTINGS_URL}
+                  onClick={() => setClosedSubNavUrl(null)}
+                >
                   <Settings />
                   <span>Instellingen</span>
+                  <ChevronRight className="ml-auto group-data-[collapsible=icon]:hidden" />
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

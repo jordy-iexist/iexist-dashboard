@@ -127,6 +127,7 @@ from app.services.bing_webmaster.client import BingWebmasterServiceError
 from app.services.bing_webmaster.connection import BingSession
 from app.services.search_console import client as gsc_client
 from app.services.search_console.client import SearchConsoleServiceError
+from app.services.search_console.sites import cached_sites
 from app.services.proranktracker.client import ProRankTrackerServiceError
 from app.features.launch_checklist.services.content_checklist import (
     ITEMS as CONTENT_ITEMS,
@@ -910,21 +911,6 @@ def push_checklist_to_monday(
 
 # --- Search Console (fase 4) ---------------------------------------------------
 
-_GSC_SITES_TTL_SECONDS = 600.0
-# (tijdstip, properties) van de laatste sites.list; het account is voor alle klanten hetzelfde.
-_gsc_sites_cache: tuple[float, list[dict[str, str]]] | None = None
-
-
-def _gsc_sites(*, refresh: bool = False) -> list[dict[str, str]]:
-    global _gsc_sites_cache
-    cached = _gsc_sites_cache
-    if not refresh and cached is not None and time.monotonic() - cached[0] < _GSC_SITES_TTL_SECONDS:
-        return cached[1]
-    sites = gsc_client.list_sites()
-    _gsc_sites_cache = (time.monotonic(), sites)
-    return sites
-
-
 def _search_console_settings(customer: CustomerWebsite, *, refresh: bool = False) -> SearchConsoleSettingsResponse:
     response = SearchConsoleSettingsResponse(configured=gsc_client.is_configured())
     manual = (customer.gsc_property or "").strip() or None
@@ -933,7 +919,7 @@ def _search_console_settings(customer: CustomerWebsite, *, refresh: bool = False
     if not response.configured:
         return response
     try:
-        sites = _gsc_sites(refresh=refresh)
+        sites = cached_sites(refresh=refresh)
     except SearchConsoleServiceError as exc:
         response.error = str(exc)
         return response
@@ -971,7 +957,7 @@ def set_search_console_property(
     chosen = (payload.property or "").strip() or None
     if chosen is not None:
         try:
-            sites = _gsc_sites(refresh=True)
+            sites = cached_sites(refresh=True)
         except SearchConsoleServiceError as exc:
             status = 400 if exc.code == "not_configured" else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc

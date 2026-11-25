@@ -19,9 +19,12 @@ export type SettingsNavGroup = {
   items: SettingsNavItem[]
 }
 
+// Enige bron voor het paneel Instellingen in de sidebar én het overzicht op
+// /dashboard/settings. Klantprofiel hoort bij de gekozen klant en wordt daar
+// apart toegevoegd.
 export const settingsNavGroups: SettingsNavGroup[] = [
   {
-    title: "Account",
+    title: "Mijn account",
     items: [
       {
         title: "Profiel",
@@ -35,22 +38,12 @@ export const settingsNavGroups: SettingsNavGroup[] = [
         href: "/dashboard/settings/openai",
         icon: KeyRound,
       },
-    ],
-  },
-  {
-    title: "Integraties",
-    items: [
       {
         title: "WordPress sites",
         description: "Sites waar blogs naartoe gepubliceerd worden",
         href: "/dashboard/settings/wordpress",
         icon: Globe,
       },
-    ],
-  },
-  {
-    title: "Content generatie",
-    items: [
       {
         title: "Blogs",
         description: "Prompt, model en afbeeldingsgeneratie voor blogs",

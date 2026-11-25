@@ -54,6 +54,7 @@ from app.features.competitor_analysis.services.brief_agent import (
     write_concept,
 )
 from app.features.competitor_analysis.services.insights import NOT_CONFIGURED_MESSAGE, add_usage
+from app.features.customers.profile import parse_profile
 from app.features.customers.rankings import host_of
 from app.services.anthropic.client import AnthropicServiceError
 from app.worker.celery_app import celery_app
@@ -146,6 +147,7 @@ def _load(brief_id: str) -> tuple[BriefInput, Brief | None, Concept | None, AiUs
                 seo_goals=customer.seo_goals if customer else None,
                 tone_of_voice=customer.tone_of_voice if customer else None,
                 form_of_address=customer.form_of_address if customer else None,
+                profile=parse_profile(customer.profile if customer else None),
             ),
             pages=pages,
             target_url=keyword.target_url,

@@ -1,31 +1,11 @@
-import { KlantHero } from "@/components/klanten/KlantHero"
-import { KlantProfielForm } from "@/components/klanten/KlantProfielForm"
-import { fetchCustomerDetail } from "@/lib/customer-api"
-
-export const metadata = {
-  title: "Klant bewerken",
-}
+import { redirect } from "next/navigation"
 
 type KlantBewerkenPageProps = {
   params: Promise<{ customerId: string }>
 }
 
-export default async function KlantBewerkenPage({
-  params,
-}: KlantBewerkenPageProps) {
+// "Klant bewerken" is opgegaan in het klantprofiel; oude links sturen daarheen door.
+export default async function KlantBewerkenPage({ params }: KlantBewerkenPageProps) {
   const { customerId } = await params
-  const customer = await fetchCustomerDetail(customerId)
-
-  return (
-    <div className="mx-auto w-full max-w-5xl space-y-8">
-      <KlantHero
-        backHref={`/dashboard/klanten/${customer.id}`}
-        backLabel="Terug naar klant"
-        eyebrow={customer.name}
-        title="Klant bewerken"
-      />
-
-      <KlantProfielForm customer={customer} />
-    </div>
-  )
+  redirect(`/dashboard/klanten/${encodeURIComponent(customerId)}/profiel`)
 }

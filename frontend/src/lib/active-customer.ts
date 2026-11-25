@@ -11,8 +11,10 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
 export type CustomerSection =
   | "home"
+  | "profiel"
   | "analyses"
   | "contentBriefs"
+  | "searchConsole"
   | "seoGeo"
   | "oplevering"
   | "analytics"
@@ -82,10 +84,14 @@ export function customerHref(
   switch (section) {
     case "home":
       return `/dashboard/klanten/${id}`
+    case "profiel":
+      return `/dashboard/klanten/${id}/profiel`
     case "analyses":
       return `/dashboard/klanten/${id}/analyses`
     case "contentBriefs":
       return `/dashboard/klanten/${id}/content-briefs`
+    case "searchConsole":
+      return `/dashboard/klanten/${id}/search-console`
     case "seoGeo":
       return `/dashboard/livegang/seo-geo/${id}`
     case "oplevering":
@@ -109,6 +115,10 @@ export function sectionFromPathname(pathname: string): CustomerSection | null {
     // Content briefs: het overzicht, en de brief zelf (die onder een analyse hangt).
     if (second === "content-briefs") return "contentBriefs"
     if (second === "analyses" && fourth === "brief") return "contentBriefs"
+    // Search Console-inzichten; klant wisselen blijft op dit scherm.
+    if (second === "search-console") return "searchConsole"
+    // Klantprofiel (het oude adres /bewerken stuurt door); klant wisselen blijft op het profiel.
+    if (second === "profiel" || second === "bewerken") return "profiel"
     // Concurrentieanalyse (lijst, wizard en resultaat); klant wisselen gaat naar de lijst.
     return second === "analyses" ? "analyses" : "home"
   }
