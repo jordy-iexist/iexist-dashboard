@@ -19,6 +19,7 @@ from app.features.launch_checklist.worker.sitemap_monitor import (
     run_sitemap_monitor_dispatch_task,
     run_sitemap_monitor_task,
 )
+from app.features.keywords.worker.refresh import refresh_keyword_competitors_task
 from app.features.landing_pages.worker.landing_page_generation import generate_landing_page_task
 from app.features.monthly_report.worker.report import run_monthly_report_task
 from app.features.seo_meta.worker.seo_meta import run_website_meta_optimization_task
@@ -35,6 +36,7 @@ __all__ = [
     "generate_blog_task",
     "generate_landing_page_task",
     "publish_blog_to_wordpress_task",
+    "refresh_keyword_competitors_task",
     "refresh_rank_snapshots_task",
     "run_competitor_analysis_task",
     "run_content_analysis_task",

@@ -367,6 +367,172 @@ class AhrefsClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "forbidden")
         self.assertIn("insufficient units", str(ctx.exception))
 
+    def test_serp_overview_custom_fields(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"positions": []})
+
+        ahrefs.serp_overview("seo", fields=("position", "url", "type", "title"), client=_client(handler))
+        self.assertEqual(seen["params"]["select"], "position,url,type,title")
+
+    def test_organic_competitors_orders_by_common_keywords(self):
+        seen = {}
+        row = {"competitor_domain": "moz.com", "domain_rating": 91.0, "keywords_common": 3000,
+               "keywords_competitor": 90000, "keywords_target": 40000, "share": 8.4}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"competitors": [row]},
+                                  headers={"x-api-units-cost-total-actual": "120"})
+
+        result = ahrefs.organic_competitors(
+            "klant.nl", country="nl", on_date=date(2026, 11, 25), client=_client(handler)
+        )
+
+        params = seen["params"]
+        self.assertEqual((seen["method"], seen["path"]), ("GET", "/v3/site-explorer/organic-competitors"))
+        self.assertEqual(params["target"], "klant.nl")
+        self.assertEqual(params["mode"], "subdomains")
+        self.assertEqual(params["date"], "2026-11-25")
+        self.assertEqual(params["country"], "nl")
+        self.assertEqual(params["order_by"], "keywords_common:desc")
+        self.assertEqual(params["limit"], "20")
+        self.assertEqual(
+            params["select"],
+            "competitor_domain,domain_rating,keywords_common,keywords_competitor,keywords_target,share",
+        )
+        self.assertNotIn("where", params)
+        self.assertEqual(result.rows, [row])
+        self.assertEqual(result.units, 120)
+
+    def test_organic_competitors_with_domains_filters_without_order(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"competitors": []}, headers={"x-api-units-cost-total-actual": "50"})
+
+        result = ahrefs.organic_competitors(
+            "klant.nl", domains=["moz.com", " semrush.com ", ""], client=_client(handler)
+        )
+        params = seen["params"]
+        self.assertNotIn("order_by", params)
+        self.assertNotIn("country", params)
+        self.assertEqual(params["limit"], "2")
+        self.assertEqual(json.loads(params["where"]), {"or": [
+            {"field": "competitor_domain", "is": ["eq", "moz.com"]},
+            {"field": "competitor_domain", "is": ["eq", "semrush.com"]},
+        ]})
+        self.assertEqual(result.units, 50)
+
+    def test_domains_metrics_posts_subdomains_and_maps_targets(self):
+        bodies = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            bodies.append(body)
+            rows = [
+                {"index": i, "url": f"{t['url']}/", "domain_rating": 50.0, "org_keywords": 100 + i,
+                 "org_keywords_1_3": 10, "org_keywords_4_10": 20, "org_traffic": 1000}
+                for i, t in reversed(list(enumerate(body["targets"])))
+            ]
+            return httpx.Response(200, json={"targets": rows}, headers={"x-api-units-cost-total-actual": "84"})
+
+        domains = ["klant.nl", "a.nl"] + [f"d{i}.nl" for i in range(100)]
+        result = ahrefs.domains_metrics(domains, country="nl", client=_client(handler))
+
+        self.assertEqual([len(b["targets"]) for b in bodies], [100, 2])
+        self.assertEqual(bodies[0]["select"], list(ahrefs.DOMAIN_METRICS_FIELDS))
+        self.assertEqual(bodies[0]["country"], "nl")
+        self.assertEqual(bodies[0]["targets"][0], {"url": "klant.nl", "mode": "subdomains", "protocol": "both"})
+        by_target = {row["target"]: row for row in result.rows}
+        self.assertEqual(by_target["klant.nl"]["org_keywords"], 100)
+        self.assertEqual(by_target["a.nl"]["org_keywords"], 101)
+        self.assertEqual(by_target["d99.nl"]["url"], "d99.nl/")
+        self.assertEqual(len(result.rows), 102)
+        self.assertEqual(result.units, 168)
+
+    def test_domains_metrics_without_domains_skips_request(self):
+        def handler(request):
+            raise AssertionError("geen request verwacht")
+
+        result = ahrefs.domains_metrics([" "], client=_client(handler))
+        self.assertEqual((result.rows, result.units), ([], 0))
+
+    def test_metrics_history_monthly(self):
+        seen = {}
+        rows = [{"date": "2026-09-01T00:00:00Z", "org_traffic": 18000},
+                {"date": "2026-10-01T00:00:00Z", "org_traffic": 20481}]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"metrics": rows}, headers={"x-api-units-cost-total-actual": "50"})
+
+        result = ahrefs.metrics_history(
+            "klant.nl", country="nl", date_from=date(2026, 9, 1), client=_client(handler)
+        )
+        params = seen["params"]
+        self.assertEqual(seen["path"], "/v3/site-explorer/metrics-history")
+        self.assertEqual(params["target"], "klant.nl")
+        self.assertEqual(params["mode"], "subdomains")
+        self.assertEqual(params["protocol"], "both")
+        self.assertEqual(params["country"], "nl")
+        self.assertEqual(params["date_from"], "2026-09-01")
+        self.assertEqual(params["history_grouping"], "monthly")
+        self.assertEqual(params["select"], "date,org_traffic")
+        self.assertEqual(result.rows, rows)
+        self.assertEqual(result.units, 50)
+
+    def test_top10_keywords_without_order_by(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json={"keywords": [{"keyword": "seo", "best_position": 3}]},
+                headers={"x-api-units-cost-total-actual": "300"},
+            )
+
+        result = ahrefs.top10_keywords("klant.nl", country="nl", limit=150, client=_client(handler))
+
+        params = seen["params"]
+        self.assertEqual(seen["path"], "/v3/site-explorer/organic-keywords")
+        self.assertNotIn("order_by", params)
+        self.assertEqual(params["select"], "keyword,best_position")
+        self.assertEqual(params["limit"], "150")
+        self.assertEqual(params["country"], "nl")
+        self.assertEqual(params["mode"], "subdomains")
+        self.assertIn("date", params)
+        self.assertEqual(json.loads(params["where"]), {"and": [{"field": "best_position", "is": ["lte", 10]}]})
+        self.assertEqual(result.rows, [{"keyword": "seo", "best_position": 3}])
+        self.assertEqual(result.units, 300)
+
+    def test_top10_keywords_with_keyword_list(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"keywords": []})
+
+        ahrefs.top10_keywords(
+            "klant.nl", limit=3, keywords=["seo bureau", 'zoek "snel", nu', " "], client=_client(handler)
+        )
+        params = seen["params"]
+        self.assertNotIn("order_by", params)
+        self.assertEqual(json.loads(params["where"]), {"and": [
+            {"field": "best_position", "is": ["lte", 10]},
+            {"or": [
+                {"field": "keyword", "is": ["eq", "seo bureau"]},
+                {"field": "keyword", "is": ["eq", 'zoek "snel", nu']},
+            ]},
+        ]})
+
     def test_organic_rows_skips_features_and_duplicates(self):
         result = ahrefs.AhrefsResult(rows=SERP_PAYLOAD["positions"])
 

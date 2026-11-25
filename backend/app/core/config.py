@@ -370,6 +370,18 @@ class Settings(BaseSettings):
     ahrefs_request_timeout_seconds: float = Field(
         default=30.0, validation_alias="AHREFS_REQUEST_TIMEOUT_SECONDS"
     )
+    # Zoekwoorden › Concurrenten: hoe lang een momentopname geldig blijft (TTL 0 = alleen
+    # verversen via de knop), het unit-plafond per verversing en het aantal top 10-zoekwoorden
+    # dat per domein wordt opgehaald (2 units per rij).
+    ahrefs_competitors_ttl_days: int = Field(
+        default=30, ge=0, le=365, validation_alias="AHREFS_COMPETITORS_TTL_DAYS"
+    )
+    ahrefs_competitors_max_units: int = Field(
+        default=5000, ge=500, le=100_000, validation_alias="AHREFS_COMPETITORS_MAX_UNITS"
+    )
+    ahrefs_competitors_keywords_per_domain: int = Field(
+        default=150, ge=10, le=1000, validation_alias="AHREFS_COMPETITORS_KEYWORDS_PER_DOMAIN"
+    )
 
     # Claude (Anthropic) voor de concurrentieanalyse: één bureausleutel. Zonder sleutel loopt
     # de analyse door en krijgen de AI-kaarten "niet ingesteld"; daarom niet verplicht.
@@ -384,6 +396,10 @@ class Settings(BaseSettings):
     # Model van het maandrapport per klant (eigen agent, één aanroep per rapport).
     monthly_report_model: str = Field(
         default="claude-sonnet-5-5", validation_alias="MONTHLY_REPORT_MODEL"
+    )
+    # Model van Zoekwoorden › Concurrenten (domeinen indelen, zoekwoorden indelen, samenvatting).
+    competitor_overview_model: str = Field(
+        default="claude-sonnet-5-5", validation_alias="COMPETITOR_OVERVIEW_MODEL"
     )
     # Grens per aanroep (de aanroepen streamen niet: dit is de hele generatietijd).
     anthropic_timeout_seconds: float = Field(

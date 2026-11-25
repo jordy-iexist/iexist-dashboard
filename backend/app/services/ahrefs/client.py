@@ -2,7 +2,8 @@
 
 Elke functie geeft naast de data ook het aantal verbruikte API-units terug
 (header `x-api-units-cost-total-actual`), zodat een scan zijn verbruik kan tonen.
-Fouten worden vertaald naar `AhrefsServiceError` met een `code`.
+Fouten worden vertaald naar `AhrefsServiceError` met een `code`. Elke aanvraag kost
+minimaal 50 units; de kosten per rij staan per rapport bij de veldlijsten hieronder.
 """
 from __future__ import annotations
 
@@ -72,6 +73,30 @@ SERP_EXTRA_POSITIONS = 5
 KEYWORDS_OVERVIEW_FIELDS = ("keyword", "volume", "difficulty", "intents")
 URL_METRICS_FIELDS = ("index", "url", "domain_rating", "url_rating", "refdomains")
 BATCH_MAX_TARGETS = 100
+
+# Zoekwoorden › Concurrenten (gemeten 25-11-2026 op het testdomein ahrefs.com, land nl).
+# Elke aanvraag kost minimaal 50 units.
+# organic-competitors: rijen onder `competitors`, 6 units per rij met deze zes velden;
+#   `share` is een percentage als float (bv. 8.4). Een `where` op `competitor_domain` werkt.
+# batch-analysis met mode subdomains: rijen onder `targets`, met `index` en `url` zonder
+#   protocol ("ahrefs.com/"); 14 units per rij (org_traffic is het dure veld).
+# metrics-history: rijen onder `metrics`, oplopend op datum ("2026-10-01T00:00:00Z"),
+#   11 units per rij.
+# organic-keywords met alleen keyword + best_position en ZONDER order_by: 2 units per rij;
+#   de standaardvolgorde is dan op verkeer aflopend. Elke order_by (ook op een niet
+#   geselecteerd veld als volume of sum_traffic) maakt het 12 per rij. Een `where` met een
+#   or-lijst van zoekwoorden werkt; wat niet rankt komt gewoon niet terug. Het testdomein
+#   geeft hoogstens 100 rijen terug, ook bij een hogere limit.
+COMPETITOR_FIELDS = (
+    "competitor_domain", "domain_rating", "keywords_common",
+    "keywords_competitor", "keywords_target", "share",
+)
+DOMAIN_METRICS_FIELDS = (
+    "index", "url", "domain_rating", "org_keywords",
+    "org_keywords_1_3", "org_keywords_4_10", "org_traffic",
+)
+HISTORY_FIELDS = ("date", "org_traffic")
+TOP10_KEYWORD_FIELDS = ("keyword", "best_position")
 
 
 class AhrefsServiceError(Exception):
@@ -326,16 +351,18 @@ def serp_overview(
     *,
     country: str | None = None,
     top_positions: int = 10,
+    fields: tuple[str, ...] | None = None,
     client: httpx.Client | None = None,
 ) -> AhrefsResult:
     """De laatst bekende Google-SERP van een zoekwoord, inclusief SERP-features.
 
     `top_positions` telt SERP-blokken, geen organische resultaten (zie het commentaar
     bovenin). Voor de top N organische pagina's: vraag `N + SERP_EXTRA_POSITIONS` op en
-    filter met `organic_rows()`.
+    filter met `organic_rows()`. `fields` (standaard `SERP_FIELDS`) maakt een smallere en
+    dus goedkopere selectie mogelijk; `organic_rows()` heeft `position`, `url` en `type` nodig.
     """
     params: dict[str, Any] = {
-        "select": ",".join(SERP_FIELDS),
+        "select": ",".join(fields or SERP_FIELDS),
         "keyword": keyword.strip(),
         "country": country or settings.ahrefs_country,
         "top_positions": top_positions,
@@ -389,6 +416,131 @@ def url_metrics(urls: list[str], *, client: httpx.Client | None = None) -> Ahref
         units += _units(response)
         cached = cached and response.headers.get("x-api-cache") == "hit"
     return AhrefsResult(rows=rows, units=units, cached=cached)
+
+
+def _json(where: dict[str, Any]) -> str:
+    return json.dumps(where, separators=(",", ":"), ensure_ascii=False)
+
+
+def organic_competitors(
+    target: str,
+    *,
+    country: str | None = None,
+    limit: int = 20,
+    domains: list[str] | None = None,
+    on_date: date | None = None,
+    client: httpx.Client | None = None,
+) -> AhrefsResult:
+    """Organische concurrenten van het domein: domeinen die op dezelfde zoekwoorden ranken.
+
+    Zonder `domains` de `limit` domeinen met de meeste gedeelde zoekwoorden. Met `domains`
+    alleen die domeinen (een `where` op `competitor_domain`, `limit` = aantal domeinen);
+    een domein zonder gedeelde zoekwoorden komt dan niet terug.
+    """
+    params: dict[str, Any] = {
+        "target": target,
+        "mode": "subdomains",
+        "protocol": "both",
+        "date": (on_date or date.today()).isoformat(),
+        "select": ",".join(COMPETITOR_FIELDS),
+    }
+    wanted = [d.strip() for d in (domains or []) if d and d.strip()]
+    if wanted:
+        params["where"] = _json(
+            {"or": [{"field": "competitor_domain", "is": ["eq", d]} for d in wanted]}
+        )
+        params["limit"] = len(wanted)
+    else:
+        params["order_by"] = "keywords_common:desc"
+        params["limit"] = limit
+    if country:
+        params["country"] = country
+    return _site_explorer("organic-competitors", "competitors", params, client)
+
+
+def domains_metrics(
+    domains: list[str], *, country: str | None = None, client: httpx.Client | None = None
+) -> AhrefsResult:
+    """DR, organische zoekwoorden (totaal, 1–3, 4–10) en verkeer voor meerdere domeinen.
+
+    Batch-analysis met `mode: subdomains`, per request maximaal `BATCH_MAX_TARGETS` domeinen.
+    Elke rij krijgt `target` met het domein zoals opgegeven (gekoppeld via `index`).
+    """
+    targets = [d.strip() for d in domains if d and d.strip()]
+    rows: list[dict[str, Any]] = []
+    units = 0
+    cached = bool(targets)
+    for start in range(0, len(targets), BATCH_MAX_TARGETS):
+        chunk = targets[start:start + BATCH_MAX_TARGETS]
+        body: dict[str, Any] = {
+            "select": list(DOMAIN_METRICS_FIELDS),
+            "targets": [{"url": d, "mode": "subdomains", "protocol": "both"} for d in chunk],
+        }
+        if country:
+            body["country"] = country
+        payload, response = _request("POST", "/batch-analysis/batch-analysis", json=body, client=client)
+        for row in _rows(payload, "targets"):
+            index = row.get("index")
+            target = chunk[index] if isinstance(index, int) and 0 <= index < len(chunk) else None
+            rows.append({**row, "target": target})
+        units += _units(response)
+        cached = cached and response.headers.get("x-api-cache") == "hit"
+    return AhrefsResult(rows=rows, units=units, cached=cached)
+
+
+def metrics_history(
+    target: str,
+    *,
+    country: str | None = None,
+    date_from: date,
+    client: httpx.Client | None = None,
+) -> AhrefsResult:
+    """Organisch verkeer per maand vanaf `date_from`, oplopend op datum."""
+    params: dict[str, Any] = {
+        "target": target,
+        "mode": "subdomains",
+        "protocol": "both",
+        "date_from": date_from.isoformat(),
+        "history_grouping": "monthly",
+        "select": ",".join(HISTORY_FIELDS),
+    }
+    if country:
+        params["country"] = country
+    return _site_explorer("metrics-history", "metrics", params, client)
+
+
+def top10_keywords(
+    target: str,
+    *,
+    country: str | None = None,
+    limit: int,
+    keywords: list[str] | None = None,
+    client: httpx.Client | None = None,
+) -> AhrefsResult:
+    """Zoekwoorden waarop het domein in de top 10 staat (`keyword`, `best_position`).
+
+    Zonder `keywords` de eerste `limit` zoekwoorden in de standaardvolgorde van Ahrefs (op
+    verkeer aflopend). Met `keywords` alleen die zoekwoorden (een or-lijst in de `where`);
+    wat niet in de top 10 staat komt niet terug. Haalt de lijst `limit` rijen, dan is hij
+    vermoedelijk afgekapt.
+    """
+    conditions: list[dict[str, Any]] = [{"field": "best_position", "is": ["lte", 10]}]
+    wanted = [k.strip() for k in (keywords or []) if k and k.strip()]
+    if wanted:
+        conditions.append({"or": [{"field": "keyword", "is": ["eq", k]} for k in wanted]})
+    params: dict[str, Any] = {
+        "target": target,
+        "mode": "subdomains",
+        "protocol": "both",
+        "date": date.today().isoformat(),
+        "select": ",".join(TOP10_KEYWORD_FIELDS),
+        "where": _json({"and": conditions}),
+        # Bewust geen order_by: die maakt een rij 12 units in plaats van 2 (zie bovenin).
+        "limit": limit,
+    }
+    if country:
+        params["country"] = country
+    return _site_explorer("organic-keywords", "keywords", params, client)
 
 
 def _types(row: dict[str, Any]) -> list[str]:

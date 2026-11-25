@@ -1273,6 +1273,62 @@ class CustomerRankSnapshot(Base):
     )
 
 
+class CustomerCompetitorOverview(Base):
+    """Concurrentenoverzicht per klant voor het scherm Zoekwoorden › Concurrenten.
+
+    Eén rij per klant. `raw` is `Raw` (ruwe Ahrefs- en PRT-gegevens, voor hergebruik), `data`
+    is `Snapshot` (de laatste geslaagde momentopname; blijft staan als een nieuwe run faalt),
+    `overrides` is `Overrides` (handmatige keuzes, alleen door de router geschreven) en
+    `ai_usage` is `AiUsage`; de vormen staan in `features/keywords/schemas.py`. `target` en
+    `country` horen bij de momentopname: wijzigt het domein of het land, dan is die verlopen.
+    """
+
+    __tablename__ = "customer_competitor_overviews"
+
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # idle | pending | collecting | classifying | summarizing | completed | failed
+    # idle = de rij draagt alleen handmatige keuzes; er is nog geen run gestart.
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="idle", server_default=text("'idle'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    data: Mapped[Any] = mapped_column(JSON, nullable=True)
+    raw: Mapped[Any] = mapped_column(JSON, nullable=True)
+    overrides: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Laatste toevoeging, verwijdering of uitsluiting; later dan `started_at` = bijwerken nodig.
+    overrides_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Verbruikte Ahrefs-units van de laatste run.
+    ahrefs_units: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    ai_usage: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Model van de laatste geslaagde Claude-aanroep.
+    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Start van de laatste run en einde van de laatste geslaagde run (de TTL telt vanaf hier).
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    # Levensteken van de worker: wordt bij elke statuswissel bijgewerkt.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class LaunchContentPage(Base):
     """Pagina-inhoud van een fase-3 scan (eigen rijen, los van fase 1/2)."""
 
@@ -1876,4 +1932,5 @@ __all__ = [
     "MonthlyReport",
     "WorkItem",
     "CustomerRankSnapshot",
+    "CustomerCompetitorOverview",
 ]

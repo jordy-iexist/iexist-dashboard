@@ -33,6 +33,12 @@ import {
   FileChartColumn,
   Kanban,
   LayoutGrid,
+  TextSearch,
+  Users,
+  Puzzle,
+  Lightbulb,
+  FileSearch,
+  Telescope,
   type LucideIcon,
 } from "lucide-react";
 
@@ -84,6 +90,7 @@ import {
 import { settingsNavGroups } from "@/components/settings/settings-nav-items";
 import { WORK_BOARD_URL, workBoardHref } from "@/lib/work-queue";
 import { AGENCY_OVERVIEW_URL } from "@/lib/agency-overview";
+import { Pill } from "@/components/livegang/shared";
 
 const menuItems = [
   {
@@ -104,6 +111,8 @@ const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
 const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
 // Past op geen enkel pad: het menu-item "Maandrapport" is dan niet actief.
 const MONTHLY_REPORT_INACTIVE_URL = "#maandrapport";
+// Past op geen enkel pad: het menu-item "Concurrenten" (Zoekwoorden) is dan niet actief.
+const KEYWORD_COMPETITORS_INACTIVE_URL = "#zoekwoorden-concurrenten";
 const SETTINGS_URL = "/dashboard/settings";
 // Past op geen enkel pad: zonder actieve klant is "Klantprofiel" nooit actief.
 const CUSTOMER_PROFILE_INACTIVE_URL = "#klantprofiel";
@@ -135,6 +144,8 @@ type NavLeafItem = {
   icon: LucideIcon;
   /** Kopje in het paneel; verschijnt boven het eerste item van elk kopje. */
   heading?: string;
+  /** Nog niet gebouwd: grijs, niet klikbaar, met het label "Binnenkort". */
+  soon?: boolean;
 };
 
 type NavGroupItem = NavLeafItem & {
@@ -218,26 +229,50 @@ function NavGroup({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub className={subMenuClass}>
-            {items.map((item) => (
-              <SidebarMenuSubItem key={item.url}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={item.url === activeUrl}
-                  className={subClass}
-                >
-                  <Link
-                    href={item.href}
-                    onClick={
-                      item.children ? () => onOpenSubNav(item.url) : undefined
-                    }
+            {items.map((item) =>
+              item.soon ? (
+                <SidebarMenuSubItem key={item.url}>
+                  {/* Geen link en niet focusbaar. Past het label niet naast de titel,
+                      dan schuift het eronder, zodat de titel leesbaar blijft. */}
+                  <SidebarMenuSubButton
+                    asChild
+                    className={cn(
+                      subClass,
+                      "h-auto min-h-7 cursor-default py-1 text-white/45 hover:bg-transparent hover:text-white/45 aria-disabled:opacity-100 [&>svg]:text-white/35",
+                    )}
                   >
-                    <item.icon />
-                    <span>{item.title}</span>
-                    {item.children && <ChevronRight className="ml-auto" />}
-                  </Link>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
+                    <span aria-disabled="true">
+                      <item.icon />
+                      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <span>{item.title}</span>
+                        <Pill className="bg-white/10 px-1.5 py-0 text-[10px] leading-4 text-white/60">
+                          Binnenkort
+                        </Pill>
+                      </span>
+                    </span>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ) : (
+                <SidebarMenuSubItem key={item.url}>
+                  <SidebarMenuSubButton
+                    asChild
+                    isActive={item.url === activeUrl}
+                    className={subClass}
+                  >
+                    <Link
+                      href={item.href}
+                      onClick={
+                        item.children ? () => onOpenSubNav(item.url) : undefined
+                      }
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                      {item.children && <ChevronRight className="ml-auto" />}
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ),
+            )}
           </SidebarMenuSub>
         </CollapsibleContent>
       </SidebarMenuItem>
@@ -407,6 +442,8 @@ export function AppSidebar({
   const onContentBriefs = pathSection === "contentBriefs";
   // Het maandrapport staat onder de klantpagina, maar hoort in het menu bij Rapportage.
   const onMonthlyReport = pathSection === "maandrapport";
+  // Zoekwoorden › Concurrenten staat onder de klantpagina, maar heeft een eigen groep in het menu.
+  const onKeywordCompetitors = pathSection === "zoekwoordConcurrenten";
   // Het klantprofiel staat onder de klantpagina, maar hoort in het menu bij Instellingen.
   const onProfile = pathSection === "profiel";
   const onSettings = pathname.startsWith(SETTINGS_URL) || onProfile;
@@ -419,6 +456,7 @@ export function AppSidebar({
           !onSearchConsole &&
           !onContentBriefs &&
           !onMonthlyReport &&
+          !onKeywordCompetitors &&
           !onProfile &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
@@ -430,6 +468,47 @@ export function AppSidebar({
     url === "/dashboard" ? hrefFor("home", url) : url;
 
   const navGroups: NavGroupConfig[] = [
+    {
+      title: "Zoekwoorden",
+      icon: TextSearch,
+      items: [
+        {
+          title: "Concurrenten",
+          // Het adres bevat de klant, dus op het scherm zelf telt het huidige pad als het adres.
+          url: onKeywordCompetitors ? pathname : KEYWORD_COMPETITORS_INACTIVE_URL,
+          href: hrefFor("zoekwoordConcurrenten", CUSTOMERS_URL),
+          icon: Users,
+        },
+        {
+          title: "Content gap",
+          url: "#zoekwoorden-content-gap",
+          href: "#zoekwoorden-content-gap",
+          icon: Puzzle,
+          soon: true,
+        },
+        {
+          title: "Zoekwoordkansen",
+          url: "#zoekwoorden-kansen",
+          href: "#zoekwoorden-kansen",
+          icon: Lightbulb,
+          soon: true,
+        },
+        {
+          title: "Zoekwoorddetail",
+          url: "#zoekwoorden-detail",
+          href: "#zoekwoorden-detail",
+          icon: FileSearch,
+          soon: true,
+        },
+        {
+          title: "Zoekwoordonderzoek",
+          url: "#zoekwoorden-onderzoek",
+          href: "#zoekwoorden-onderzoek",
+          icon: Telescope,
+          soon: true,
+        },
+      ],
+    },
     {
       title: "Website",
       icon: Globe,

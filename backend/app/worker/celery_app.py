@@ -53,6 +53,8 @@ celery_app.conf.update(
         "app.worker.tasks.run_content_brief_task": {"queue": "default"},
         # Maandrapport: cijfers ophalen en één Claude-aanroep.
         "app.worker.tasks.run_monthly_report_task": {"queue": "default"},
+        # Zoekwoorden › Concurrenten: een paar Ahrefs-aanroepen en drie Claude-aanroepen per klant.
+        "app.worker.tasks.refresh_keyword_competitors_task": {"queue": "default"},
         # Werkvoorraad Search Console: per klant een paar seconden Google, niet achter scans in `audit`.
         "app.worker.tasks.run_work_queue_gsc_dispatch_task": {"queue": "default"},
         "app.worker.tasks.run_work_queue_gsc_task": {"queue": "default"},
@@ -95,6 +97,7 @@ celery_app.autodiscover_tasks([
     "app.features.launch_checklist.worker",
     "app.features.competitor_analysis.worker",
     "app.features.monthly_report.worker",
+    "app.features.keywords.worker",
     "app.features.work_queue.worker",
     "app.features.agency_overview.worker",
 ])

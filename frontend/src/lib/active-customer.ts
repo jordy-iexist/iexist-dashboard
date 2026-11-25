@@ -17,6 +17,7 @@ export type CustomerSection =
   | "contentBriefs"
   | "searchConsole"
   | "maandrapport"
+  | "zoekwoordConcurrenten"
   | "seoGeo"
   | "oplevering"
   | "analytics"
@@ -96,6 +97,8 @@ export function customerHref(
       return `/dashboard/klanten/${id}/search-console`
     case "maandrapport":
       return `/dashboard/klanten/${id}/maandrapport`
+    case "zoekwoordConcurrenten":
+      return `/dashboard/klanten/${id}/zoekwoorden/concurrenten`
     case "seoGeo":
       return `/dashboard/livegang/seo-geo/${id}`
     case "oplevering":
@@ -125,6 +128,8 @@ export function sectionFromPathname(pathname: string): CustomerSection | null {
     if (second === "maandrapport") return "maandrapport"
     // Klantprofiel (het oude adres /bewerken stuurt door); klant wisselen blijft op het profiel.
     if (second === "profiel" || second === "bewerken") return "profiel"
+    // Zoekwoorden › Concurrenten; klant wisselen blijft op dit scherm.
+    if (second === "zoekwoorden") return "zoekwoordConcurrenten"
     // Concurrentieanalyse (lijst, wizard en resultaat); klant wisselen gaat naar de lijst.
     return second === "analyses" ? "analyses" : "home"
   }
