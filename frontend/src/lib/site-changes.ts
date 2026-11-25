@@ -4,6 +4,8 @@
  * onder `/api/site-changes`.
  */
 
+import { seoGeoSectionHref } from "@/lib/seo-geo-sections"
+
 export type Topic =
   | "meta_title"
   | "meta_description"
@@ -186,9 +188,8 @@ export function checkPage(customerId: string, url: string) {
   })
 }
 
-/** Link naar het scherm Aanpassingen, eventueel direct op één pagina. */
+/** Link naar het scherm Aanpassingen, eventueel direct op één pagina (`?url=`). */
 export function changesHref(customerId: string, url?: string | null) {
-  const params = new URLSearchParams({ fase: "aanpassingen" })
-  if (url) params.set("url", url)
-  return `/dashboard/livegang/seo-geo/${customerId}?${params}`
+  const href = seoGeoSectionHref(customerId, "aanpassingen")
+  return url ? `${href}?${new URLSearchParams({ url })}` : href
 }

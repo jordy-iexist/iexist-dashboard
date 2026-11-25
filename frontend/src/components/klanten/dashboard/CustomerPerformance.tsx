@@ -10,6 +10,7 @@ import {
   fetchCustomerRankings,
 } from "@/lib/customer-api"
 import type { CustomerImprovements, CustomerQuickWins } from "@/lib/customer-types"
+import { changesHref } from "@/lib/site-changes"
 
 type Hint = { hint: React.ReactNode; tone: KpiTone }
 
@@ -29,7 +30,7 @@ function monthHint(delta: number | null, digits: number): Hint {
 }
 
 function improvementsCard(customerId: string, improvements: CustomerImprovements | null) {
-  const href = `/dashboard/livegang/seo-geo/${customerId}?fase=aanpassingen`
+  const href = changesHref(customerId)
   if (!improvements || !improvements.hasSources) {
     return <KpiCard label="Open verbeterpunten" value="—" hint="nog geen scan" href={href} />
   }

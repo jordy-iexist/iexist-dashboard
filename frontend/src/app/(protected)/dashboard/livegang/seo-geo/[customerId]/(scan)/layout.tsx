@@ -4,15 +4,15 @@ import { ArrowLeft, ExternalLink } from "lucide-react"
 import { LaunchScanWorkspace } from "@/components/livegang/LaunchScanWorkspace"
 import { fetchCustomerDetail } from "@/lib/customer-api"
 
-export const metadata = {
-  title: "SEO/GEO-scan",
-}
-
-type LivegangKlantPageProps = {
+type SeoGeoScanLayoutProps = {
+  children: React.ReactNode
   params: Promise<{ customerId: string }>
 }
 
-export default async function LivegangKlantPage({ params }: LivegangKlantPageProps) {
+/**
+ * Kop van de SEO/GEO-scan van een klant rond de subpagina's (fases, Monitor, Aanpassingen). In een route group, zodat de printpagina van de checklist erbuiten valt.
+ */
+export default async function SeoGeoScanLayout({ children, params }: SeoGeoScanLayoutProps) {
   const { customerId } = await params
   const customer = await fetchCustomerDetail(customerId)
 
@@ -42,6 +42,8 @@ export default async function LivegangKlantPage({ params }: LivegangKlantPagePro
           </div>
         </>
       }
-    />
+    >
+      {children}
+    </LaunchScanWorkspace>
   )
 }

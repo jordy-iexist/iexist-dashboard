@@ -4,6 +4,8 @@
  * in een httpOnly-cookie in deze browser staat: de callback vergelijkt beide.
  */
 
+import { SEO_GEO_BASE_URL, seoGeoSectionHref } from "@/lib/seo-geo-sections"
+
 export const BING_OAUTH_COOKIE = "bing_oauth"
 /** Alleen de Bing-routes krijgen de cookie mee. */
 export const BING_OAUTH_COOKIE_PATH = "/api/bing-webmaster"
@@ -28,14 +30,14 @@ export function parseBingOAuthCookie(value: string | undefined): BingOAuthCookie
 }
 
 /**
- * Pagina waar de gebruiker na het koppelen op terugkomt: fase 4 van de klant,
- * met het resultaat in `?bing=` (gelezen door BingWebmasterSetting).
+ * Pagina waar de gebruiker na het koppelen op terugkomt: de subpagina Kwartaal GEO (fase 4)
+ * van de klant, zonder klant de klantenlijst van de scan. Het resultaat staat in `?bing=`
+ * (gelezen door BingWebmasterSetting).
  * De basis komt uit NEXT_PUBLIC_SITE_URL: in Docker klopt de host van het verzoek niet.
  */
 export function bingReturnUrl(customer: string | null, result: "gekoppeld" | "geweigerd" | "fout", detail?: string) {
   const base = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-  const url = new URL(customer ? `/dashboard/livegang/seo-geo/${customer}` : "/dashboard/livegang/seo-geo", base)
-  if (customer) url.searchParams.set("fase", "4")
+  const url = new URL(customer ? seoGeoSectionHref(customer, "kwartaal") : SEO_GEO_BASE_URL, base)
   url.searchParams.set("bing", result)
   if (detail) url.searchParams.set("bing_melding", detail.slice(0, 300))
   return url

@@ -1,5 +1,7 @@
 import { AnalyticsOverview } from "@/components/analytics/AnalyticsOverview"
-import { parseAnalyticsFilters } from "@/lib/analytics/api"
+import { ANALYTICS_BASE_URL } from "@/components/analytics/analytics-nav-items"
+import { NoCustomerState } from "@/components/analytics/states"
+import { resolveAnalyticsCustomer } from "@/lib/analytics/customer.server"
 import type { PageSearchParams } from "@/lib/search-params"
 
 export const metadata = {
@@ -7,6 +9,7 @@ export const metadata = {
 }
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<PageSearchParams> }) {
-  const { customerId } = parseAnalyticsFilters(await searchParams)
+  const customerId = await resolveAnalyticsCustomer(await searchParams, ANALYTICS_BASE_URL)
+  if (!customerId) return <NoCustomerState />
   return <AnalyticsOverview customerId={customerId} />
 }

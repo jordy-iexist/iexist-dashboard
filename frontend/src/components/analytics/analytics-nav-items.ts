@@ -15,7 +15,7 @@ export type AnalyticsNavItem = {
 export const analyticsNavItems: AnalyticsNavItem[] = [
   {
     title: "Overzicht",
-    description: "Kerncijfers over alle klanten, rapporten en vergelijken",
+    description: "Kerncijfers, rapporten en vergelijken van deze klant",
     href: ANALYTICS_BASE_URL,
     icon: LayoutDashboard,
     exact: true,
@@ -28,7 +28,7 @@ export const analyticsNavItems: AnalyticsNavItem[] = [
   },
   {
     title: "Vergelijken",
-    description: "Trend, scan tegen scan en klanten onderling",
+    description: "Trend en scan tegen scan",
     href: `${ANALYTICS_BASE_URL}/vergelijken`,
     icon: GitCompareArrows,
   },

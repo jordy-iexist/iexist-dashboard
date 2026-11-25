@@ -1,42 +1,40 @@
 import Link from "next/link"
-import { ChevronRight, GitCompareArrows, TrendingUp, Users } from "lucide-react"
+import { ChevronRight, GitCompareArrows, TrendingUp } from "lucide-react"
 
 import { ANALYTICS_BASE_URL } from "@/components/analytics/analytics-nav-items"
-import { OverviewKpis } from "@/components/analytics/OverviewKpis"
+import { CustomerKpis } from "@/components/analytics/CustomerKpis"
 import { ReportList } from "@/components/analytics/ReportList"
 
 const COMPARE_ENTRIES = [
-  { modus: "trend", title: "Trend per klant", description: "Tot vier cijfers van één klant naast elkaar.", icon: TrendingUp, keepCustomer: true },
-  { modus: "scans", title: "Scan A tegen B", description: "Twee scans van één klant, alle cijfers.", icon: GitCompareArrows, keepCustomer: true },
-  { modus: "klanten", title: "Klanten onderling", description: "Alle klanten op één cijfer, met mediaan.", icon: Users, keepCustomer: false },
+  { modus: "trend", title: "Trend", description: "Tot vier cijfers van deze klant naast elkaar.", icon: TrendingUp },
+  { modus: "scans", title: "Scan A tegen B", description: "Twee scans van deze klant, alle cijfers.", icon: GitCompareArrows },
 ] as const
 
-/** Startpagina van Analytics: kerncijfers over alle klanten, de rapporten en de ingang naar Vergelijken. */
-export function AnalyticsOverview({ customerId }: { customerId: string | null }) {
+/** Startpagina van Analytics: kerncijfers van de klant uit het adres, de rapporten en de ingang naar Vergelijken. */
+export function AnalyticsOverview({ customerId }: { customerId: string }) {
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <SectionHeading title="Alle klanten" description="Laatste nulmeting of kwartaalscan per klant." />
-        <OverviewKpis />
+        <SectionHeading title="Kerncijfers" description="Laatste nulmeting of kwartaalscan, met het verschil t.o.v. de meting ervoor." />
+        {/* key: bij een andere klant (via de sidebar) begint de tegelrij opnieuw, zonder cijfers van de vorige. */}
+        <CustomerKpis key={customerId} customerId={customerId} />
       </section>
 
       <section className="space-y-3">
-        <SectionHeading title="Rapporten" description="Vaste grafiekrapporten per klant." />
+        <SectionHeading title="Rapporten" description="Vaste grafiekrapporten voor deze klant." />
         <ReportList customerId={customerId} />
       </section>
 
       <section className="space-y-3">
-        <SectionHeading title="Vergelijken" description="Over de tijd, tussen twee scans of tussen klanten." />
-        <ul className="grid gap-3 sm:grid-cols-3">
+        <SectionHeading title="Vergelijken" description="Over de tijd of tussen twee scans." />
+        <ul className="grid gap-3 sm:grid-cols-2">
           {COMPARE_ENTRIES.map((entry) => {
-            const query = new URLSearchParams()
+            const query = new URLSearchParams({ klant: customerId })
             if (entry.modus !== "trend") query.set("modus", entry.modus)
-            if (entry.keepCustomer && customerId) query.set("klant", customerId)
-            const qs = query.toString()
             return (
               <li key={entry.modus}>
                 <Link
-                  href={`${ANALYTICS_BASE_URL}/vergelijken${qs ? `?${qs}` : ""}`}
+                  href={`${ANALYTICS_BASE_URL}/vergelijken?${query}`}
                   className="group flex h-full items-start gap-3 rounded-lg border bg-card p-4 shadow-xs transition-colors hover:bg-muted/50"
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">

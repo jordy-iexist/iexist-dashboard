@@ -1,31 +1,23 @@
 /**
- * Analytics > Vergelijken: URL-state (`?modus=&klant=&a=&b=&metric=`) en pure
- * helpers voor de drie modi. Geen React.
+ * Analytics > Vergelijken: URL-state (`?modus=&a=&b=&metric=`) en pure helpers
+ * voor de twee modi. De klant (`?klant=`) leest de pagina zelf. Geen React.
  */
 import type { MetricDef, ScanRef, TrendPoint } from "@/lib/analytics/api"
 import { formatShortDate } from "@/lib/analytics/format"
 
-export const COMPARE_MODES = ["trend", "scans", "klanten"] as const
+export const COMPARE_MODES = ["trend", "scans"] as const
 export type CompareMode = (typeof COMPARE_MODES)[number]
 
 export const MAX_TREND_METRICS = 4
 export const DEFAULT_TREND_METRICS = ["issues_comparable", "ai_score", "domain_rating", "gsc_clicks"]
-export const DEFAULT_BENCHMARK_METRIC = "issues_comparable"
-/** Kernmetrics die de benchmarktabel altijd toont (naast de gekozen metric). */
-export const BENCHMARK_CORE_METRICS = ["issues_comparable", "ai_score", "domain_rating", "indexable_pct"]
-/** Scans ouder dan dit tellen in de benchmark als verouderd (gedimd). */
-export const STALE_AFTER_DAYS = 180
 
 export type CompareState = {
   mode: CompareMode
-  customerId: string | null
   /** Gekozen scans (modus `scans`); `null` = standaard. */
   a: string | null
   b: string | null
   /** Metrics van de modus `trend` (1 tot 4). */
   trendMetrics: string[]
-  /** Metric van de modus `klanten`. */
-  benchmarkMetric: string
 }
 
 type RawSearchParams = { [key: string]: string | string[] | undefined }
@@ -35,35 +27,30 @@ function single(value: string | string[] | undefined): string | null {
   return v && v.trim() ? v.trim() : null
 }
 
-/** Leest de beginstand uit (await-ed) `searchParams`. `metric` hoort bij de modus in de URL. */
+/**
+ * Leest de beginstand uit (await-ed) `searchParams`. `metric` hoort bij de modus
+ * in de URL; een onbekende modus (bijv. het vervallen `klanten`) wordt Trend.
+ */
 export function parseCompareParams(params: RawSearchParams): CompareState {
   const modeParam = single(params.modus)
   const mode = COMPARE_MODES.find((m) => m === modeParam) ?? "trend"
   const metrics = [...new Set((single(params.metric) ?? "").split(",").map((m) => m.trim()).filter(Boolean))]
   return {
     mode,
-    customerId: single(params.klant),
     a: single(params.a),
     b: single(params.b),
     trendMetrics: mode === "trend" && metrics.length > 0 ? metrics.slice(0, MAX_TREND_METRICS) : DEFAULT_TREND_METRICS,
-    benchmarkMetric: mode === "klanten" && metrics.length > 0 ? metrics[0] : DEFAULT_BENCHMARK_METRIC,
   }
 }
 
-/** De state als URL-parameters voor `writeUrlParams`; alleen wat bij de huidige modus hoort. */
+/** De state als URL-parameters voor `writeUrlParams`; alleen wat bij de huidige modus hoort (`klant` blijft staan). */
 export function compareToUrlParams(state: CompareState): Record<string, string | null> {
   const trendMetrics = sameList(state.trendMetrics, DEFAULT_TREND_METRICS) ? null : state.trendMetrics.join(",")
   return {
     modus: state.mode === "trend" ? null : state.mode,
-    klant: state.customerId,
     a: state.mode === "scans" ? state.a : null,
     b: state.mode === "scans" ? state.b : null,
-    metric:
-      state.mode === "trend"
-        ? trendMetrics
-        : state.mode === "klanten" && state.benchmarkMetric !== DEFAULT_BENCHMARK_METRIC
-          ? state.benchmarkMetric
-          : null,
+    metric: state.mode === "trend" ? trendMetrics : null,
   }
 }
 
@@ -118,16 +105,4 @@ const timeFormat = new Intl.DateTimeFormat("nl-NL", { hour: "2-digit", minute: "
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? "" : timeFormat.format(date)
-}
-
-/** Ouderdom in hele dagen ten opzichte van `now`. */
-export function ageInDays(value: string, now: number = Date.now()): number | null {
-  const time = new Date(value).getTime()
-  return Number.isNaN(time) ? null : Math.floor((now - time) / 86_400_000)
-}
-
-export function isStale(scan: ScanRef | null, now?: number): boolean {
-  if (!scan) return false
-  const age = ageInDays(scan.date, now)
-  return age != null && age > STALE_AFTER_DAYS
 }

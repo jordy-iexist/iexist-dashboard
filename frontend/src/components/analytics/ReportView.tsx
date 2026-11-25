@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
-import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import {
@@ -20,12 +19,11 @@ import {
 } from "@/components/analytics/charts"
 import { ANALYTICS_BASE_URL } from "@/components/analytics/analytics-nav-items"
 import { FilterBar } from "@/components/analytics/FilterBar"
-import { MetricDelta } from "@/components/analytics/MetricDelta"
+import { KpiTile } from "@/components/analytics/KpiTile"
 import { MetricTable } from "@/components/analytics/MetricTable"
 import { EmptyState, ErrorNote, InfoNotes, Notice } from "@/components/analytics/states"
-import { CompactStat, StatGrid } from "@/components/livegang/shared"
+import { StatGrid } from "@/components/livegang/shared"
 import {
-  fetchAnalyticsCustomers,
   fetchTrend,
   filtersToUrlParams,
   type AnalyticsFilters,
@@ -33,7 +31,7 @@ import {
   type TrendPoint,
   type TrendResponse,
 } from "@/lib/analytics/api"
-import { diff, formatAxisTick, formatDate, formatMetricValue } from "@/lib/analytics/format"
+import { formatAxisTick, formatDate, formatMetricValue } from "@/lib/analytics/format"
 import { getReport, phasesLabel, type ChartDef, type ReportDef, type ReportSection } from "@/lib/analytics/reports"
 import {
   breakMarkers,
@@ -46,7 +44,6 @@ import {
   sourceNotes,
   sourcesForMetrics,
 } from "@/lib/analytics/trend"
-import type { LaunchCustomer } from "@/lib/launch-checklist"
 import { writeUrlParams } from "@/lib/url-state"
 import { cn } from "@/lib/utils"
 
@@ -73,24 +70,13 @@ function requestKey(filters: AnalyticsFilters): string | null {
 
 /**
  * Rendert elk rapport uit `REPORTS`: filterbalk, KPI-tegels, grafieken, tabel
- * en brontoelichting. Filters staan in de URL (`?klant=&van=&tot=&alle=1`).
+ * en brontoelichting. Filters staan in de URL (`?klant=&van=&tot=&alle=1`); de
+ * klant komt uit het adres en wisselt alleen via de klantkiezer in de sidebar.
  */
 export function ReportView({ slug, initialFilters }: { slug: string; initialFilters: AnalyticsFilters }) {
   const report = getReport(slug)
-  const router = useRouter()
   const [filters, setFilters] = useState<AnalyticsFilters>(initialFilters)
-  const [customers, setCustomers] = useState<LaunchCustomer[] | null>(null)
-  const [customersError, setCustomersError] = useState<string | null>(null)
   const [result, setResult] = useState<TrendResult | null>(null)
-
-  useEffect(() => {
-    fetchAnalyticsCustomers()
-      .then(setCustomers)
-      .catch((err: Error) => {
-        setCustomers([])
-        setCustomersError(`Klanten laden mislukt: ${err.message}`)
-      })
-  }, [])
 
   const key = requestKey(filters)
   const { customerId, start, end } = filters
@@ -142,22 +128,9 @@ export function ReportView({ slug, initialFilters }: { slug: string; initialFilt
         </div>
       </div>
 
-      <FilterBar
-        customers={customers}
-        filters={filters}
-        onChange={updateFilters}
-        onAllCustomers={() =>
-          router.push(
-            `${ANALYTICS_BASE_URL}/vergelijken?modus=klanten${report.kpis[0] ? `&metric=${encodeURIComponent(report.kpis[0])}` : ""}`
-          )
-        }
-      />
+      <FilterBar filters={filters} onChange={updateFilters} />
 
-      {customersError && <ErrorNote>{customersError}</ErrorNote>}
-
-      {!filters.customerId ? (
-        <EmptyState>Kies een klant om het rapport te zien.</EmptyState>
-      ) : key === null ? null : error ? (
+      {key === null ? null : error ? (
         <ErrorNote>{error}</ErrorNote>
       ) : !data ? (
         <p className="text-sm text-muted-foreground">Rapport laden…</p>
@@ -331,38 +304,6 @@ function SectionView({
 
       <MetricTable rows={rows} points={points} labels={labels} caption={`${section.title} per meting`} />
     </section>
-  )
-}
-
-function KpiTile({
-  metric,
-  last,
-  previous,
-  labels,
-}: {
-  metric: MetricDef
-  last: TrendPoint
-  previous: TrendPoint | null
-  labels: Map<string, string>
-}) {
-  const value = last.values[metric.key] ?? null
-  const delta = previous ? diff(value, previous.values[metric.key]) : null
-  const hint = previous
-    ? `${labels.get(last.scan_id)}, t.o.v. ${labels.get(previous.scan_id)}`
-    : labels.get(last.scan_id)
-  return (
-    <CompactStat
-      label={metric.label}
-      hint={value == null ? `Niet gemeten bij ${labels.get(last.scan_id)}` : hint}
-      value={
-        <span className="flex flex-wrap items-baseline gap-x-2">
-          <span>{formatMetricValue(value, metric.unit)}</span>
-          {previous && delta != null && (
-            <MetricDelta delta={delta} unit={metric.unit} higherIsBetter={metric.higher_is_better} className="text-xs" />
-          )}
-        </span>
-      }
-    />
   )
 }
 

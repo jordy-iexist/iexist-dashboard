@@ -3,7 +3,7 @@
  * (`GET /analytics/customers/{id}/trend`). Alleen fase 1 (nulmeting) en fase 4
  * (kwartaalscan) leveren punten; `null` betekent "niet gemeten", nooit 0.
  */
-import { apiFetch, type LaunchCustomer, type QuarterlyComparison } from "@/lib/launch-checklist"
+import { apiFetch, type QuarterlyComparison } from "@/lib/launch-checklist"
 
 export type MetricUnit = "count" | "percent" | "score" | "ms" | "position"
 
@@ -60,7 +60,7 @@ export function fetchTrend(customerId: string, range: TrendRange = {}, init?: Re
 
 // --- scan A tegen B (`GET /analytics/compare`) -----------------------------------
 
-/** Scan zoals compare en benchmark hem noemen. */
+/** Scan zoals compare hem noemt. */
 export type ScanRef = { scan_id: string; phase: number; period: string; label: string; date: string }
 
 export type MetricComparison = Omit<MetricDef, "phases"> & {
@@ -90,43 +90,6 @@ export type CompareResponse = {
 export function fetchCompare(a: string, b: string, init?: RequestInit): Promise<CompareResponse> {
   const query = new URLSearchParams({ a, b })
   return apiFetch<CompareResponse>(`/analytics/compare?${query}`, init)
-}
-
-// --- klanten onderling (`GET /analytics/benchmark`) -------------------------------
-
-export type BenchmarkRow = {
-  customer: { id: string; name: string; domain: string }
-  /** Laatste voltooide nulmeting of kwartaalscan; `null` = alleen checklist-voortgang. */
-  scan: ScanRef | null
-  values: Record<string, number | null>
-}
-
-export type MetricSummary = {
-  median: number | null
-  p25: number | null
-  p75: number | null
-  min: number | null
-  max: number | null
-  /** Aantal klanten met een waarde. */
-  n: number
-}
-
-export type BenchmarkResponse = {
-  metrics: MetricDef[]
-  rows: BenchmarkRow[]
-  summary: Record<string, MetricSummary>
-}
-
-export function fetchBenchmark(init?: RequestInit): Promise<BenchmarkResponse> {
-  return apiFetch<BenchmarkResponse>("/analytics/benchmark", init)
-}
-
-/** Groep met de huidige checklist-voortgang (fase 2, 3, 5): hangt niet aan een scandatum. */
-export const CHECKLIST_GROUP = "checklist"
-
-/** Klanten voor de klantkiezer (zelfde lijst als de livegang-overzichten). */
-export function fetchAnalyticsCustomers(): Promise<LaunchCustomer[]> {
-  return apiFetch<{ customers: LaunchCustomer[] }>("/customers").then((data) => data.customers)
 }
 
 /** Welke externe bron een metric-groep voedt; bepaalt welke brontoelichting een rapport toont. */

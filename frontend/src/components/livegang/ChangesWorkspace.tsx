@@ -1,6 +1,7 @@
 "use client"
 
 import { ChevronDown, ExternalLink, Loader2, ScanSearch } from "lucide-react"
+import { useSearchParams } from "next/navigation"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -21,7 +22,7 @@ import {
   type PagesResponse,
   type PageSummary,
 } from "@/lib/site-changes"
-import { readUrlParam, writeUrlParams } from "@/lib/url-state"
+import { writeUrlParams } from "@/lib/url-state"
 import { cn } from "@/lib/utils"
 
 // --- doorklikken vanuit andere fases -----------------------------------------
@@ -30,7 +31,11 @@ type ChangesNav = { customerId: string; open: (url: string | null) => void }
 
 const ChangesNavContext = createContext<ChangesNav | null>(null)
 
-/** Laat "Bekijk in Aanpassingen"-links binnen de werkruimte van fase wisselen zonder te herladen. */
+/**
+ * Laat "Bekijk in Aanpassingen"-links binnen de SEO/GEO-scan via de router naar de pagina
+ * Aanpassingen gaan (zonder de pagina te herladen). `onOpen` navigeert; staat Aanpassingen al
+ * open, dan volgt de gekozen pagina daar de nieuwe `?url=`.
+ */
 export function ChangesNavProvider({
   customerId,
   onOpen,
@@ -45,9 +50,9 @@ export function ChangesNavProvider({
 }
 
 /**
- * Onopvallende link naar het scherm Aanpassingen op één pagina. Binnen de SEO/GEO-werkruimte
- * wisselt een gewone klik direct van fase; nieuw tabblad (Cmd/Ctrl/middelklik) en gebruik
- * buiten de werkruimte volgen de echte URL.
+ * Onopvallende link naar het scherm Aanpassingen op één pagina. Binnen de SEO/GEO-scan gaat een
+ * gewone klik via de router (`ChangesNavProvider`); nieuw tabblad (Cmd/Ctrl/middelklik) en gebruik
+ * buiten de scan volgen de echte URL.
  */
 export function ChangesLink({ url, customerId, className }: { url: string; customerId?: string; className?: string }) {
   const nav = useContext(ChangesNavContext)
@@ -300,8 +305,17 @@ export function ChangesWorkspace({ customerId }: { customerId: string }) {
   const [pagesError, setPagesError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [onlyOpen, setOnlyOpen] = useState(true)
-  // Gekozen pagina; bij openen uit de URL (?url=), zodat een link naar één pagina deelbaar is.
-  const [selectedUrl, setSelectedUrl] = useState<string | null>(() => readUrlParam("url"))
+  // Gekozen pagina volgt ?url= in het adres, zodat een link naar één pagina deelbaar is. Het menu en
+  // "Bekijk in Aanpassingen" navigeren naar deze route met een andere (of geen) url zonder dat dit
+  // scherm opnieuw mount; daarom bij elke adreswijziging de selectie overnemen. Een klik in de lijst
+  // zet de selectie direct lokaal en schrijft daarna het adres (dat dan dezelfde waarde krijgt).
+  const urlFromAddress = useSearchParams().get("url")
+  const [selectedUrl, setSelectedUrl] = useState<string | null>(urlFromAddress)
+  const [seenUrlFromAddress, setSeenUrlFromAddress] = useState<string | null>(urlFromAddress)
+  if (urlFromAddress !== seenUrlFromAddress) {
+    setSeenUrlFromAddress(urlFromAddress)
+    setSelectedUrl(urlFromAddress)
+  }
   // Detail en fout horen bij de URL waarvoor ze zijn opgehaald; bij wisselen tonen we niets ouds.
   const [loaded, setLoaded] = useState<{ url: string; page: PageDetail } | null>(null)
   const [failed, setFailed] = useState<{ url: string; error: SiteChangesError } | null>(null)
@@ -378,7 +392,9 @@ export function ChangesWorkspace({ customerId }: { customerId: string }) {
   function selectPage(url: string) {
     setSelectedUrl(url)
     setRefreshError(null)
-    writeUrlParams({ fase: "aanpassingen", url })
+    // Met syncRouter: anders blijft de router (en useSearchParams) op de vorige url staan en zou een
+    // latere navigatie naar dat adres de selectie niet meer terugzetten.
+    writeUrlParams({ url }, { syncRouter: true })
   }
 
   // Na een actie: direct lokaal bijwerken, daarna pagina en tellers opnieuw ophalen

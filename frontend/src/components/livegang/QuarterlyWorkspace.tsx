@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown"
 import { Bot, Check, Copy, Download, Loader2, Play, Printer, Square, Trash2 } from "lucide-react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -35,7 +36,7 @@ import {
   type QuarterlyChecklist,
 } from "@/lib/launch-checklist"
 import { usePolling } from "@/hooks/use-polling"
-import { readUrlChoice, readUrlParam, writeUrlParams } from "@/lib/url-state"
+import { pickUrlChoice, writeUrlParams } from "@/lib/url-state"
 
 const TABS = [
   { key: "checklist", label: "Checklist" },
@@ -48,8 +49,7 @@ type TabKey = (typeof TABS)[number]["key"]
 const TAB_KEYS = TABS.map((t) => t.key)
 const PERIOD_PATTERN = /^\d{4}-Q[1-4]$/
 
-function initialPeriod(): string | null {
-  const value = readUrlParam("ronde")
+function initialPeriod(value: string | null): string | null {
   return value && PERIOD_PATTERN.test(value) ? value : null
 }
 
@@ -57,9 +57,12 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
   const [checklist, setChecklist] = useState<QuarterlyChecklist | null>(null)
   const [latest, setLatest] = useState<LaunchScanDetail | null>(null)
   const [report, setReport] = useState<LaunchScanDetail | null>(null)
+  // Ronde en tabblad uit het adres van de router: bij navigeren binnen de app staat
+  // window.location tijdens de eerste render nog op het vorige adres.
+  const searchParams = useSearchParams()
   // null = de huidige ronde (die bepaalt de backend).
-  const [period, setPeriodState] = useState<string | null>(initialPeriod)
-  const [storedTab, setTabState] = useState<TabKey>(() => readUrlChoice("tab", TAB_KEYS, "checklist"))
+  const [period, setPeriodState] = useState<string | null>(() => initialPeriod(searchParams.get("ronde")))
+  const [storedTab, setTabState] = useState<TabKey>(() => pickUrlChoice(searchParams.get("tab"), TAB_KEYS, "checklist"))
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,11 +70,11 @@ export function QuarterlyWorkspace({ customerId, onChange }: { customerId: strin
 
   const setTab = (next: TabKey) => {
     setTabState(next)
-    writeUrlParams({ fase: "4", tab: next })
+    writeUrlParams({ tab: next })
   }
   const setPeriod = (next: string | null) => {
     setPeriodState(next)
-    writeUrlParams({ fase: "4", ronde: next })
+    writeUrlParams({ ronde: next })
   }
 
   const loadChecklist = useCallback(async () => {

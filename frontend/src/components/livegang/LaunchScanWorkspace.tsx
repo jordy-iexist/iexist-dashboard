@@ -1,60 +1,16 @@
 "use client"
 
-import { ClipboardCheck, Download, Loader2, Play, Radar, RefreshCw, Square, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { RefreshCw } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { AiChecksTab } from "@/components/livegang/AiChecksTab"
-import { AiVisibilityTab } from "@/components/livegang/AiVisibilityTab"
-import { ChangesNavProvider, ChangesWorkspace } from "@/components/livegang/ChangesWorkspace"
-import { ContentWorkspace } from "@/components/livegang/ContentWorkspace"
-import { GeoWorkspace } from "@/components/livegang/GeoWorkspace"
-import { InventoryTab } from "@/components/livegang/InventoryTab"
-import { IssuesTab } from "@/components/livegang/IssuesTab"
+import { ChangesNavProvider } from "@/components/livegang/ChangesWorkspace"
 import { MondayBoardSetting } from "@/components/livegang/MondayBoardSetting"
-import { MonitorWorkspace } from "@/components/livegang/MonitorWorkspace"
-import { OverviewTab } from "@/components/livegang/OverviewTab"
-import { QuarterlyWorkspace } from "@/components/livegang/QuarterlyWorkspace"
-import {
-  isActive,
-  PanelRow,
-  PanelTabs,
-  PhasePanel,
-  PhaseStepper,
-  PollingFailedNotice,
-  ScanProgress,
-  ScanStatusBadge,
-} from "@/components/livegang/shared"
-import { VitalsTab } from "@/components/livegang/VitalsTab"
-import {
-  API_BASE,
-  apiFetch,
-  formatDateTime,
-  STATUS_LABELS,
-  type LaunchScan,
-  type LaunchScanDetail,
-} from "@/lib/launch-checklist"
-import { usePolling } from "@/hooks/use-polling"
-import { readUrlChoice, readUrlParam, writeUrlParams } from "@/lib/url-state"
-import { cn } from "@/lib/utils"
-
-const TABS = [
-  { key: "overview", label: "Overzicht" },
-  { key: "issues", label: "Actiepunten" },
-  { key: "inventory", label: "Inventaris" },
-  { key: "vitals", label: "Core Web Vitals" },
-  { key: "ai", label: "AI-vindbaarheid" },
-  { key: "visibility", label: "AI-zichtbaarheid" },
-] as const
-
-type TabKey = (typeof TABS)[number]["key"]
-const TAB_KEYS = TABS.map((t) => t.key)
-
-/** Sitemap-monitor: zelfde nummer als `LaunchScan.phase` in de backend; in de URL `?fase=monitor`. */
-const MONITOR_PHASE = 6
-/** Aanpassingen per pagina: alleen in de frontend; in de URL `?fase=aanpassingen` (met eventueel `&url=`). */
-const CHANGES_PHASE = 7
+import { PanelRow } from "@/components/livegang/shared"
+import { apiFetch, type LaunchScan } from "@/lib/launch-checklist"
+import { seoGeoSlugForPhase, type SeoGeoPhase, type SeoGeoSlug } from "@/lib/seo-geo-sections"
+import { changesHref } from "@/lib/site-changes"
 
 async function fetchPhaseState(customerId: string) {
   const query = `customer_website_id=${encodeURIComponent(customerId)}&limit=20`
@@ -96,54 +52,82 @@ async function fetchPhaseState(customerId: string) {
   }
 }
 
-export function LaunchScanWorkspace({ customerId, header }: { customerId: string; header: React.ReactNode }) {
-  const [phase, setPhase] = useState<number | null>(null)
-  const [done, setDone] = useState<Record<number, boolean>>({})
-  const [outdated, setOutdated] = useState<Record<number, boolean>>({})
+type PhaseState = Awaited<ReturnType<typeof fetchPhaseState>>
+
+/** Waarom fase 2 t/m 4 nog dicht zit: de melding op de pagina van die fase. */
+const LOCK_REASONS: Record<Exclude<SeoGeoPhase, 1>, string> = {
+  2: "Voer eerst een voltooide nulmeting (fase 1) uit.",
+  3: "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
+  4: "Voer eerst een voltooide content-scan (fase 3) uit.",
+}
+
+/** Vergrendeltekst als de vorige fase nog niet is afgerond, anders undefined. */
+export function phaseLockReason(phase: SeoGeoPhase, done: Record<number, boolean>): string | undefined {
+  return phase === 1 || done[phase - 1] ? undefined : LOCK_REASONS[phase]
+}
+
+/** Verste fase die al gestart is: daar opent de scan zonder gekozen onderdeel. */
+function furthestStartedPhase(state: PhaseState): SeoGeoPhase {
+  return state.done[3] && state.hasQuarterlyScans
+    ? 4
+    : state.done[2] && state.hasContentScans
+      ? 3
+      : state.done[1] && state.hasGeoScans
+        ? 2
+        : 1
+}
+
+type ScanPhases = {
+  customerId: string
+  done: Record<number, boolean>
+  /** Afgeronde fases (2 en 3) die op een oudere nulmeting dan de nieuwste zijn gebaseerd. */
+  outdated: Record<number, boolean>
+  /** Subpagina van de verste gestarte fase. */
+  furthest: SeoGeoSlug
+  /** Fasestatus opnieuw ophalen (na een scan, of als een fase iets wijzigt). */
+  refreshPhases: () => void
+}
+
+const ScanPhasesContext = createContext<ScanPhases | null>(null)
+
+/** Fasestatus van de klant voor de subpagina's van de scan (alleen binnen `LaunchScanWorkspace`). */
+export function useScanPhases(): ScanPhases {
+  const value = useContext(ScanPhasesContext)
+  if (!value) throw new Error("useScanPhases werkt alleen binnen LaunchScanWorkspace")
+  return value
+}
+
+/**
+ * Schil om de subpagina's van de SEO/GEO-scan van een klant (layout): de kop en de fasestatus.
+ * Wisselen tussen de onderdelen gaat via het menu (SEO/GEO-scan in de zijbalk).
+ * De subpagina verschijnt pas als de fasestatus de eerste keer is geladen.
+ */
+export function LaunchScanWorkspace({
+  customerId,
+  header,
+  children,
+}: {
+  customerId: string
+  header: React.ReactNode
+  children: React.ReactNode
+}) {
+  const router = useRouter()
+  const [phaseState, setPhaseState] = useState<PhaseState | null>(null)
   // Eerste keer laden mislukt: geen fase tonen (die zou ten onrechte "vergrendeld" lijken).
   const [loadError, setLoadError] = useState<string | null>(null)
   // Verversen na de eerste keer laden mislukt: de vorige fasestatus blijft staan.
   const [refreshError, setRefreshError] = useState(false)
   // Ophogen = de fasestatus opnieuw laden (knop "Opnieuw proberen").
   const [loadAttempt, setLoadAttempt] = useState(0)
-  // Ophogen = het scherm Aanpassingen opnieuw openen (leest dan de gekozen pagina uit de URL).
-  const [changesVisit, setChangesVisit] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     fetchPhaseState(customerId)
       .then((state) => {
         if (cancelled) return
-        setDone(state.done)
-        setOutdated(state.outdated)
+        setPhaseState(state)
         setLoadError(null)
         setRefreshError(false)
-        // De fase uit de URL (?fase=) gaat voor, zodat een refresh op dezelfde fase
-        // blijft. Zonder keuze: fase 2 openen als die al eerder gestart is.
-        const fromUrl = readUrlParam("fase")
-        const fallback =
-          state.done[3] && state.hasQuarterlyScans
-            ? 4
-            : state.done[2] && state.hasContentScans
-              ? 3
-              : state.done[1] && state.hasGeoScans
-                ? 2
-                : 1
-        const initial =
-          fromUrl === "monitor"
-            ? MONITOR_PHASE
-            : fromUrl === "aanpassingen"
-            ? CHANGES_PHASE
-            : fromUrl === "1"
-            ? 1
-            : fromUrl === "2" && state.done[1]
-              ? 2
-              : fromUrl === "3" && state.done[2]
-                ? 3
-                : fromUrl === "4" && state.done[3]
-                  ? 4
-                  : fallback
-        setPhase((current) => current ?? initial)
       })
       .catch((err: Error) => {
         if (!cancelled) setLoadError(err.message || "Onbekende fout")
@@ -156,27 +140,33 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
   const refreshPhases = useCallback(() => {
     fetchPhaseState(customerId)
       .then((state) => {
-        setDone(state.done)
-        setOutdated(state.outdated)
+        setPhaseState(state)
         setRefreshError(false)
       })
       .catch(() => setRefreshError(true))
   }, [customerId])
 
-  // Naar Aanpassingen, eventueel direct op één pagina (ook vanuit "Bekijk in Aanpassingen"-links).
-  const openChanges = useCallback((url: string | null) => {
-    writeUrlParams({ fase: "aanpassingen", tab: null, ronde: null, url })
-    setPhase(CHANGES_PHASE)
-    setChangesVisit((n) => n + 1)
-    if (url) window.scrollTo({ top: 0, behavior: "smooth" })
-  }, [])
+  // "Bekijk in Aanpassingen"-links: naar Aanpassingen, eventueel direct op één pagina.
+  const openChanges = useCallback(
+    (url: string | null) => router.push(changesHref(customerId, url)),
+    [router, customerId]
+  )
+
+  const done = useMemo(() => phaseState?.done ?? {}, [phaseState])
+  const outdated = useMemo(() => phaseState?.outdated ?? {}, [phaseState])
+  const furthest = phaseState ? seoGeoSlugForPhase(furthestStartedPhase(phaseState)) : null
+
+  const context = useMemo<ScanPhases | null>(
+    () => (furthest ? { customerId, done, outdated, furthest, refreshPhases } : null),
+    [customerId, done, outdated, furthest, refreshPhases]
+  )
 
   function retryLoad() {
     setLoadError(null)
     setLoadAttempt((n) => n + 1)
   }
 
-  if (phase === null && loadError) {
+  if (phaseState === null && loadError) {
     return (
       <div className="space-y-6">
         <header className="space-y-2">{header}</header>
@@ -197,343 +187,20 @@ export function LaunchScanWorkspace({ customerId, header }: { customerId: string
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 space-y-2">{header}</div>
         <div className="space-y-2 lg:shrink-0">
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
-            <PhaseStepper
-              active={phase ?? 1}
-              completed={done}
-              outdated={outdated}
-              locked={{
-                2: done[1] ? undefined : "Voer eerst een voltooide nulmeting (fase 1) uit.",
-                3: done[2] ? undefined : "Voer eerst een voltooide GEO/SEO-scan (fase 2) uit.",
-                4: done[3] ? undefined : "Voer eerst een voltooide content-scan (fase 3) uit.",
-              }}
-              onSelect={(next) => {
-                setPhase(next)
-                // Tabbladen (en de ronde van fase 4) verschillen per fase: opnieuw beginnen.
-                writeUrlParams({ fase: String(next), tab: null, ronde: null, url: null })
-              }}
-            />
-            <MonitorStep
-              active={phase === MONITOR_PHASE}
-              onSelect={() => {
-                setPhase(MONITOR_PHASE)
-                writeUrlParams({ fase: "monitor", tab: null, ronde: null, url: null })
-              }}
-            />
-            <SideStep
-              active={phase === CHANGES_PHASE}
-              onSelect={() => openChanges(null)}
-              icon={ClipboardCheck}
-              eyebrow="Per pagina"
-              label="Aanpassingen"
-              title="Aanpassingen — per pagina voorstellen beoordelen, afvinken en live controleren"
-            />
-          </div>
           {refreshError && (
             <p className="text-xs text-amber-800 lg:text-right dark:text-amber-300">
-              De fasestatus kon niet worden ververst; de fases hierboven kunnen verouderd zijn.
+              De fasestatus kon niet worden ververst; of een fase open of verouderd is, kan achterlopen.
             </p>
           )}
           <MondayBoardSetting customerId={customerId} align="end" />
         </div>
       </header>
-      <ChangesNavProvider customerId={customerId} onOpen={openChanges}>
-        {phase === 1 && <NulmetingWorkspace customerId={customerId} onChange={refreshPhases} />}
-        {phase === 2 && <GeoWorkspace customerId={customerId} onChange={refreshPhases} />}
-        {phase === 3 && <ContentWorkspace customerId={customerId} onChange={refreshPhases} />}
-        {phase === 4 && <QuarterlyWorkspace customerId={customerId} onChange={refreshPhases} />}
-        {phase === MONITOR_PHASE && <MonitorWorkspace customerId={customerId} />}
-        {phase === CHANGES_PHASE && <ChangesWorkspace key={changesVisit} customerId={customerId} />}
-      </ChangesNavProvider>
-    </div>
-  )
-}
-
-/** Stap "Monitor" naast de fasekiezer, in dezelfde stijl: doorlopend, dus zonder nummer of afgerond-status. */
-function MonitorStep({ active, onSelect }: { active: boolean; onSelect: () => void }) {
-  return (
-    <SideStep
-      active={active}
-      onSelect={onSelect}
-      icon={Radar}
-      eyebrow="Doorlopend"
-      label="Monitor"
-      title="Monitor — dagelijkse sitemapcontrole op nieuwe en gewijzigde pagina's"
-    />
-  )
-}
-
-/** Losse stap naast de fasekiezer (Monitor, Aanpassingen): altijd klikbaar, zonder nummer of afgerond-status. */
-function SideStep({
-  active,
-  onSelect,
-  icon: Icon,
-  eyebrow,
-  label,
-  title,
-}: {
-  active: boolean
-  onSelect: () => void
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
-  eyebrow: string
-  label: string
-  title: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      title={title}
-      aria-current={active ? "step" : undefined}
-      className={cn(
-        "flex w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors sm:w-40",
-        active ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/60"
-      )}
-    >
-      <span className="flex items-center gap-1.5">
-        <span
-          className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-full",
-            active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-          )}
-        >
-          <Icon className="size-2.5" strokeWidth={3} />
-        </span>
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</span>
-      </span>
-      <span className={cn("block truncate text-sm leading-snug", active ? "font-semibold" : "font-medium")}>
-        {label}
-      </span>
-    </button>
-  )
-}
-
-function NulmetingWorkspace({ customerId, onChange }: { customerId: string; onChange: () => void }) {
-  const [scans, setScans] = useState<LaunchScan[] | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [scan, setScan] = useState<LaunchScanDetail | null>(null)
-  const [tab, setTabState] = useState<TabKey>(() => readUrlChoice("tab", TAB_KEYS, "overview"))
-  const setTab = (next: TabKey) => {
-    setTabState(next)
-    writeUrlParams({ fase: "1", tab: next })
-  }
-  const [maxPages, setMaxPages] = useState(500)
-  const [vitalsMax, setVitalsMax] = useState(100)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const loadScans = useCallback(async () => {
-    const result = await apiFetch<{ items: LaunchScan[] }>(
-      `/scans?customer_website_id=${encodeURIComponent(customerId)}&phase=1&limit=20`
-    )
-    // Client-side ook filteren: een oudere backend negeert ?phase=.
-    const items = result.items.filter((s) => (s.phase ?? 1) === 1)
-    setScans(items)
-    onChange()
-    return items
-  }, [customerId, onChange])
-
-  useEffect(() => {
-    loadScans()
-      .then((items) => setSelectedId((current) => current ?? items[0]?.id ?? null))
-      .catch((err: Error) => setError(err.message))
-  }, [loadScans])
-
-  const loadScan = useCallback(async (id: string) => {
-    const detail = await apiFetch<LaunchScanDetail>(`/scans/${id}`)
-    setScan(detail)
-    return detail
-  }, [])
-
-  // Detail laden bij het wisselen van scan.
-  useEffect(() => {
-    if (!selectedId) {
-      setScan(null)
-      return
-    }
-    loadScan(selectedId).catch((err: Error) => setError(err.message))
-  }, [selectedId, loadScan])
-
-  // Pollen zolang de geselecteerde scan loopt; daarna de scanlijst verversen.
-  const { failing: pollingFailed } = usePolling(
-    async () => {
-      if (!selectedId) return
-      const next = await loadScan(selectedId)
-      if (!isActive(next.status)) await loadScans()
-    },
-    scan !== null && scan.id === selectedId && isActive(scan.status),
-    3000
-  )
-
-  async function startScan() {
-    setBusy(true)
-    setError(null)
-    try {
-      const created = await apiFetch<LaunchScanDetail>("/scans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_website_id: customerId, max_pages: maxPages, vitals_max_pages: vitalsMax }),
-      })
-      await loadScans()
-      setTab("overview")
-      setSelectedId(created.id)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function cancelScan() {
-    if (!scan) return
-    setBusy(true)
-    try {
-      await apiFetch(`/scans/${scan.id}/cancel`, { method: "POST" })
-      await loadScan(scan.id)
-      await loadScans()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function deleteScan() {
-    if (!scan || !window.confirm("Deze scan en alle resultaten verwijderen?")) return
-    setBusy(true)
-    try {
-      await apiFetch(`/scans/${scan.id}`, { method: "DELETE" })
-      const items = await loadScans()
-      setSelectedId(items[0]?.id ?? null)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const running = scan ? isActive(scan.status) : false
-  const anyRunning = scans?.some((s) => isActive(s.status)) ?? false
-  const hasResults = scan !== null && (scan.status === "completed" || scan.status === "analyzing" || scan.status === "vitals")
-
-  return (
-    <div className="space-y-4">
-      <PhasePanel
-        title="Fase 1 · Nulmeting & AI scan"
-        description={
-          <>
-            Haalt de sitemap op, maakt een site-inventaris (statuscodes, indexeerbaarheid, title/meta/H1, links,
-            afbeeldingen, structured data), meet de Core Web Vitals per pagina (mobiel), controleert de
-            AI-vindbaarheid en laat de Nulmeting-agent een rapport met actiepunten schrijven.
-          </>
-        }
-      >
-        {scans && scans.length === 0 && (
-          <PanelRow>
-            <span className="text-muted-foreground">Nog geen scans voor deze klant: start hieronder de eerste scan.</span>
-          </PanelRow>
-        )}
-
-        {scan && (
-          <PanelRow className="space-y-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <ScanStatusBadge status={scan.status} />
-              <span className="text-muted-foreground">
-                Gestart {formatDateTime(scan.created_at)}
-                {scan.completed_at && ` · klaar ${formatDateTime(scan.completed_at)}`}
-              </span>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                {scans && scans.length > 1 && (
-                  <select
-                    value={selectedId ?? ""}
-                    onChange={(e) => setSelectedId(e.target.value)}
-                    aria-label="Scangeschiedenis"
-                    title="Scangeschiedenis"
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
-                  >
-                    {scans.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {formatDateTime(s.created_at)} · {STATUS_LABELS[s.status]}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {running ? (
-                  <Button size="sm" variant="ghost" onClick={cancelScan} disabled={busy}>
-                    <Square /> Annuleren
-                  </Button>
-                ) : (
-                  <>
-                    {scan.status === "completed" && (
-                      <>
-                        <Button size="sm" variant="outline" asChild>
-                          <a href={`${API_BASE}/scans/${scan.id}/export?kind=inventory`}>
-                            <Download /> Inventaris (CSV)
-                          </a>
-                        </Button>
-                        <Button size="sm" variant="outline" asChild>
-                          <a href={`${API_BASE}/scans/${scan.id}/export?kind=issues`}>
-                            <Download /> Actiepunten (CSV)
-                          </a>
-                        </Button>
-                      </>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={deleteScan} disabled={busy} title="Scan verwijderen">
-                      <Trash2 /> Verwijderen
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-            {running && <ScanProgress scan={scan} bare />}
-            <PollingFailedNotice failing={pollingFailed} />
-            {scan.status === "failed" && (
-              <p className="text-red-700 dark:text-red-400">Scan mislukt: {scan.error_message ?? "onbekende fout"}</p>
-            )}
-          </PanelRow>
-        )}
-
-        <PanelRow tone="muted">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="space-y-1">
-              <span className="block text-xs text-muted-foreground">Max. pagina&apos;s</span>
-              <Input type="number" min={1} max={2000} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} className="w-28 bg-background" />
-            </label>
-            <label className="space-y-1">
-              <span className="block text-xs text-muted-foreground">Max. CWV-metingen</span>
-              <Input type="number" min={0} max={500} value={vitalsMax} onChange={(e) => setVitalsMax(Math.max(0, Number(e.target.value) || 0))} className="w-28 bg-background" />
-            </label>
-            <Button onClick={startScan} disabled={busy || anyRunning}>
-              {busy ? <Loader2 className="animate-spin" /> : <Play />}
-              {anyRunning ? "Scan loopt…" : "Start nieuwe scan"}
-            </Button>
-          </div>
-        </PanelRow>
-
-        {error && <PanelRow tone="error">{error}</PanelRow>}
-      </PhasePanel>
-
-      {hasResults && (
-        <PanelTabs
-          tabs={TABS.map((t) => ({
-            key: t.key,
-            label:
-              t.key === "issues" && scan.summary_stats?.issues ? `${t.label} (${scan.summary_stats.issues.total})` : t.label,
-          }))}
-          active={tab}
-          onSelect={setTab}
-        />
-      )}
-
-      {scan && hasResults && (
-        <>
-          {tab === "overview" && <OverviewTab scan={scan} />}
-          {tab === "issues" && <IssuesTab scanId={scan.id} customerId={customerId} />}
-          {tab === "inventory" && <InventoryTab scanId={scan.id} hasAhrefs={Boolean(scan.ahrefs)} />}
-          {tab === "vitals" && <VitalsTab scanId={scan.id} measuring={scan.status === "vitals"} />}
-          {tab === "ai" && <AiChecksTab checks={scan.ai_checks} />}
-          {tab === "visibility" && <AiVisibilityTab scanId={scan.id} snapshot={scan.proranktracker} />}
-        </>
+      {context && (
+        <ScanPhasesContext.Provider value={context}>
+          <ChangesNavProvider customerId={customerId} onOpen={openChanges}>
+            {children}
+          </ChangesNavProvider>
+        </ScanPhasesContext.Provider>
       )}
     </div>
   )

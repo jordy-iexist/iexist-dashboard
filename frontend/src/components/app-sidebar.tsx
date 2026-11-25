@@ -22,6 +22,12 @@ import {
   ChevronLeft,
   ChevronRight,
   List,
+  Gauge,
+  ListTodo,
+  FilePen,
+  CalendarRange,
+  Activity,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +69,12 @@ import {
   fetchCustomerOptions,
   type CustomerOption,
 } from "@/components/klanten/CustomerSwitcher";
+import {
+  SEO_GEO_BASE_URL,
+  SEO_GEO_SECTIONS,
+  seoGeoSectionHref,
+  type SeoGeoSlug,
+} from "@/lib/seo-geo-sections";
 
 const menuItems = [
   {
@@ -73,7 +85,7 @@ const menuItems = [
 ];
 
 const CUSTOMERS_URL = "/dashboard/klanten";
-const SEO_GEO_URL = "/dashboard/livegang/seo-geo";
+const SEO_GEO_URL = SEO_GEO_BASE_URL;
 const GOLIVE_URL = "/dashboard/livegang/oplevering";
 const ANALYTICS_URL = "/dashboard/livegang/analytics";
 
@@ -81,6 +93,17 @@ const BLOGS_URL = "/dashboard/blogs";
 const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
 // Past op geen enkel pad: het menu-item "Content briefs" is dan niet actief.
 const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
+
+// Iconen van de subpagina's van de SEO/GEO-scan (derde niveau in het menu).
+// Radar (Monitor in de scan zelf) is hier al het icoon van de groep Vindbaarheid.
+const SEO_GEO_SECTION_ICONS: Record<SeoGeoSlug, LucideIcon> = {
+  nulmeting: Gauge,
+  "geo-checklist": ListTodo,
+  content: FilePen,
+  kwartaal: CalendarRange,
+  monitor: Activity,
+  aanpassingen: ClipboardCheck,
+};
 
 // Shopify-admin look: compact items, light pill for active, no sub-menu guide line
 const itemClass =
@@ -391,6 +414,18 @@ export function AppSidebar({
           url: SEO_GEO_URL,
           href: hrefFor("seoGeo", SEO_GEO_URL),
           icon: Search,
+          // Zonder actieve klant geen subpagina's: dan is het item de link naar de klantenlijst.
+          children: activeCustomerId
+            ? SEO_GEO_SECTIONS.map((section) => {
+                const href = seoGeoSectionHref(activeCustomerId, section.slug);
+                return {
+                  title: section.menuTitle,
+                  url: href,
+                  href,
+                  icon: SEO_GEO_SECTION_ICONS[section.slug],
+                };
+              })
+            : undefined,
         },
       ],
     },

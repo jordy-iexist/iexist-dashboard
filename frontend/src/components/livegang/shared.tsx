@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock, RefreshCw, WifiOff } from "lucide-react"
+import { Loader2, WifiOff } from "lucide-react"
 
 import {
   ACTIVE_STATUSES,
@@ -91,103 +91,6 @@ export function CompactStat({
         </p>
       )}
     </div>
-  )
-}
-
-export const PHASES = [
-  { number: 1, title: "Nulmeting & AI scan", description: "Inventaris, Core Web Vitals en AI-vindbaarheid", available: true },
-  { number: 2, title: "GEO/SEO-checklist", description: "Schema, entiteit-signalen en AI-toegang", available: true },
-  { number: 3, title: "Content & onpage", description: "Meta, koppen en herschrijfvoorstellen", available: true },
-  { number: 4, title: "Kwartaal GEO", description: "Herhaalscan, vergelijking en rapportage per kwartaal", available: true },
-]
-
-export function PhaseStepper({
-  active,
-  completed,
-  outdated = {},
-  locked = {},
-  onSelect,
-}: {
-  active: number
-  completed: Record<number, boolean>
-  /** Afgeronde fases die op een oudere nulmeting zijn gebaseerd (oranje i.p.v. groen). */
-  outdated?: Record<number, boolean>
-  locked?: Record<number, string | undefined>
-  onSelect?: (phase: number) => void
-}) {
-  return (
-    <nav aria-label="Fases">
-      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {PHASES.map((phase) => {
-          const isActive = phase.number === active
-          const isDone = completed[phase.number] ?? false
-          const isOutdated = isDone && (outdated[phase.number] ?? false)
-          const lockReason = phase.available ? locked[phase.number] : undefined
-          const clickable = phase.available && !lockReason && !!onSelect
-          const outdatedHint = isOutdated ? "Gebaseerd op een oudere nulmeting — scan opnieuw." : undefined
-          const statusLabel = !phase.available
-            ? "Binnenkort"
-            : isOutdated
-              ? "Verouderd"
-              : isDone
-                ? "Afgerond"
-                : lockReason
-                  ? "Vergrendeld"
-                  : isActive
-                    ? "Bezig"
-                    : "Open"
-          return (
-            <li key={phase.number} className="min-w-0">
-              <button
-                type="button"
-                disabled={!clickable}
-                onClick={() => onSelect?.(phase.number)}
-                title={`${phase.title} — ${lockReason ?? outdatedHint ?? phase.description}`}
-                aria-current={isActive ? "step" : undefined}
-                className={cn(
-                  "flex h-full w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors sm:w-40",
-                  isActive
-                    ? "border-primary bg-primary/5 ring-1 ring-primary"
-                    : clickable
-                      ? "hover:bg-muted/60"
-                      : "cursor-default",
-                  !phase.available || lockReason ? "opacity-60" : undefined
-                )}
-              >
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className={cn(
-                      "flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                      isOutdated && "bg-amber-500 text-white",
-                      isDone && !isOutdated && "bg-green-600 text-white",
-                      !isDone && isActive && "bg-primary text-primary-foreground",
-                      !isDone && !isActive && "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    {isOutdated ? (
-                      <RefreshCw className="size-2.5" strokeWidth={3} />
-                    ) : isDone ? (
-                      <Check className="size-2.5" strokeWidth={3} />
-                    ) : lockReason || !phase.available ? (
-                      <Lock className="size-2.5" strokeWidth={3} />
-                    ) : (
-                      phase.number
-                    )}
-                  </span>
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Fase {phase.number}
-                  </span>
-                  <span className="sr-only">: {statusLabel}</span>
-                </span>
-                <span className={cn("block truncate text-sm leading-snug", isActive ? "font-semibold" : "font-medium")}>
-                  {phase.title}
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ol>
-    </nav>
   )
 }
 

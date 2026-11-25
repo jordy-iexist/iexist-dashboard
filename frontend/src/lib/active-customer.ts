@@ -2,6 +2,8 @@
 // Vrij van React en `next/headers`, zodat server en client dit kunnen
 // importeren. De server-only cookielezer staat in `active-customer.server.ts`.
 
+import { isSeoGeoSlug, seoGeoSectionHref } from "@/lib/seo-geo-sections"
+
 export const ACTIVE_CUSTOMER_COOKIE = "active_customer_id"
 export const ACTIVE_CUSTOMER_STORAGE_KEY = "active_customer_id"
 
@@ -125,9 +127,20 @@ export function sectionFromPathname(pathname: string): CustomerSection | null {
 
 // Adres van hetzelfde onderdeel voor een andere klant; anders de klantpagina.
 export function switchHref(pathname: string, newCustomerId: string): string {
-  const [root, section, first, second] = segmentsOf(pathname)
+  const [root, section, first, second, third, ...rest] = segmentsOf(pathname)
 
   if (root === "dashboard") {
+    // Subpagina van de SEO/GEO-scan: dezelfde subpagina van de nieuwe klant.
+    // Het basisadres en de printpagina gaan zoals de rest naar het basisadres.
+    if (
+      section === "livegang" &&
+      first === "seo-geo" &&
+      second &&
+      isSeoGeoSlug(third) &&
+      rest.length === 0
+    ) {
+      return seoGeoSectionHref(newCustomerId, third)
+    }
     // Analytics-subpagina's (rapporten, vergelijken) houden hun eigen subpad.
     if (section === "livegang" && first === "analytics" && second) {
       const path = `/${segmentsOf(pathname).join("/")}`

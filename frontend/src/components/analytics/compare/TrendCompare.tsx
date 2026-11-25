@@ -6,7 +6,6 @@ import { useId } from "react"
 
 import { ChartFrame, seriesColor, TrendLineChart, type ChartDatum } from "@/components/analytics/charts"
 import type { TrendRequest } from "@/components/analytics/compare/CompareView"
-import { FilterBar } from "@/components/analytics/FilterBar"
 import { MetricTable } from "@/components/analytics/MetricTable"
 import { EmptyState, ErrorNote, InfoNotes, Notice } from "@/components/analytics/states"
 import { CompactStat, StatGrid } from "@/components/livegang/shared"
@@ -15,7 +14,6 @@ import { groupMetrics, MAX_TREND_METRICS } from "@/lib/analytics/compare"
 import { formatAxisTick, formatDate, formatMetricValue, unitDescription } from "@/lib/analytics/format"
 import { phasesLabel } from "@/lib/analytics/reports"
 import { metricIndex, pointLabels, selectPoints, sourceNotes, sourcesForMetrics } from "@/lib/analytics/trend"
-import type { LaunchCustomer } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
 const CHART_HEIGHT = 200
@@ -23,47 +21,26 @@ const selectClass =
   "h-9 w-full min-w-0 rounded-md border border-input bg-card px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
 
 export type TrendCompareProps = {
-  customers: LaunchCustomer[] | null
-  customerId: string | null
-  onCustomerChange: (customerId: string | null) => void
   trend: TrendRequest
   selected: string[]
   onSelectedChange: (keys: string[]) => void
 }
 
-/** Modus Trend: één klant, één tot vier metrics als kleine grafieken naast elkaar. */
-export function TrendCompare({ customers, customerId, onCustomerChange, trend, selected, onSelectedChange }: TrendCompareProps) {
+/** Modus Trend: de klant uit het adres, één tot vier metrics als kleine grafieken naast elkaar. */
+export function TrendCompare({ trend, selected, onSelectedChange }: TrendCompareProps) {
   const { data, error, loading } = trend
 
+  if (error) return <ErrorNote>{error}</ErrorNote>
+  if (!data) return <p className="text-sm text-muted-foreground">Trend laden…</p>
   return (
-    <div className="space-y-6">
-      <FilterBar
-        customers={customers}
-        filters={{ customerId, start: null, end: null, allScans: false }}
-        onChange={(patch) => {
-          if ("customerId" in patch) onCustomerChange(patch.customerId ?? null)
-        }}
-        showPeriod={false}
-        showAllScans={false}
-      />
-
-      {!customerId ? (
-        <EmptyState>Kies een klant om de trend te zien.</EmptyState>
-      ) : error ? (
-        <ErrorNote>{error}</ErrorNote>
-      ) : !data ? (
-        <p className="text-sm text-muted-foreground">Trend laden…</p>
-      ) : (
-        <TrendBody
-          metrics={data.metrics}
-          allPoints={data.points}
-          customer={data.customer}
-          selected={selected}
-          onSelectedChange={onSelectedChange}
-          loading={loading}
-        />
-      )}
-    </div>
+    <TrendBody
+      metrics={data.metrics}
+      allPoints={data.points}
+      customer={data.customer}
+      selected={selected}
+      onSelectedChange={onSelectedChange}
+      loading={loading}
+    />
   )
 }
 

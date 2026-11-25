@@ -7,7 +7,6 @@ import { useId } from "react"
 import type { TrendRequest } from "@/components/analytics/compare/CompareView"
 import { MetricCompareTable } from "@/components/analytics/compare/MetricCompareTable"
 import { useRequest } from "@/components/analytics/compare/use-request"
-import { FilterBar } from "@/components/analytics/FilterBar"
 import { EmptyState, ErrorNote, InfoNotes, Notice } from "@/components/analytics/states"
 import {
   AhrefsSection,
@@ -19,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { fetchCompare, type CompareResponse, type ScanRef, type TrendPoint } from "@/lib/analytics/api"
 import { defaultScanPair, scanPairLabels } from "@/lib/analytics/compare"
-import { formatDateTime, type LaunchCustomer } from "@/lib/launch-checklist"
+import { formatDateTime } from "@/lib/launch-checklist"
 import { cn } from "@/lib/utils"
 
 const selectClass =
@@ -28,9 +27,6 @@ const selectClass =
 const PHASE_NAMES: Record<number, string> = { 1: "Nulmeting", 4: "Kwartaalscan" }
 
 export type ScanCompareProps = {
-  customers: LaunchCustomer[] | null
-  customerId: string | null
-  onCustomerChange: (customerId: string | null) => void
   trend: TrendRequest
   /** Keuze uit de URL; `null` of onbekend = standaard. */
   a: string | null
@@ -38,39 +34,14 @@ export type ScanCompareProps = {
   onPairChange: (a: string, b: string) => void
 }
 
-/** Modus Scan A/B: twee scans van één klant naast elkaar. */
-export function ScanCompare({ customers, customerId, onCustomerChange, trend, a, b, onPairChange }: ScanCompareProps) {
+/** Modus Scan A/B: twee scans van de klant uit het adres naast elkaar. */
+export function ScanCompare({ trend, a, b, onPairChange }: ScanCompareProps) {
   const { data, error, loading } = trend
 
+  if (error) return <ErrorNote>{error}</ErrorNote>
+  if (!data) return <p className="text-sm text-muted-foreground">Scans laden…</p>
   return (
-    <div className="space-y-6">
-      <FilterBar
-        customers={customers}
-        filters={{ customerId, start: null, end: null, allScans: false }}
-        onChange={(patch) => {
-          if ("customerId" in patch) onCustomerChange(patch.customerId ?? null)
-        }}
-        showPeriod={false}
-        showAllScans={false}
-      />
-
-      {!customerId ? (
-        <EmptyState>Kies een klant om twee scans te vergelijken.</EmptyState>
-      ) : error ? (
-        <ErrorNote>{error}</ErrorNote>
-      ) : !data ? (
-        <p className="text-sm text-muted-foreground">Scans laden…</p>
-      ) : (
-        <ScanPicker
-          customer={data.customer}
-          points={data.points}
-          a={a}
-          b={b}
-          onPairChange={onPairChange}
-          dimmed={loading}
-        />
-      )}
-    </div>
+    <ScanPicker customer={data.customer} points={data.points} a={a} b={b} onPairChange={onPairChange} dimmed={loading} />
   )
 }
 

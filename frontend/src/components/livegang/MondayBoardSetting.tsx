@@ -17,10 +17,10 @@ import { cn } from "@/lib/utils"
 
 /**
  * Monday-bord van de klant: tonen, aanmaken in de map, of een bestaand bord koppelen.
- * Slanke regel: onder de fase-cards in de klantheader (SEO/GEO-scan) en als eigen card bij de livegang.
+ * Slanke regel: rechts in de klantheader (SEO/GEO-scan) en als eigen card bij de livegang.
  */
 export function MondayBoardSetting({ customerId, align = "start" }: { customerId: string; align?: "start" | "end" }) {
-  // "end": rechts uitlijnen op brede schermen (onder de fase-cards in de klantheader).
+  // "end": rechts uitlijnen op brede schermen (in de klantheader).
   const justify = align === "end" ? "lg:justify-end" : undefined
   const [settings, setSettings] = useState<MondaySettings | null>(null)
   const [error, setError] = useState<string | null>(null)

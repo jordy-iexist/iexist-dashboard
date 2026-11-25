@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown"
 import { Bot, Download, Loader2, Play, Printer, Square, Trash2 } from "lucide-react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,7 @@ import {
   type ScanStatus,
 } from "@/lib/launch-checklist"
 import { usePolling } from "@/hooks/use-polling"
-import { readUrlChoice, writeUrlParams } from "@/lib/url-state"
+import { pickUrlChoice, writeUrlParams } from "@/lib/url-state"
 
 const TABS = [
   { key: "checklist", label: "Checklist" },
@@ -52,10 +53,13 @@ export function ContentWorkspace({ customerId, onChange }: { customerId: string;
   const [checklist, setChecklist] = useState<ContentChecklist | null>(null)
   const [latest, setLatest] = useState<LaunchScanDetail | null>(null)
   const [report, setReport] = useState<LaunchScanDetail | null>(null)
-  const [storedTab, setTabState] = useState<TabKey>(() => readUrlChoice("tab", TAB_KEYS, "checklist"))
+  // Tabblad uit het adres van de router: bij navigeren binnen de app staat window.location
+  // tijdens de eerste render nog op het vorige adres.
+  const searchParams = useSearchParams()
+  const [storedTab, setTabState] = useState<TabKey>(() => pickUrlChoice(searchParams.get("tab"), TAB_KEYS, "checklist"))
   const setTab = (next: TabKey) => {
     setTabState(next)
-    writeUrlParams({ fase: "3", tab: next })
+    writeUrlParams({ tab: next })
   }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

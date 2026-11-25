@@ -11,6 +11,11 @@ export function EmptyState({ children, className }: { children: React.ReactNode;
   )
 }
 
+/** Geen klant in het adres en geen laatst gekozen klant: kiezen gaat via de sidebar. */
+export function NoCustomerState() {
+  return <EmptyState>Kies linksboven een klant om Analytics te zien.</EmptyState>
+}
+
 /** Foutmelding van de backend als gewone melding (geen crash). */
 export function ErrorNote({ children }: { children: React.ReactNode }) {
   return (
