@@ -51,6 +51,8 @@ celery_app.conf.update(
         "app.worker.tasks.run_competitor_analysis_task": {"queue": "audit"},
         # Content brief: twee korte Claude-aanroepen, niet achter lange scans in `audit`.
         "app.worker.tasks.run_content_brief_task": {"queue": "default"},
+        # Maandrapport: cijfers ophalen en één Claude-aanroep.
+        "app.worker.tasks.run_monthly_report_task": {"queue": "default"},
     },
     # Celery beat (service `beat`, precies één instantie). Tijden in `timezone` hierboven.
     beat_schedule={
@@ -71,4 +73,5 @@ celery_app.autodiscover_tasks([
     "app.features.website_audit.worker",
     "app.features.launch_checklist.worker",
     "app.features.competitor_analysis.worker",
+    "app.features.monthly_report.worker",
 ])

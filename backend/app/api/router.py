@@ -11,6 +11,7 @@ from app.features.launch_checklist.analytics_router import router as launch_chec
 from app.features.launch_checklist.fix_prompt_router import router as launch_checklist_fix_prompt_router
 from app.features.launch_checklist.router import router as launch_checklist_router
 from app.features.launch_checklist.schema_markup_router import router as launch_checklist_schema_markup_router
+from app.features.monthly_report.router import router as monthly_report_router
 from app.features.settings.router import router as settings_router
 from app.features.site_changes.router import router as site_changes_router
 from app.features.seo_tracker.router import router as seo_tracker_router
@@ -34,3 +35,4 @@ router.include_router(launch_checklist_schema_markup_router)
 router.include_router(site_changes_router)
 router.include_router(competitor_analysis_router)
 router.include_router(competitor_analysis_brief_router)
+router.include_router(monthly_report_router)

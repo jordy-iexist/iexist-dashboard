@@ -19,6 +19,7 @@ from app.features.launch_checklist.worker.sitemap_monitor import (
     run_sitemap_monitor_task,
 )
 from app.features.landing_pages.worker.landing_page_generation import generate_landing_page_task
+from app.features.monthly_report.worker.report import run_monthly_report_task
 from app.features.seo_meta.worker.seo_meta import run_website_meta_optimization_task
 from app.features.seo_tracker.worker.seo_scans import scan_website_keywords_task
 from app.features.website_audit.worker.website_audit import run_website_audit_task
@@ -36,6 +37,7 @@ __all__ = [
     "run_geo_scan_task",
     "run_golive_scan_task",
     "run_launch_scan_task",
+    "run_monthly_report_task",
     "run_quarterly_scan_task",
     "run_sitemap_monitor_dispatch_task",
     "run_sitemap_monitor_task",

@@ -30,6 +30,7 @@ import {
   ClipboardCheck,
   MousePointerClick,
   Building2,
+  FileChartColumn,
   type LucideIcon,
 } from "lucide-react";
 
@@ -97,6 +98,8 @@ const BLOGS_URL = "/dashboard/blogs";
 const BLOG_UPLOAD_URL = "/dashboard/blogs/upload";
 // Past op geen enkel pad: het menu-item "Content briefs" is dan niet actief.
 const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
+// Past op geen enkel pad: het menu-item "Maandrapport" is dan niet actief.
+const MONTHLY_REPORT_INACTIVE_URL = "#maandrapport";
 const SETTINGS_URL = "/dashboard/settings";
 // Past op geen enkel pad: zonder actieve klant is "Klantprofiel" nooit actief.
 const CUSTOMER_PROFILE_INACTIVE_URL = "#klantprofiel";
@@ -398,6 +401,8 @@ export function AppSidebar({
   // Content briefs staan ook onder de klantpagina (het overzicht, en de brief zelf onder
   // een analyse), maar horen in het menu bij Content.
   const onContentBriefs = pathSection === "contentBriefs";
+  // Het maandrapport staat onder de klantpagina, maar hoort in het menu bij Rapportage.
+  const onMonthlyReport = pathSection === "maandrapport";
   // Het klantprofiel staat onder de klantpagina, maar hoort in het menu bij Instellingen.
   const onProfile = pathSection === "profiel";
   const onSettings = pathname.startsWith(SETTINGS_URL) || onProfile;
@@ -409,6 +414,7 @@ export function AppSidebar({
           !onAnalyses &&
           !onSearchConsole &&
           !onContentBriefs &&
+          !onMonthlyReport &&
           !onProfile &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
@@ -499,6 +505,13 @@ export function AppSidebar({
           url: ANALYTICS_URL,
           href: hrefFor("analytics", ANALYTICS_URL),
           icon: ChartLine,
+        },
+        {
+          title: "Maandrapport",
+          // Het adres bevat de klant, dus op het maandrapport telt het huidige pad als het adres.
+          url: onMonthlyReport ? pathname : MONTHLY_REPORT_INACTIVE_URL,
+          href: hrefFor("maandrapport", CUSTOMERS_URL),
+          icon: FileChartColumn,
         },
       ],
     },

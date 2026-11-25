@@ -1689,6 +1689,50 @@ class ContentBrief(Base):
     )
 
 
+class MonthlyReport(Base):
+    """Maandrapport van één klant voor één kalendermaand ("YYYY-MM").
+
+    Eén per klant en maand. `data` is `ReportData` (momentopname van cijfers en werk), `report`
+    is `ReportText` (tekst van de agent), `manual` is `Manual` (handmatige cijfers, alleen door
+    de router geschreven), `ai_usage` is `AiUsage`; de vormen staan in
+    `features/monthly_report/schemas.py`. `data` en `report` worden samen weggeschreven.
+    """
+
+    __tablename__ = "monthly_reports"
+    __table_args__ = (
+        UniqueConstraint("customer_website_id", "month", name="uq_monthly_reports_customer_month"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    # draft | pending | collecting | writing | completed | failed
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default=text("'pending'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    data: Mapped[Any] = mapped_column(JSON, nullable=True)
+    report: Mapped[Any] = mapped_column(JSON, nullable=True)
+    manual: Mapped[Any] = mapped_column(JSON, nullable=True)
+    ai_usage: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Model van de laatste geslaagde aanroep.
+    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -1726,4 +1770,5 @@ __all__ = [
     "CompetitorAnalysisPage",
     "CompetitorAnalysisAction",
     "ContentBrief",
+    "MonthlyReport",
 ]

@@ -352,6 +352,10 @@ class Settings(BaseSettings):
     content_brief_model: str = Field(
         default="claude-sonnet-5-5", validation_alias="CONTENT_BRIEF_MODEL"
     )
+    # Model van het maandrapport per klant (eigen agent, één aanroep per rapport).
+    monthly_report_model: str = Field(
+        default="claude-sonnet-5-5", validation_alias="MONTHLY_REPORT_MODEL"
+    )
     # Grens per aanroep (de aanroepen streamen niet: dit is de hele generatietijd).
     anthropic_timeout_seconds: float = Field(
         default=300.0, ge=30, le=600, validation_alias="ANTHROPIC_TIMEOUT_SECONDS"
