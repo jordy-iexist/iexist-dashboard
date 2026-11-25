@@ -1329,6 +1329,56 @@ class CustomerCompetitorOverview(Base):
     )
 
 
+class CustomerKeywordGap(Base):
+    """Content gap per klant voor het scherm Zoekwoorden › Content gap.
+
+    Eén rij per klant, geen geschiedenis: opnieuw ophalen vervangt de vorige. `data` is
+    `GapSnapshot` (het laatste geslaagde resultaat; blijft staan als een nieuwe run faalt); de
+    vorm staat in `features/keywords/gap_schemas.py`. De naam vermijdt verwarring met het
+    schema `CustomerContentGap` in `customers/schemas.py`.
+    """
+
+    __tablename__ = "customer_keyword_gaps"
+
+    customer_website_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("customer_websites.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # idle | pending | collecting | enriching | completed | failed
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="idle", server_default=text("'idle'")
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    data: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Verbruikte Ahrefs-units van de laatste geslaagde run.
+    ahrefs_units: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # `completed_at` van de concurrentenscan waarop de laatste geslaagde run draaide; is de
+    # scan daarna vernieuwd, dan is de content gap verouderd.
+    source_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Start van de laatste run en einde van de laatste geslaagde run.
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    # Levensteken van de worker: wordt bij elke statuswissel bijgewerkt.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class LaunchContentPage(Base):
     """Pagina-inhoud van een fase-3 scan (eigen rijen, los van fase 1/2)."""
 

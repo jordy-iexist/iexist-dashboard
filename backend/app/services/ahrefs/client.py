@@ -515,6 +515,7 @@ def top10_keywords(
     country: str | None = None,
     limit: int,
     keywords: list[str] | None = None,
+    max_position: int | None = 10,
     client: httpx.Client | None = None,
 ) -> AhrefsResult:
     """Zoekwoorden waarop het domein in de top 10 staat (`keyword`, `best_position`).
@@ -522,9 +523,12 @@ def top10_keywords(
     Zonder `keywords` de eerste `limit` zoekwoorden in de standaardvolgorde van Ahrefs (op
     verkeer aflopend). Met `keywords` alleen die zoekwoorden (een or-lijst in de `where`);
     wat niet in de top 10 staat komt niet terug. Haalt de lijst `limit` rijen, dan is hij
-    vermoedelijk afgekapt.
+    vermoedelijk afgekapt. `max_position` (standaard 10) is de positiegrens; `None` laat die
+    weg, zodat ook een positie buiten de top 10 terugkomt (bijv. #14 voor de content gap).
     """
-    conditions: list[dict[str, Any]] = [{"field": "best_position", "is": ["lte", 10]}]
+    conditions: list[dict[str, Any]] = []
+    if max_position is not None:
+        conditions.append({"field": "best_position", "is": ["lte", max_position]})
     wanted = [k.strip() for k in (keywords or []) if k and k.strip()]
     if wanted:
         conditions.append({"or": [{"field": "keyword", "is": ["eq", k]} for k in wanted]})
@@ -534,10 +538,11 @@ def top10_keywords(
         "protocol": "both",
         "date": date.today().isoformat(),
         "select": ",".join(TOP10_KEYWORD_FIELDS),
-        "where": _json({"and": conditions}),
         # Bewust geen order_by: die maakt een rij 12 units in plaats van 2 (zie bovenin).
         "limit": limit,
     }
+    if conditions:
+        params["where"] = _json({"and": conditions})
     if country:
         params["country"] = country
     return _site_explorer("organic-keywords", "keywords", params, client)

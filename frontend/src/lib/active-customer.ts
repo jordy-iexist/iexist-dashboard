@@ -18,6 +18,7 @@ export type CustomerSection =
   | "searchConsole"
   | "maandrapport"
   | "zoekwoordConcurrenten"
+  | "zoekwoordContentGap"
   | "seoGeo"
   | "oplevering"
   | "analytics"
@@ -99,6 +100,8 @@ export function customerHref(
       return `/dashboard/klanten/${id}/maandrapport`
     case "zoekwoordConcurrenten":
       return `/dashboard/klanten/${id}/zoekwoorden/concurrenten`
+    case "zoekwoordContentGap":
+      return `/dashboard/klanten/${id}/zoekwoorden/content-gap`
     case "seoGeo":
       return `/dashboard/livegang/seo-geo/${id}`
     case "oplevering":
@@ -114,7 +117,7 @@ export function customerHref(
 
 // Het onderdeel met een klantversie waar dit pad onder valt, of null.
 export function sectionFromPathname(pathname: string): CustomerSection | null {
-  const [root, section, first, second, , fourth] = segmentsOf(pathname)
+  const [root, section, first, second, third, fourth] = segmentsOf(pathname)
   if (root !== "dashboard") return null
 
   if (section === "klanten") {
@@ -128,8 +131,11 @@ export function sectionFromPathname(pathname: string): CustomerSection | null {
     if (second === "maandrapport") return "maandrapport"
     // Klantprofiel (het oude adres /bewerken stuurt door); klant wisselen blijft op het profiel.
     if (second === "profiel" || second === "bewerken") return "profiel"
-    // Zoekwoorden › Concurrenten; klant wisselen blijft op dit scherm.
-    if (second === "zoekwoorden") return "zoekwoordConcurrenten"
+    // Zoekwoorden: elk scherm (Concurrenten, Content gap) is een eigen onderdeel; klant
+    // wisselen blijft op hetzelfde scherm. Een onbekend of leeg subpad telt als Concurrenten.
+    if (second === "zoekwoorden") {
+      return third === "content-gap" ? "zoekwoordContentGap" : "zoekwoordConcurrenten"
+    }
     // Concurrentieanalyse (lijst, wizard en resultaat); klant wisselen gaat naar de lijst.
     return second === "analyses" ? "analyses" : "home"
   }

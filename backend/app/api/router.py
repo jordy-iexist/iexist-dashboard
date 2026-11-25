@@ -7,6 +7,7 @@ from app.features.competitor_analysis.brief_router import router as competitor_a
 from app.features.competitor_analysis.router import router as competitor_analysis_router
 from app.features.customers.router import router as customers_router
 from app.features.customers.sheet_router import router as customer_sheet_router
+from app.features.keywords.gap_router import router as keywords_gap_router
 from app.features.keywords.router import router as keywords_router
 from app.features.landing_pages.router import router as landing_pages_router
 from app.features.launch_checklist.analytics_router import router as launch_checklist_analytics_router
@@ -42,3 +43,4 @@ router.include_router(monthly_report_router)
 router.include_router(work_queue_router)
 router.include_router(agency_overview_router)
 router.include_router(keywords_router)
+router.include_router(keywords_gap_router)

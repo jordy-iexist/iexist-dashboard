@@ -382,6 +382,10 @@ class Settings(BaseSettings):
     ahrefs_competitors_keywords_per_domain: int = Field(
         default=150, ge=10, le=1000, validation_alias="AHREFS_COMPETITORS_KEYWORDS_PER_DOMAIN"
     )
+    # Zoekwoorden › Content gap: unit-plafond per run (circa 39 units per uitgewerkt zoekwoord).
+    ahrefs_content_gap_max_units: int = Field(
+        default=5000, ge=500, le=100_000, validation_alias="AHREFS_CONTENT_GAP_MAX_UNITS"
+    )
 
     # Claude (Anthropic) voor de concurrentieanalyse: één bureausleutel. Zonder sleutel loopt
     # de analyse door en krijgen de AI-kaarten "niet ingesteld"; daarom niet verplicht.
@@ -400,6 +404,10 @@ class Settings(BaseSettings):
     # Model van Zoekwoorden › Concurrenten (domeinen indelen, zoekwoorden indelen, samenvatting).
     competitor_overview_model: str = Field(
         default="claude-sonnet-5-5", validation_alias="COMPETITOR_OVERVIEW_MODEL"
+    )
+    # Model van "Aanvullen vanuit website (AI)" op het klantprofiel (één aanroep per klik).
+    customer_profile_model: str = Field(
+        default="claude-sonnet-5-5", validation_alias="CUSTOMER_PROFILE_MODEL"
     )
     # Grens per aanroep (de aanroepen streamen niet: dit is de hele generatietijd).
     anthropic_timeout_seconds: float = Field(

@@ -18,6 +18,7 @@ import {
   getErrorMessage,
   ProfielHeader,
   ProfielKaarten,
+  useAiFill,
   useBeforeUnloadWarning,
   useProfielForm,
   type ErrorResponse,
@@ -39,12 +40,24 @@ function KoppelingenPlaceholder() {
 
 export function NieuweKlant() {
   const router = useRouter()
-  const { form, update, openCards, toggleCard } = useProfielForm(emptyForm, ["bedrijf"])
+  const { form, setForm, update, openCards, setOpenCards, toggleCard } = useProfielForm(emptyForm, [
+    "bedrijf",
+  ])
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const { filling, fill } = useAiFill({
+    form,
+    setForm,
+    setOpenCards,
+    setFeedback,
+    saveLabel: "Klant toevoegen",
+  })
 
   const filledIn = useMemo(() => formKey(form) !== EMPTY_KEY, [form])
-  const canSubmit = form.name.trim().length > 0 && form.baseUrl.trim().length > 0 && !saving
+  const hasWebsite = form.baseUrl.trim().length > 0
+  // Tijdens het aanvullen staat alles uit, zodat het formulier niet verandert onderweg.
+  const busy = saving || filling
+  const canSubmit = form.name.trim().length > 0 && hasWebsite && !busy
 
   // Niet waarschuwen tijdens het doorsturen naar het nieuwe profiel.
   useBeforeUnloadWarning(filledIn && !saving)
@@ -90,11 +103,16 @@ export function NieuweKlant() {
         subtitle="Vul het profiel meteen in; het wordt meegegeven aan Claude bij content briefs en concepteksten"
         actions={
           <>
-            <AiFillButton />
+            <AiFillButton
+              onClick={() => void fill()}
+              loading={filling}
+              disabled={!hasWebsite || busy}
+              title={hasWebsite ? undefined : "Vul eerst de website in"}
+            />
             <Button
               onClick={() => void create()}
               disabled={!canSubmit}
-              title={canSubmit || saving ? undefined : "Vul eerst naam en website in"}
+              title={canSubmit || busy ? undefined : "Vul eerst naam en website in"}
             >
               {saving && <Loader2 className="animate-spin" aria-hidden="true" />}
               {saving ? "Klant toevoegen…" : "Klant toevoegen"}
@@ -110,7 +128,7 @@ export function NieuweKlant() {
         update={update}
         openCards={openCards}
         toggleCard={toggleCard}
-        disabled={saving}
+        disabled={busy}
         categoryName={form.categoryId ? "Gekozen – wordt bij toevoegen bewaard" : null}
         connections={<KoppelingenPlaceholder />}
       />

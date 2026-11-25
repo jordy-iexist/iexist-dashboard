@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.features.customers.profile import MAX_LIST_ITEM_CHARS, MAX_SERVICES, CustomerService
 
 
 class CustomerSheetColumnItem(BaseModel):
@@ -200,3 +202,74 @@ class CustomerSearchConsoleInsightsResponse(BaseModel):
     opportunities: SearchConsoleOpportunities | None = None
     untracked: SearchConsoleUntracked | None = None
     declining: SearchConsoleDeclining | None = None
+
+
+# --- Klantprofiel aanvullen vanuit de website ----------------------------------------------
+
+# Bestaande namen die de frontend meestuurt (`existing`): begrensd, zodat een grote body de
+# prompt niet opblaast. Zelfde grenzen als in het klantprofiel.
+MAX_EXISTING_ITEMS = MAX_SERVICES
+MAX_EXISTING_ITEM_CHARS = MAX_LIST_ITEM_CHARS
+
+
+def _bounded_names(value: Any) -> list[str]:
+    """Alleen strings, witruimte samengevoegd, lege weg, afgekapt op items en tekens.
+
+    Ruimhartig: een verkeerd type of een te lange lijst geeft geen fout maar wordt ingekort;
+    de lijst is alleen een hint voor Claude.
+    """
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = " ".join(item.split())[:MAX_EXISTING_ITEM_CHARS].rstrip()
+        if text:
+            result.append(text)
+        if len(result) >= MAX_EXISTING_ITEMS:
+            break
+    return result
+
+
+class ProfileSuggestionExisting(BaseModel):
+    """Wat al in het formulier staat; Claude herhaalt dat niet."""
+
+    services: list[str] = Field(default_factory=list)
+    usps: list[str] = Field(default_factory=list)
+    cases: list[str] = Field(default_factory=list)
+
+    @field_validator("services", "usps", "cases", mode="before")
+    @classmethod
+    def _names(cls, value: Any) -> list[str]:
+        return _bounded_names(value)
+
+
+class ProfileSuggestionRequest(BaseModel):
+    # Leeg of ontbrekend geeft de 400 "Site URL is verplicht." (niet de 422 van FastAPI).
+    base_url: str = ""
+    existing: ProfileSuggestionExisting | None = None
+
+
+class ProfileSuggestionProfile(BaseModel):
+    """De tien profielvelden die de website kan aanvullen (zonder `services_source` en de
+    schrijfregels)."""
+
+    company_type: str = ""
+    service_area: str = ""
+    target_audience: str = ""
+    specialties: str = ""
+    services: list[CustomerService] = Field(default_factory=list)
+    usps: list[str] = Field(default_factory=list)
+    reviews: str = ""
+    certifications: str = ""
+    team: str = ""
+    cases: list[str] = Field(default_factory=list)
+
+
+class ProfileSuggestionResponse(BaseModel):
+    profile: ProfileSuggestionProfile
+    # De URL's die echt gelezen zijn (eind-URL na doorverwijzing), homepage eerst.
+    pages: list[str] = Field(default_factory=list)
+    # Bijv. "De website verwijst door naar …"; anders null.
+    note: str | None = None

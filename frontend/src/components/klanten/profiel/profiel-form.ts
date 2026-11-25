@@ -291,6 +291,194 @@ export function toProfile(form: ProfielForm): CustomerProfile {
   }
 }
 
+// --- Voorstel uit de website ------------------------------------------------------------------
+
+/** Wat het aanvullen heeft toegevoegd, voor de melding. */
+export type SuggestionCounts = {
+  /** Nieuwe dienstrijen. */
+  services: number
+  /** Prijzen uit de website: bij nieuwe diensten en bij bestaande diensten zonder prijs. */
+  prices: number
+  usps: number
+  cases: number
+  /** Gevulde tekstvelden (Bedrijf en Bewijs). */
+  fields: number
+}
+
+export type MergeResult = {
+  form: ProfielForm
+  /** Kaarten waarin iets is aangevuld. */
+  changedCards: CardId[]
+  counts: SuggestionCounts
+}
+
+/** Tekstvelden die alleen gevuld worden als ze leeg zijn, met de kaart waarop ze staan. */
+const SUGGESTED_TEXT_FIELDS = [
+  ["companyType", "company_type", "bedrijf"],
+  ["serviceArea", "service_area", "bedrijf"],
+  ["targetAudience", "target_audience", "bedrijf"],
+  ["specialties", "specialties", "bedrijf"],
+  ["reviews", "reviews", "bewijs"],
+  ["certifications", "certifications", "bewijs"],
+  ["team", "team", "bewijs"],
+] as const
+
+/** Vergelijkbare naam van een dienst: getrimd, witruimte samengevoegd, kleine letters. */
+function serviceNameKey(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+/**
+ * Nieuwe regels onder een lijst (één item per regel). De bestaande tekst blijft letterlijk
+ * staan; dubbelen (hoofdletterongevoelig) en items boven de limiet vallen weg.
+ */
+function appendLines(value: string, suggested: string[]) {
+  const existing = splitLines(value)
+  const seen = new Set(existing.map((item) => item.toLowerCase()))
+  const added: string[] = []
+  for (const raw of suggested) {
+    if (existing.length + added.length >= LIMITS.listItems) break
+    const item = clip(raw.replace(/\s+/g, " "), LIMITS.listItem)
+    const key = item.toLowerCase()
+    if (!item || seen.has(key)) continue
+    seen.add(key)
+    added.push(item)
+  }
+  if (added.length === 0) return { value, added: 0 }
+  const separator = value === "" || value.endsWith("\n") ? "" : "\n"
+  return { value: `${value}${separator}${added.join("\n")}`, added: added.length }
+}
+
+/**
+ * Voegt een voorstel uit de website samen met het formulier, volgens "alleen aanvullen": lege
+ * velden worden gevuld, bij diensten, USP's en cases komen alleen nieuwe regels erbij, en een
+ * bestaande dienst zonder prijs krijgt de prijs van de website. Wat al is ingevuld blijft staan.
+ * Zuiver: `today` (dd-mm-jjjj) komt van buiten. Verandert er niets, dan is `form` hetzelfde object.
+ */
+export function mergeSuggestion(form: ProfielForm, suggestion: unknown, today: string): MergeResult {
+  const profile = parseProfile(suggestion)
+  const counts: SuggestionCounts = { services: 0, prices: 0, usps: 0, cases: 0, fields: 0 }
+  const changed = new Set<CardId>()
+  const next: ProfielForm = { ...form }
+
+  // Tekstvelden: alleen als het veld leeg is.
+  for (const [field, source, card] of SUGGESTED_TEXT_FIELDS) {
+    const value = clip(profile[source], LIMITS.text)
+    if (!value || form[field].trim() !== "") continue
+    next[field] = value
+    counts.fields += 1
+    changed.add(card)
+  }
+
+  // Diensten: nieuwe namen achteraan, prijs alleen bij een bestaande dienst zonder prijs.
+  // Rijen zonder naam blijven onaangeroerd; de limiet telt alleen diensten met een naam.
+  const rows = [...form.services]
+  const indexByName = new Map<string, number>()
+  rows.forEach((row, index) => {
+    const key = serviceNameKey(row.name)
+    if (key && !indexByName.has(key)) indexByName.set(key, index)
+  })
+  let namedServices = cleanServices(form.services).length
+  let servicesChanged = false
+  for (const service of profile.services) {
+    const name = clip(service.name.replace(/\s+/g, " "), LIMITS.serviceField)
+    const price = clip(service.price, LIMITS.serviceField)
+    const key = serviceNameKey(name)
+    if (!key) continue
+
+    const index = indexByName.get(key)
+    if (index !== undefined) {
+      if (price && rows[index].price.trim() === "") {
+        rows[index] = { ...rows[index], price }
+        counts.prices += 1
+        servicesChanged = true
+      }
+      continue
+    }
+
+    if (namedServices >= LIMITS.services) continue
+    indexByName.set(key, rows.length)
+    rows.push(newServiceRow({ name, price }))
+    namedServices += 1
+    counts.services += 1
+    if (price) counts.prices += 1
+    servicesChanged = true
+  }
+  if (servicesChanged) {
+    next.services = rows
+    if (form.servicesSource.trim() === "") next.servicesSource = `website, ${today}`
+    changed.add("diensten")
+  }
+
+  // USP's en cases: nieuwe items onderaan.
+  const usps = appendLines(form.usps, profile.usps)
+  if (usps.added > 0) {
+    next.usps = usps.value
+    counts.usps = usps.added
+    changed.add("usps")
+  }
+  const cases = appendLines(form.cases, profile.cases)
+  if (cases.added > 0) {
+    next.cases = cases.value
+    counts.cases = cases.added
+    changed.add("bewijs")
+  }
+
+  const order: CardId[] = ["bedrijf", "diensten", "usps", "bewijs"]
+  return {
+    form: changed.size > 0 ? next : form,
+    changedCards: order.filter((card) => changed.has(card)),
+    counts,
+  }
+}
+
+function plural(count: number, one: string, many: string) {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/** "a", "a en b", "a, b en c". */
+function joinParts(parts: string[]) {
+  if (parts.length <= 1) return parts.join("")
+  return `${parts.slice(0, -1).join(", ")} en ${parts[parts.length - 1]}`
+}
+
+/**
+ * Melding na het aanvullen. `saveLabel` is de tekst van de opslaanknop ("Opslaan" of
+ * "Klant toevoegen"); `note` uit het antwoord komt erachter.
+ */
+export function suggestionMessage(
+  counts: SuggestionCounts,
+  pagesRead: number,
+  note: string | null,
+  saveLabel: string
+) {
+  const pagesText = plural(pagesRead, "pagina", "pagina's")
+  const parts = [
+    counts.services > 0 && plural(counts.services, "dienst", "diensten"),
+    counts.prices > 0 && plural(counts.prices, "prijs", "prijzen"),
+    counts.usps > 0 && plural(counts.usps, "USP", "USP's"),
+    counts.cases > 0 && plural(counts.cases, "case", "cases"),
+    counts.fields > 0 && plural(counts.fields, "veld", "velden"),
+  ].filter((part): part is string => !!part)
+
+  const sentences: string[] = []
+  if (parts.length === 0) {
+    sentences.push(
+      pagesRead > 0
+        ? `Niets nieuws gevonden op de website (${pagesText} gelezen).`
+        : "Niets nieuws gevonden op de website."
+    )
+  } else {
+    const source = pagesRead > 0 ? `vanaf ${pagesText}` : "vanaf de website"
+    sentences.push(`Aangevuld ${source}: ${joinParts(parts)}.`)
+    sentences.push(`Loop de geopende kaarten na en klik op ${saveLabel}.`)
+    if (counts.cases > 0) sentences.push("Controleer bij cases of de klant toestemming heeft gegeven.")
+  }
+  const extra = note?.trim()
+  if (extra) sentences.push(extra)
+  return sentences.join(" ")
+}
+
 // --- Formulier → PATCH-body -------------------------------------------------------------------
 
 export type CustomerPatchBody = {

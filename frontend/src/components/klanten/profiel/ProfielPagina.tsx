@@ -5,13 +5,21 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { Sparkles } from "lucide-react"
+import { Loader2, Sparkles } from "lucide-react"
 
-import { Pill } from "@/components/livegang/shared"
 import { Button } from "@/components/ui/button"
+import type { ProfileSuggestionResponse } from "@/lib/customer-types"
 
 import { BedrijfCard, BewijsCard, DienstenCard, UspsCard } from "./BedrijfKaarten"
-import { type CardId, type ProfielForm, type UpdateField } from "./profiel-form"
+import {
+  cleanServices,
+  mergeSuggestion,
+  splitLines,
+  suggestionMessage,
+  type CardId,
+  type ProfielForm,
+  type UpdateField,
+} from "./profiel-form"
 import { RegelsCard, ToneCard } from "./SchrijfKaarten"
 import { TrajectCard } from "./TrajectKaart"
 
@@ -56,7 +64,11 @@ export function useBeforeUnloadWarning(active: boolean) {
 
 // --- Meldingen --------------------------------------------------------------------------------
 
-export type Feedback = { type: "success" | "error"; message: string } | null
+/**
+ * "success" verdwijnt op het klantprofiel na een paar seconden; "info" blijft staan (zoals de
+ * melding na het aanvullen vanuit de website), net als "error".
+ */
+export type Feedback = { type: "success" | "info" | "error"; message: string } | null
 
 export type ErrorResponse = { error?: string }
 
@@ -64,20 +76,110 @@ export function getErrorMessage(payload: ErrorResponse | null, fallback: string)
   return payload?.error?.trim() ? payload.error : fallback
 }
 
+const FEEDBACK_STYLES: Record<NonNullable<Feedback>["type"], string> = {
+  success: "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+  info: "bg-muted/50 text-foreground",
+  error: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+}
+
 export function FeedbackMessage({ feedback }: { feedback: Feedback }) {
   if (!feedback) return null
   return (
     <div
       role={feedback.type === "error" ? "alert" : "status"}
-      className={`rounded-xl px-4 py-3 text-sm ${
-        feedback.type === "success"
-          ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-          : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-      }`}
+      className={`rounded-xl px-4 py-3 text-sm ${FEEDBACK_STYLES[feedback.type]}`}
     >
       {feedback.message}
     </div>
   )
+}
+
+// --- Aanvullen vanuit website -----------------------------------------------------------------
+
+/** Datum van vandaag als dd-mm-jjjj, voor de bron van de prijzen. */
+function todayText() {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`
+}
+
+function isSuggestionResponse(payload: unknown): payload is ProfileSuggestionResponse {
+  return !!payload && typeof payload === "object" && "profile" in payload
+}
+
+/**
+ * "Aanvullen vanuit website (AI)": laat de backend de website lezen en voegt het voorstel
+ * samen met het formulier (alleen aanvullen). Opent de gewijzigde kaarten en zet de melding;
+ * opslaan blijft aan de gebruiker. `saveLabel` is de tekst van de opslaanknop, voor de melding.
+ */
+export function useAiFill({
+  form,
+  setForm,
+  setOpenCards,
+  setFeedback,
+  saveLabel,
+}: {
+  form: ProfielForm
+  setForm: (form: ProfielForm) => void
+  setOpenCards: React.Dispatch<React.SetStateAction<ReadonlySet<CardId>>>
+  setFeedback: (feedback: Feedback) => void
+  saveLabel: string
+}) {
+  const [filling, setFilling] = useState(false)
+
+  const fill = async () => {
+    const baseUrl = form.baseUrl.trim()
+    if (!baseUrl || filling) return
+
+    setFeedback(null)
+    setFilling(true)
+    try {
+      const response = await fetch("/api/customers/profile-suggestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_url: baseUrl,
+          existing: {
+            services: cleanServices(form.services).map((service) => service.name),
+            usps: splitLines(form.usps),
+            cases: splitLines(form.cases),
+          },
+        }),
+      })
+      const payload = (await response.json().catch(() => null)) as unknown
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(payload as ErrorResponse | null, "Kon het profiel niet aanvullen vanuit de website.")
+        )
+      }
+      if (!isSuggestionResponse(payload)) {
+        throw new Error("Onverwacht antwoord van de server; het profiel is niet aangevuld.")
+      }
+
+      // Tijdens het laden staan de kaarten uit, dus `form` is nog dezelfde als bij de klik.
+      const merged = mergeSuggestion(form, payload.profile, todayText())
+      const pages = Array.isArray(payload.pages) ? payload.pages.length : 0
+      const note = typeof payload.note === "string" ? payload.note : null
+      if (merged.changedCards.length > 0) {
+        setForm(merged.form)
+        setOpenCards((current) => new Set([...current, ...merged.changedCards]))
+      }
+      setFeedback({ type: "info", message: suggestionMessage(merged.counts, pages, note, saveLabel) })
+    } catch (error) {
+      // Een netwerkfout geeft fetch als TypeError met een Engelse browsertekst.
+      setFeedback({
+        type: "error",
+        message:
+          error instanceof Error && !(error instanceof TypeError)
+            ? error.message
+            : "Kon de server niet bereiken; het profiel is niet aangevuld.",
+      })
+    } finally {
+      setFilling(false)
+    }
+  }
+
+  return { filling, fill }
 }
 
 // --- Kop --------------------------------------------------------------------------------------
@@ -136,16 +238,23 @@ export function ProfielHeader({
   )
 }
 
-/** "Aanvullen vanuit website (AI)": nog niet beschikbaar. */
-export function AiFillButton() {
+/** "Aanvullen vanuit website (AI)"; tijdens het lezen van de website een spinner. */
+export function AiFillButton({
+  onClick,
+  loading,
+  disabled,
+  title,
+}: {
+  onClick: () => void
+  loading: boolean
+  disabled: boolean
+  title?: string
+}) {
   return (
-    <>
-      <Pill>Binnenkort</Pill>
-      <Button variant="outline" disabled title="Binnenkort">
-        <Sparkles aria-hidden="true" />
-        Aanvullen vanuit website (AI)
-      </Button>
-    </>
+    <Button variant="outline" onClick={onClick} disabled={disabled || loading} title={title}>
+      {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+      {loading ? "Website lezen…" : "Aanvullen vanuit website (AI)"}
+    </Button>
   )
 }
 

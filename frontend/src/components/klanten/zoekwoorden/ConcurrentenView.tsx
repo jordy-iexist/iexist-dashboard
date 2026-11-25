@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertTriangle, CircleAlert, Info, Loader2, Plus, RefreshCw, RotateCcw, Search, Users } from "lucide-react"
+import Link from "next/link"
+import { AlertTriangle, Loader2, Plus, RefreshCw, RotateCcw, Search, Users } from "lucide-react"
 
 import { ResultCard, formatShortDate } from "@/components/klanten/analyses/result-parts"
 import { AddCompetitorDialog } from "@/components/klanten/zoekwoorden/AddCompetitorDialog"
@@ -9,10 +10,11 @@ import { AiSummaryCard } from "@/components/klanten/zoekwoorden/AiSummaryCard"
 import { CompetitorKpis, formatCount } from "@/components/klanten/zoekwoorden/CompetitorKpis"
 import { CompetitorsTable, type CompetitorChoice } from "@/components/klanten/zoekwoorden/CompetitorsTable"
 import { ConcurrentenSkeleton } from "@/components/klanten/zoekwoorden/ConcurrentenSkeleton"
+import { Notice } from "@/components/klanten/zoekwoorden/Notice"
 import { TopicHeatmap } from "@/components/klanten/zoekwoorden/TopicHeatmap"
-import { Pill } from "@/components/livegang/shared"
 import { Button } from "@/components/ui/button"
 import { usePolling } from "@/hooks/use-polling"
+import { contentGapHref } from "@/lib/keyword-content-gap"
 import {
   KeywordCompetitorsError,
   fetchCompetitorOverview,
@@ -24,7 +26,6 @@ import {
   type OverviewStatus,
   type RefreshMode,
 } from "@/lib/keyword-competitors"
-import { cn } from "@/lib/utils"
 
 export type ConcurrentenViewProps = {
   customerId: string
@@ -50,41 +51,6 @@ function countryName(code: string) {
 
 function errorMessage(err: unknown) {
   return err instanceof Error && err.message ? err.message : "Er ging iets mis."
-}
-
-type Tone = "neutral" | "amber" | "red"
-
-const NOTICE_CLASSES: Record<Tone, string> = {
-  neutral: "border-border bg-card text-foreground",
-  amber: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/50 dark:bg-amber-900/20 dark:text-amber-200",
-  red: "border-red-300 bg-card text-red-700 dark:border-red-500/60 dark:text-red-300",
-}
-
-const NOTICE_ICONS = { neutral: Info, amber: AlertTriangle, red: CircleAlert } as const
-
-/** Meldingsbalk in de bestaande opmaak (neutraal, amber of rood), met optioneel een knop. */
-function Notice({
-  tone,
-  children,
-  action,
-  icon,
-}: {
-  tone: Tone
-  children: React.ReactNode
-  action?: React.ReactNode
-  icon?: React.ReactNode
-}) {
-  const Icon = NOTICE_ICONS[tone]
-  return (
-    <div
-      role={tone === "red" ? "alert" : "status"}
-      className={cn("flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-sm", NOTICE_CLASSES[tone])}
-    >
-      {icon ?? <Icon className="size-4 shrink-0" aria-hidden="true" />}
-      <span className="min-w-0 flex-1">{children}</span>
-      {action}
-    </div>
-  )
 }
 
 /** Uitleg onder de titel: de basis van de concurrenten verschilt per momentopname. */
@@ -298,13 +264,25 @@ export function ConcurrentenView({ customerId, customerName, domain }: Concurren
             <Plus aria-hidden="true" />
             Concurrent toevoegen
           </Button>
-          <Pill>Binnenkort</Pill>
-          {/* Een uitgeschakelde knop krijgt geen muisgebeurtenissen; de uitleg staat op de omhulling. */}
-          <span title="Binnenkort">
-            <Button disabled className="font-semibold">
-              Content gap starten
+          {/* Opent het Content gap-scherm; starten (en units uitgeven) gebeurt daar. */}
+          {hasSnapshot ? (
+            <Button asChild className="font-semibold">
+              <Link href={contentGapHref(customerId)}>Content gap starten</Link>
             </Button>
-          </span>
+          ) : (
+            // Een uitgeschakelde knop krijgt geen muisgebeurtenissen; de uitleg staat op de omhulling.
+            <span
+              title={
+                overview
+                  ? "Haal eerst de concurrenten op: de content gap bouwt voort op een voltooide concurrentenscan."
+                  : undefined
+              }
+            >
+              <Button disabled className="font-semibold">
+                Content gap starten
+              </Button>
+            </span>
+          )}
         </div>
       </header>
 

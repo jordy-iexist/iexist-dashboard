@@ -20,6 +20,7 @@ import {
   ProfielHeader,
   ProfielKaarten,
   UnsavedNotice,
+  useAiFill,
   useBeforeUnloadWarning,
   useProfielForm,
   type ErrorResponse,
@@ -45,10 +46,13 @@ export function KlantProfiel({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const { filling, fill } = useAiFill({ form, setForm, setOpenCards, setFeedback, saveLabel: "Opslaan" })
 
   const savedKey = useMemo(() => formKey(toForm(saved)), [saved])
   const dirty = useMemo(() => formKey(form) !== savedKey, [form, savedKey])
-  const busy = saving || deleting
+  // Tijdens het aanvullen staat alles uit, zodat het formulier niet verandert onderweg.
+  const busy = saving || deleting || filling
+  const hasWebsite = form.baseUrl.trim().length > 0
 
   useBeforeUnloadWarning(dirty)
 
@@ -165,7 +169,12 @@ export function KlantProfiel({
         actions={
           <>
             {dirty && !saving && <UnsavedNotice />}
-            <AiFillButton />
+            <AiFillButton
+              onClick={() => void fill()}
+              loading={filling}
+              disabled={!hasWebsite || busy}
+              title={hasWebsite ? undefined : "Vul eerst de website in"}
+            />
             <Button onClick={() => void save()} disabled={!dirty || busy}>
               {saving && <Loader2 className="animate-spin" aria-hidden="true" />}
               {saving ? "Opslaan…" : "Opslaan"}

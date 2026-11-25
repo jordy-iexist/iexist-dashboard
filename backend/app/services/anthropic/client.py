@@ -81,13 +81,15 @@ def is_configured() -> bool:
     return bool(settings.anthropic_api_key.strip())
 
 
-def _make_client() -> anthropic.Anthropic:
+def _make_client(*, timeout: float | None = None, max_retries: int | None = None) -> anthropic.Anthropic:
+    """Nieuwe client. Zonder `timeout`/`max_retries`: `settings.anthropic_timeout_seconds` en
+    `MAX_RETRIES` (het gedrag van de worker-taken)."""
     # Altijd een expliciete sleutel: een kale `Anthropic()` pakt ook andere credentials op
     # (ANTHROPIC_AUTH_TOKEN, een `ant auth login`-profiel).
     return anthropic.Anthropic(
         api_key=settings.anthropic_api_key.strip(),
-        timeout=settings.anthropic_timeout_seconds,
-        max_retries=MAX_RETRIES,
+        timeout=settings.anthropic_timeout_seconds if timeout is None else timeout,
+        max_retries=MAX_RETRIES if max_retries is None else max_retries,
     )
 
 
@@ -151,12 +153,19 @@ def parse_structured(
     max_tokens: int = 16000,
     model: str | None = None,
     client: Any = None,
+    timeout: float | None = None,
+    max_retries: int | None = None,
 ) -> AnthropicResult:
     """Vraag Claude om een antwoord in de vorm van `output_model` en valideer het.
 
     `effort` regelt hoe diep het model nadenkt (`low`/`medium`/`high`/`xhigh`/`max`); thinking
     staat op dit model altijd aan en telt mee in `max_tokens`. `model`: None = het
     standaardmodel (`settings.anthropic_model`). `client` is alleen voor tests.
+
+    `timeout` (seconden) en `max_retries`: None = `settings.anthropic_timeout_seconds` en
+    `MAX_RETRIES`. Een synchroon endpoint kiest hier een kortere grens en geen herkansing,
+    zodat de gebruiker niet minutenlang wacht. Gelden alleen voor een eigen client (niet
+    als `client` is meegegeven).
 
     Eisen aan `output_model` (het schema gaat via `anthropic.transform_schema` naar de API):
     - Elk object krijgt `additionalProperties: false`; extra velden kan Claude dus niet sturen.
@@ -183,7 +192,7 @@ def parse_structured(
     chosen_model = model or settings.anthropic_model
     output_format = {"type": "json_schema", "schema": anthropic.transform_schema(output_model)}
     owns_client = client is None
-    api = client or _make_client()
+    api = client or _make_client(timeout=timeout, max_retries=max_retries)
     try:
         response = api.beta.messages.create(
             model=chosen_model,

@@ -113,6 +113,8 @@ const CONTENT_BRIEFS_INACTIVE_URL = "#content-briefs";
 const MONTHLY_REPORT_INACTIVE_URL = "#maandrapport";
 // Past op geen enkel pad: het menu-item "Concurrenten" (Zoekwoorden) is dan niet actief.
 const KEYWORD_COMPETITORS_INACTIVE_URL = "#zoekwoorden-concurrenten";
+// Past op geen enkel pad: het menu-item "Content gap" (Zoekwoorden) is dan niet actief.
+const KEYWORD_CONTENT_GAP_INACTIVE_URL = "#zoekwoorden-content-gap";
 const SETTINGS_URL = "/dashboard/settings";
 // Past op geen enkel pad: zonder actieve klant is "Klantprofiel" nooit actief.
 const CUSTOMER_PROFILE_INACTIVE_URL = "#klantprofiel";
@@ -444,6 +446,8 @@ export function AppSidebar({
   const onMonthlyReport = pathSection === "maandrapport";
   // Zoekwoorden › Concurrenten staat onder de klantpagina, maar heeft een eigen groep in het menu.
   const onKeywordCompetitors = pathSection === "zoekwoordConcurrenten";
+  // Zoekwoorden › Content gap: idem, met een eigen item in die groep.
+  const onKeywordContentGap = pathSection === "zoekwoordContentGap";
   // Het klantprofiel staat onder de klantpagina, maar hoort in het menu bij Instellingen.
   const onProfile = pathSection === "profiel";
   const onSettings = pathname.startsWith(SETTINGS_URL) || onProfile;
@@ -457,6 +461,7 @@ export function AppSidebar({
           !onContentBriefs &&
           !onMonthlyReport &&
           !onKeywordCompetitors &&
+          !onKeywordContentGap &&
           !onProfile &&
           (pathname === customerHomePath ||
             pathname.startsWith(`${customerHomePath}/`)))
@@ -481,10 +486,10 @@ export function AppSidebar({
         },
         {
           title: "Content gap",
-          url: "#zoekwoorden-content-gap",
-          href: "#zoekwoorden-content-gap",
+          // Zelfde aanpak als "Concurrenten": alleen op het scherm zelf actief.
+          url: onKeywordContentGap ? pathname : KEYWORD_CONTENT_GAP_INACTIVE_URL,
+          href: hrefFor("zoekwoordContentGap", CUSTOMERS_URL),
           icon: Puzzle,
-          soon: true,
         },
         {
           title: "Zoekwoordkansen",

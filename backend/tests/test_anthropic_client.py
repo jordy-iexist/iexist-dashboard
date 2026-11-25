@@ -201,6 +201,18 @@ class AnthropicClientTests(unittest.TestCase):
         factory.assert_called_once_with(api_key="test-key", timeout=300.0, max_retries=1)
         self.assertEqual(fake.calls[-1], "closed")
 
+    def test_owned_client_timeout_and_retries_override(self):
+        fake = FakeClient()
+        fake.close = lambda: fake.calls.append("closed")
+        with patch.object(claude.anthropic, "Anthropic", return_value=fake) as factory:
+            _call(None, timeout=90, max_retries=0)
+        factory.assert_called_once_with(api_key="test-key", timeout=90, max_retries=0)
+        self.assertEqual(fake.calls[-1], "closed")
+        # Alleen de override; de standaard blijft voor de volgende aanroep staan.
+        with patch.object(claude.anthropic, "Anthropic", return_value=fake) as factory:
+            _call(None, timeout=None, max_retries=None)
+        factory.assert_called_once_with(api_key="test-key", timeout=300.0, max_retries=1)
+
     def test_cost_usd(self):
         usage = {"input_tokens": 1_000_000, "output_tokens": 100_000}
         self.assertAlmostEqual(claude.cost_usd(usage, "claude-opus-5-5"), 4.0 + 2.0)

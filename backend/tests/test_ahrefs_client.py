@@ -533,6 +533,30 @@ class AhrefsClientTests(unittest.TestCase):
             ]},
         ]})
 
+    def test_top10_keywords_without_position_limit(self):
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(dict(request.url.params))
+            return httpx.Response(200, json={"keywords": [{"keyword": "seo", "best_position": 14}]})
+
+        result = ahrefs.top10_keywords(
+            "klant.nl", limit=2, keywords=["seo", "sea"], max_position=None, client=_client(handler)
+        )
+        self.assertEqual(json.loads(seen[0]["where"]), {"and": [
+            {"or": [
+                {"field": "keyword", "is": ["eq", "seo"]},
+                {"field": "keyword", "is": ["eq", "sea"]},
+            ]},
+        ]})
+        self.assertEqual(result.rows, [{"keyword": "seo", "best_position": 14}])
+
+        # Zonder zoekwoorden en zonder grens: geen `where`. Een andere grens komt in de `where`.
+        ahrefs.top10_keywords("klant.nl", limit=5, max_position=None, client=_client(handler))
+        self.assertNotIn("where", seen[1])
+        ahrefs.top10_keywords("klant.nl", limit=5, max_position=20, client=_client(handler))
+        self.assertEqual(json.loads(seen[2]["where"]), {"and": [{"field": "best_position", "is": ["lte", 20]}]})
+
     def test_organic_rows_skips_features_and_duplicates(self):
         result = ahrefs.AhrefsResult(rows=SERP_PAYLOAD["positions"])
 

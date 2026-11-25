@@ -55,6 +55,8 @@ celery_app.conf.update(
         "app.worker.tasks.run_monthly_report_task": {"queue": "default"},
         # Zoekwoorden › Concurrenten: een paar Ahrefs-aanroepen en drie Claude-aanroepen per klant.
         "app.worker.tasks.refresh_keyword_competitors_task": {"queue": "default"},
+        # Zoekwoorden › Content gap: een handvol Ahrefs-aanroepen per klant, geen AI.
+        "app.worker.tasks.run_content_gap_task": {"queue": "default"},
         # Werkvoorraad Search Console: per klant een paar seconden Google, niet achter scans in `audit`.
         "app.worker.tasks.run_work_queue_gsc_dispatch_task": {"queue": "default"},
         "app.worker.tasks.run_work_queue_gsc_task": {"queue": "default"},

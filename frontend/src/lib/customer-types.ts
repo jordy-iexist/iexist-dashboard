@@ -52,6 +52,30 @@ export type CustomerProfile = {
   content_rules: string[]
 }
 
+/** Profielvelden die "Aanvullen vanuit website (AI)" kan voorstellen. */
+export type ProfileSuggestion = Pick<
+  CustomerProfile,
+  | "company_type"
+  | "service_area"
+  | "target_audience"
+  | "specialties"
+  | "services"
+  | "usps"
+  | "reviews"
+  | "certifications"
+  | "team"
+  | "cases"
+>
+
+// Antwoord van POST /api/customers/profile-suggestion: voorstel uit de website, niet opgeslagen.
+export type ProfileSuggestionResponse = {
+  profile: ProfileSuggestion
+  /** De URL's die echt gelezen zijn. */
+  pages: string[]
+  /** Bijv. "De website verwijst door naar …"; null als er niets te melden is. */
+  note: string | null
+}
+
 export type CustomerWebsiteDetail = CustomerWebsiteItem & {
   placed_this_month: number
   links_placed_this_month: number

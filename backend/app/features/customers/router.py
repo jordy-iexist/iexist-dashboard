@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import threading
 from typing import Any
 import uuid
 
@@ -9,13 +10,15 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_user_id, utc_now_iso
 from app.db.models import Blog, CustomerCategory, CustomerWebsite, SerpScan, WebsiteMetaRun
 from app.db.session import get_db
-from app.features.customers import quick_wins, search_console_insights
+from app.features.customers import profile_suggestion, quick_wins, search_console_insights
 from app.features.customers.profile import CustomerProfile, parse_profile
 from app.features.customers.rankings import customer_rankings
 from app.features.customers.schemas import (
     CustomerQuickWinsResponse,
     CustomerRankingsResponse,
     CustomerSearchConsoleInsightsResponse,
+    ProfileSuggestionRequest,
+    ProfileSuggestionResponse,
 )
 from app.features.customers.services import delete_customer_website_cascade
 from app.features.seo_tracker.mappers import to_customer_website_item
@@ -124,6 +127,63 @@ async def list_customers(
             )
             for w in websites
         ]
+    )
+
+
+# Hooguit twee aanvullingen tegelijk (elk houdt een thread tot ruim twee minuten bezet).
+_PROFILE_SUGGESTION_SLOTS = threading.BoundedSemaphore(2)
+PROFILE_SUGGESTION_BUSY = (
+    "Er lopen al twee aanvullingen vanuit een website. Wacht even en probeer het dan opnieuw."
+)
+# Code van `ProfileSuggestionError` → HTTP-status (zie het contract in het plan).
+_PROFILE_SUGGESTION_STATUS = {
+    "invalid_url": 400,
+    "not_configured": 503,
+    "site_unreachable": 502,
+    "too_little_text": 422,
+    "rate_limited": 429,
+    "timeout": 504,
+    "claude_error": 502,
+}
+
+
+@router.post(
+    "/api/customers/profile-suggestion", response_model=ProfileSuggestionResponse
+)
+def suggest_customer_profile(
+    payload: ProfileSuggestionRequest,
+    user_id: str = Depends(require_user_id),
+):
+    """Voorstel voor profielvelden vanaf de website van de klant (knop "Aanvullen vanuit
+    website (AI)"); er wordt niets opgeslagen.
+
+    Synchrone functie (threadpool) zonder databasesessie: de aanroep duurt meestal 15–45 s
+    en mag geen databaseverbinding vasthouden. Eerst de goedkope controles (URL, Claude-
+    sleutel), dan een plek bemachtigen (anders 429), dan ophalen en Claude.
+    """
+    try:
+        profile_suggestion.normalize_url(payload.base_url)
+        if not profile_suggestion.claude.is_configured():
+            raise profile_suggestion.ProfileSuggestionError(
+                profile_suggestion.MESSAGES["not_configured"], "not_configured"
+            )
+    except profile_suggestion.ProfileSuggestionError as exc:
+        raise HTTPException(
+            status_code=_PROFILE_SUGGESTION_STATUS.get(exc.code, 502), detail=exc.message
+        ) from exc
+
+    if not _PROFILE_SUGGESTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail=PROFILE_SUGGESTION_BUSY)
+    try:
+        result = profile_suggestion.suggest_profile(payload.base_url, payload.existing)
+    except profile_suggestion.ProfileSuggestionError as exc:
+        raise HTTPException(
+            status_code=_PROFILE_SUGGESTION_STATUS.get(exc.code, 502), detail=exc.message
+        ) from exc
+    finally:
+        _PROFILE_SUGGESTION_SLOTS.release()
+    return ProfileSuggestionResponse(
+        profile=result.profile, pages=result.pages, note=result.note
     )
 
 

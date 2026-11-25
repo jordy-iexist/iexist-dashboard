@@ -19,6 +19,7 @@ from app.features.launch_checklist.worker.sitemap_monitor import (
     run_sitemap_monitor_dispatch_task,
     run_sitemap_monitor_task,
 )
+from app.features.keywords.worker.gap import run_content_gap_task
 from app.features.keywords.worker.refresh import refresh_keyword_competitors_task
 from app.features.landing_pages.worker.landing_page_generation import generate_landing_page_task
 from app.features.monthly_report.worker.report import run_monthly_report_task
@@ -41,6 +42,7 @@ __all__ = [
     "run_competitor_analysis_task",
     "run_content_analysis_task",
     "run_content_brief_task",
+    "run_content_gap_task",
     "run_content_scan_task",
     "run_geo_scan_task",
     "run_golive_scan_task",
